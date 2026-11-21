@@ -4,13 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runtime.js';
+import { createInMemorySourceControl } from '../src/adapters/in-memory-source-control.js';
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
 import type { Ticket } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
 import { createRealDeps } from '../src/cli/real-deps.js';
-import type { RefinementDeps } from '../src/factory/refinement.js';
+import type { LoopDeps } from '../src/factory/build-loop.js';
+import type { ScriptRun } from '../src/factory/checks.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
 
 const FACTORY_YAML = `
@@ -18,7 +20,8 @@ schema: 1
 engine: 0.1.0
 states: { to_refine: To refine, spec_review: Spec review, ready_for_dev: Ready for Dev, in_development: In development, in_review: In review, blocked: Blocked, done: Done }
 labels: { auto: factory-auto, no_automerge: "factory:no-automerge" }
-checks: []
+checks:
+  - { id: unit-tests, station: quality, kind: script, blocking: true, timeout: 6m, run: pnpm test }
 risk:
   low: { merge: auto }
   medium: { merge: human }
@@ -34,7 +37,7 @@ ticket_providers:
     filter: project = PAY
     token_env: JIRA_TOKEN
     email_env: JIRA_EMAIL
-source_control: { kind: github, repo: acme/billing-service }
+source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN }
 agent_runtime: { kind: orca }
 `;
 
@@ -54,7 +57,15 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     await tickets.addAttachment({ key: ticket.key, name, content });
   }, Promise.resolve());
   const changedOnMain: string[] = [];
-  const deps: RefinementDeps = {
+  const scripts: ScriptRun[] = [];
+  const verdictFiles: Record<string, string> = {};
+  const { sourceControl, world: git } = createInMemorySourceControl({ now: () => '2026-11-21T08:00:00Z' });
+  const deps: LoopDeps = {
+    sourceControl,
+    runScript: async () => scripts.shift() ?? { exitCode: 0, output: 'ok', timedOut: false },
+    sleep: async () => undefined,
+    changedFilesOnBranch: async () => ['src/billing/export.ts'],
+    pushBranch: async (branch) => git.push(branch, 'c1'),
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
     config: config.value,
@@ -69,10 +80,19 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
   const run = async (...argv: readonly string[]) => {
     const out: string[] = [];
     const errors: string[] = [];
-    const code = await runCli({ argv, deps: async () => deps, folder: createSpecFolder(), write: (line) => void out.push(line), writeError: (line) => void errors.push(line) });
+    const code = await runCli({
+      argv,
+      deps: async () => deps,
+      folder: createSpecFolder(),
+      readFile: async (path) => {
+        const content = verdictFiles[path];
+        if (content === undefined) throw new Error(`No such file: ${path}`);
+        return content;
+      },
+      write: (line) => void out.push(line), writeError: (line) => void errors.push(line) });
     return { code, out, errors };
   };
-  return { run, tickets, changedOnMain };
+  return { run, tickets, changedOnMain, scripts, verdictFiles };
 };
 
 const statusOf = async (cli: Awaited<ReturnType<typeof getCli>>): Promise<string | undefined> => (await cli.tickets.getTicket('PAY-142'))?.status;
@@ -218,6 +238,111 @@ describe('factory command line', () => {
     expect(await cli.run('push', 'PAY-142', '--from', folder)).toEqual({ code: 0, out: ['Attached 1 spec files to PAY-142: proposal.md'], errors: [] });
   });
 
+  const PASS = JSON.stringify({ verdict: 'pass', findings: [], evidence: [] });
+
+  const getRunning = async () => {
+    const cli = await getCli(getMockTicket({ status: 'Spec review' }));
+    await cli.run('approve', 'PAY-142');
+    await cli.run('run', 'PAY-142');
+    cli.verdictFiles['verify.json'] = PASS;
+    cli.verdictFiles['review.json'] = PASS;
+    return cli;
+  };
+
+  it('advances a run from the first build to a pull request', async () => {
+    const cli = await getRunning();
+
+    const build = await cli.run('advance', 'PAY-142');
+    const verify = await cli.run('advance', 'PAY-142', '--changed', 'Added the exporter', '--decision', 'D-001', '--decision', 'D-004');
+    const review = await cli.run('advance', 'PAY-142', '--verdict', 'openspec-verify=verify.json');
+    const done = await cli.run('advance', 'PAY-142', '--verdict', 'reviewer=review.json', '--json');
+
+    expect(build).toEqual({ code: 0, out: ['Next: build (attempt 1)'], errors: [] });
+    expect(verify).toEqual({ code: 0, out: ['Next: verify (attempt 1). Hand in the verdict of openspec-verify'], errors: [] });
+    expect(review).toEqual({ code: 0, out: ['Next: review (attempt 1). Hand in a verdict for: reviewer'], errors: [] });
+    expect(done.code).toBe(0);
+    expect(done.out.map((line) => JSON.parse(line))).toEqual([{ ok: true, next: 'done', exit: 'pull_request', url: 'memory://pull/401' }]);
+    expect(await statusOf(cli)).toBe('In review');
+    expect(await cli.run('advance', 'PAY-142')).toEqual({ code: 1, out: [], errors: ['PAY-142 has no run in progress'] });
+  });
+
+  it('shows what failed when a gate sends the run to another attempt, then asks for a diagnosis after the last one', async () => {
+    const cli = await getRunning();
+    cli.scripts.push(...Array.from({ length: 5 }, () => ({ exitCode: 1, output: 'export.test.ts failed\nmore detail', timedOut: false })));
+    await cli.run('advance', 'PAY-142');
+
+    const second = await cli.run('advance', 'PAY-142', '--changed', 'Added the exporter');
+    await cli.run('advance', 'PAY-142', '--changed', 'Second try');
+    await cli.run('advance', 'PAY-142', '--changed', 'Third try');
+    await cli.run('advance', 'PAY-142', '--changed', 'Fourth try');
+    const diagnose = await cli.run('advance', 'PAY-142', '--changed', 'Fifth try');
+    const blocked = await cli.run('advance', 'PAY-142', '--diagnosis', 'environment', '--next-step', 'Stabilize the fixture');
+
+    expect(second).toEqual({ code: 0, out: ['Next: build (attempt 2)', '- unit-tests (quality): exit code 1', '  export.test.ts failed'], errors: [] });
+    expect(diagnose.out.slice(0, 4)).toEqual(['Next: diagnose. Every attempt failed:', 'Attempt 1: Added the exporter', '- unit-tests (quality): exit code 1', '  export.test.ts failed']);
+    expect(diagnose.out).toHaveLength(16);
+    expect(blocked.code).toBe(1);
+    expect(blocked.out).toEqual(['Blocked. Failure report: memory://attachment/4/factory-failure-report-run-1.md']);
+    expect(await statusOf(cli)).toBe('Blocked');
+  });
+
+  it('sends the ticket back on a question from the builder, and on a spec diagnosis with its questions', async () => {
+    const asked = await getRunning();
+    await asked.run('advance', 'PAY-142');
+    const diagnosed = await getCli(getMockTicket({ status: 'Spec review' }));
+    await diagnosed.run('approve', 'PAY-142');
+    await diagnosed.run('run', 'PAY-142');
+    diagnosed.scripts.push(...Array.from({ length: 5 }, () => ({ exitCode: 1, output: 'boom', timedOut: false })));
+    await diagnosed.run('advance', 'PAY-142');
+    await ['a', 'b', 'c', 'd', 'e'].reduce(async (previous, changed) => {
+      await previous;
+      await diagnosed.run('advance', 'PAY-142', '--changed', changed);
+    }, Promise.resolve());
+
+    const sentBack = await asked.run('advance', 'PAY-142', '--question', 'Reject a refund with no amount?', '--recommended', 'Yes');
+    const specGap = await diagnosed.run('advance', 'PAY-142', '--diagnosis', 'spec', '--question', 'Round before summing?', '--recommended', 'After', '--question', 'Which currency?', '--recommended', 'Invoice currency');
+
+    expect(sentBack).toEqual({ code: 1, out: ['Sent back to refinement', '- Reject a refund with no amount?'], errors: [] });
+    expect(specGap).toEqual({ code: 1, out: ['Sent back to refinement', '- Round before summing?', '- Which currency?'], errors: [] });
+    expect((await diagnosed.run('status', 'PAY-142')).out).toContain('  Recommended: Invoice currency');
+  });
+
+  it('retries a blocked ticket and overrides the run limit only when told to', async () => {
+    const cli = await getRunning();
+    cli.scripts.push(...Array.from({ length: 5 }, () => ({ exitCode: 1, output: 'boom', timedOut: false })));
+    await cli.run('advance', 'PAY-142');
+    await ['a', 'b', 'c', 'd', 'e'].reduce(async (previous, changed) => {
+      await previous;
+      await cli.run('advance', 'PAY-142', '--changed', changed);
+    }, Promise.resolve());
+    await cli.run('advance', 'PAY-142', '--diagnosis', 'code');
+
+    const unconfirmed = await cli.run('run', 'PAY-142');
+    const retried = await cli.run('run', 'PAY-142', '--confirm-retry');
+
+    expect(unconfirmed.errors).toEqual(['PAY-142 is in "Blocked". Confirm to retry it with a new run']);
+    expect(retried.out).toEqual(['Started run 2 of PAY-142 at attempt 1. Next step: revalidate']);
+  });
+
+  it('shows a failure that has no output on a single line', async () => {
+    const cli = await getRunning();
+    cli.verdictFiles['verify.json'] = 'Looks fine to me';
+    await cli.run('advance', 'PAY-142');
+    await cli.run('advance', 'PAY-142', '--changed', 'x');
+
+    const next = await cli.run('advance', 'PAY-142', '--verdict', 'openspec-verify=verify.json');
+
+    expect(next.out).toEqual(['Next: build (attempt 2)', '- openspec-verify (review): invalid verdict']);
+  });
+
+  it('exits 1 when a verdict file cannot be read', async () => {
+    const cli = await getRunning();
+    await cli.run('advance', 'PAY-142');
+    await cli.run('advance', 'PAY-142', '--changed', 'x');
+
+    expect(await cli.run('advance', 'PAY-142', '--verdict', 'openspec-verify=missing.json')).toEqual({ code: 1, out: [], errors: ['No such file: missing.json'] });
+  });
+
   it('accepts options before the ticket key', async () => {
     const cli = await getCli(getMockTicket({ status: 'Spec review' }), { ...SPEC_FILES, 'design.md': '# Design\n\n## Context\n' });
     const gate = await cli.run('ready-gate', '--json', 'PAY-142');
@@ -271,7 +396,7 @@ describe('factory command line', () => {
     expect(refused.errors).toEqual([]);
   });
 
-  it.each([[[]], [['frobnicate', 'PAY-142']], [['run']], [['approve']], [['approve', 'PAY-142', '--ceiling', 'robot']], [['approve', 'PAY-142', '--ceiling']], [['pull', 'PAY-142']], [['push', 'PAY-142']], [['pull', '--to', 'x']]])(
+  it.each([[[]], [['frobnicate', 'PAY-142']], [['run']], [['approve']], [['approve', 'PAY-142', '--ceiling', 'robot']], [['approve', 'PAY-142', '--ceiling']], [['pull', 'PAY-142']], [['push', 'PAY-142']], [['pull', '--to', 'x']], [['advance']], [['advance', 'PAY-142', '--diagnosis', 'bad luck']], [['advance', 'PAY-142', '--diagnosis']], [['advance', 'PAY-142', '--verdict', 'reviewer']], [['advance', 'PAY-142', '--verdict', '=file.json']], [['advance', 'PAY-142', '--question', 'Why?']]])(
     'exits 2 with usage for %j, without touching anything',
     async (argv) => {
       const cli = await getCli(getMockTicket({ status: 'Spec review' }));
@@ -285,6 +410,7 @@ describe('factory command line', () => {
           throw new Error('must not be built');
         },
         folder: createSpecFolder(),
+        readFile: async () => '',
         write: () => undefined,
         writeError: (line) => void errors.push(line),
       });
@@ -296,7 +422,7 @@ describe('factory command line', () => {
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(11);
+      expect(errors).toHaveLength(13);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -311,6 +437,7 @@ describe('factory command line', () => {
         throw new Error('.factory/factory.yaml is missing. Run /factory-init');
       },
       folder: createSpecFolder(),
+      readFile: async () => '',
       write: () => undefined,
       writeError: (line) => void errors.push(line),
     });
@@ -322,7 +449,7 @@ describe('factory command line', () => {
   it('reports a setup failure that is not an error object as it is', async () => {
     const errors: string[] = [];
 
-    const code = await runCli({ argv: ['next'], deps: () => Promise.reject('orca is not installed'), folder: createSpecFolder(), write: () => undefined, writeError: (line) => void errors.push(line) });
+    const code = await runCli({ argv: ['next'], deps: () => Promise.reject('orca is not installed'), folder: createSpecFolder(), readFile: async () => '', write: () => undefined, writeError: (line) => void errors.push(line) });
 
     expect(code).toBe(2);
     expect(errors).toEqual(['orca is not installed']);
@@ -338,7 +465,7 @@ const getProjectFolder = (files: Readonly<Record<string, string>>): string => {
   return root;
 };
 
-const ENV = { JIRA_TOKEN: 'secret', JIRA_EMAIL: 'factory@acme.test' };
+const ENV = { JIRA_TOKEN: 'secret', JIRA_EMAIL: 'factory@acme.test', GH_TOKEN: 'gh-secret' };
 
 const hasOpenspec = (() => {
   try {
@@ -397,9 +524,30 @@ describe('setting the command line up in a project', () => {
   });
 
   it.each([
-    [{ JIRA_EMAIL: 'factory@acme.test' }, 'Set the JIRA_TOKEN environment variable'],
-    [{ JIRA_TOKEN: 'secret' }, 'Set the JIRA_EMAIL environment variable'],
-    [{ JIRA_TOKEN: '', JIRA_EMAIL: 'factory@acme.test' }, 'Set the JIRA_TOKEN environment variable'],
+    ['source_control: { kind: bitbucket, repo: acme/billing-service, token_env: BB_TOKEN }', { BB_TOKEN: 'bb' }],
+    ['source_control: { kind: bitbucket, repo: acme/billing-service, token_env: BB_TOKEN, username_env: BB_USER }', { BB_TOKEN: 'bb', BB_USER: 'factory@acme.test' }],
+    ['source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN, api_url: "https://github.acme.test/api/v3" }', {}],
+  ])('builds the source control the project names (%#)', async (line, extraEnv) => {
+    const adapters = ADAPTERS_YAML.replace('source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN }', line);
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': adapters });
+
+    const deps = await createRealDeps({ cwd, env: { ...ENV, ...extraEnv } });
+
+    expect(typeof deps.sourceControl.openPullRequest).toBe('function');
+  });
+
+  it('names the missing Bitbucket username variable', async () => {
+    const adapters = ADAPTERS_YAML.replace('kind: github, repo: acme/billing-service, token_env: GH_TOKEN', 'kind: bitbucket, repo: acme/billing-service, token_env: GH_TOKEN, username_env: BB_USER');
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': adapters });
+
+    await expect(createRealDeps({ cwd, env: ENV })).rejects.toThrow('Set the BB_USER environment variable');
+  });
+
+  it.each([
+    [{ JIRA_EMAIL: 'factory@acme.test', GH_TOKEN: 'x' }, 'Set the JIRA_TOKEN environment variable'],
+    [{ JIRA_TOKEN: 'secret', GH_TOKEN: 'x' }, 'Set the JIRA_EMAIL environment variable'],
+    [{ JIRA_TOKEN: '', JIRA_EMAIL: 'factory@acme.test', GH_TOKEN: 'x' }, 'Set the JIRA_TOKEN environment variable'],
+    [{ JIRA_TOKEN: 'secret', JIRA_EMAIL: 'factory@acme.test' }, 'Set the GH_TOKEN environment variable'],
   ])('names the environment variable that is missing (%#)', async (env, message) => {
     const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
 
@@ -412,6 +560,8 @@ describe('setting the command line up in a project', () => {
     [ADAPTERS_YAML.replace('    base_url: https://acme.atlassian.net\n', ''), 'The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml'],
     [ADAPTERS_YAML.replace('    filter: project = PAY\n', ''), 'The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml'],
     [ADAPTERS_YAML.replace('kind: jira', 'kind: linear'), 'No supported ticket provider is configured. Only jira is supported so far'],
+    [ADAPTERS_YAML.replace(', token_env: GH_TOKEN', ''), 'The github source control needs token_env in .factory/adapters.yaml'],
+    [ADAPTERS_YAML.replace('kind: github', 'kind: bitbucket').replace(', token_env: GH_TOKEN', ''), 'The bitbucket source control needs token_env in .factory/adapters.yaml'],
   ])('explains what the ticket provider entry lacks (%#)', async (adapters, message) => {
     const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': adapters });
 

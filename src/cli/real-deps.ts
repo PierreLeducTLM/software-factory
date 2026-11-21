@@ -1,12 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createFetchHttp, sleep, withRateLimitRetry } from '../adapters/http.js';
+import { createBitbucketSourceControl } from '../adapters/bitbucket-source-control.js';
+import { createGitHubSourceControl } from '../adapters/github-source-control.js';
+import { createFetchHttp, sleep, withRateLimitRetry, type Http } from '../adapters/http.js';
 import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
 import { createCommandRunner, createOrcaAgentRuntime } from '../adapters/orca-agent-runtime.js';
+import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
-import type { RefinementDeps } from '../factory/refinement.js';
-import { createGitInputs, createSpecValidator } from './inputs.js';
+import type { LoopDeps } from '../factory/build-loop.js';
+import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
 
@@ -30,7 +33,23 @@ const fromEnv = (env: Options['env'], name: string): string => {
   return value;
 };
 
-const createTicketProvider = (adapters: AdaptersConfig, env: Options['env']): TicketProvider => {
+const GITHUB_API = 'https://api.github.com';
+const BITBUCKET_API = 'https://api.bitbucket.org/2.0';
+
+const createSourceControl = ({ source_control: source }: AdaptersConfig, env: Options['env'], http: Http): SourceControl => {
+  if (source.token_env === undefined) throw new Error(`The ${source.kind} source control needs token_env in .factory/adapters.yaml`);
+  const token = fromEnv(env, source.token_env);
+  if (source.kind === 'github') return createGitHubSourceControl({ apiUrl: source.api_url ?? GITHUB_API, repository: source.repo, token, http });
+  return createBitbucketSourceControl({
+    apiUrl: source.api_url ?? BITBUCKET_API,
+    repository: source.repo,
+    token,
+    http,
+    ...(source.username_env === undefined ? {} : { username: fromEnv(env, source.username_env) }),
+  });
+};
+
+const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], http: Http): TicketProvider => {
   const provider = adapters.ticket_providers.find((candidate) => candidate.kind === 'jira');
   if (provider === undefined) throw new Error('No supported ticket provider is configured. Only jira is supported so far');
   const { base_url: baseUrl, filter, token_env: tokenEnv, email_env: emailEnv } = provider;
@@ -43,15 +62,17 @@ const createTicketProvider = (adapters: AdaptersConfig, env: Options['env']): Ti
     email: fromEnv(env, emailEnv),
     token: fromEnv(env, tokenEnv),
     repository: adapters.repository,
-    http: withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES }),
+    http,
     now,
   });
 };
 
-export const createRealDeps = async ({ cwd, env }: Options): Promise<RefinementDeps> => {
+export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> => {
   const config = await loadConfig(cwd, 'factory.yaml', parseFactoryConfig);
   const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
-  const tickets = createTicketProvider(adapters, env);
+  const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
+  const tickets = createTicketProvider(adapters, env, http);
+  const sourceControl = createSourceControl(adapters, env, http);
   const runGit = createCommandRunner('git');
   const git = createGitInputs({ run: (args) => runGit(args, { cwd }), mainBranch: config.main_branch });
 
@@ -66,5 +87,10 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<RefinementD
     predictRisk: async () => 'high',
     mainCommit: git.mainCommit,
     changedFilesSince: git.changedFilesSince,
+    sourceControl,
+    runScript: createScriptRunner({ cwd }),
+    sleep,
+    changedFilesOnBranch: git.changedFilesOnBranch,
+    pushBranch: git.pushBranch,
   };
 };

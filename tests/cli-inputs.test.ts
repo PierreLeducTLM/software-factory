@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCommandRunner, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
-import { createGitInputs, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
+import { createGitInputs, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
 
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Test Dev', '-c', 'user.email=test@example.test', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -59,6 +59,27 @@ describe('git inputs', () => {
     expect((await inputs.changedFilesSince(first)).toSorted()).toEqual(['b.txt', 'src-billing.ts']);
   });
 
+  it('lists the files changed on the current branch since it left main, ignoring what main gained since', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'checkout', '-q', '-b', 'factory/pay-142');
+    const none = await inputsFor(clone).changedFilesOnBranch();
+    commit(clone, 'export.ts', 'x');
+    commit(origin, 'main-only.txt', 'y');
+
+    expect(none).toEqual([]);
+    expect(await inputsFor(clone).changedFilesOnBranch()).toEqual(['export.ts']);
+  });
+
+  it('pushes the branch to origin', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'checkout', '-q', '-b', 'factory/pay-142');
+    const pushed = commit(clone, 'export.ts', 'x');
+
+    await inputsFor(clone).pushBranch('factory/pay-142');
+
+    expect(git(origin, 'rev-parse', 'factory/pay-142')).toBe(pushed);
+  });
+
   it('follows the main branch the project names', async () => {
     const { origin, clone } = getClone();
     git(origin, 'checkout', '-q', '-b', 'develop');
@@ -86,6 +107,31 @@ const FILES = [
   { name: 'proposal.md', content: '# Proposal' },
   { name: 'specs__identity__user-auth__spec.md', content: '# Spec Delta' },
 ];
+
+describe('script runner', () => {
+  const run = createScriptRunner({ cwd: tmpdir() });
+
+  it('reports exit code 0 and everything the command printed', async () => {
+    expect(await run('echo out; echo err 1>&2', { timeoutSeconds: 10 })).toEqual({ exitCode: 0, output: 'out\nerr\n', timedOut: false });
+  });
+
+  it('reports the exit code of a command that fails, with its output', async () => {
+    expect(await run('echo failing; exit 3', { timeoutSeconds: 10 })).toEqual({ exitCode: 3, output: 'failing\n', timedOut: false });
+  });
+
+  it('stops a command that runs past its timeout and says it timed out', async () => {
+    const result = await run('echo started; sleep 5', { timeoutSeconds: 0.2 });
+
+    expect(result).toEqual({ exitCode: 1, output: 'started\n', timedOut: true });
+  });
+
+  it('runs in the folder it was given', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'factory-script-'));
+    writeFileSync(join(folder, 'marker.txt'), 'here');
+
+    expect((await createScriptRunner({ cwd: folder })('cat marker.txt', { timeoutSeconds: 10 })).output).toBe('here');
+  });
+});
 
 describe('spec folder', () => {
   it('writes attached files into folders and reads them back under their attachment names', async () => {

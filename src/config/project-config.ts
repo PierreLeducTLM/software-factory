@@ -86,7 +86,13 @@ const AdaptersConfigSchema = z.object({
       }),
     )
     .min(1),
-  source_control: z.object({ kind: z.enum(['github', 'bitbucket']), repo: z.string().min(1) }),
+  source_control: z.object({
+    kind: z.enum(['github', 'bitbucket']),
+    repo: z.string().min(1),
+    token_env: z.string().optional(),
+    username_env: z.string().optional(),
+    api_url: z.string().optional(),
+  }),
   agent_runtime: z.object({ kind: z.literal('orca') }),
 });
 

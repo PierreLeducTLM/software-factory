@@ -44,6 +44,7 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 - [x] 3.7 Implement the retry of a Blocked ticket through `factory run`, and verify the "Retry after fixing a flaky test", "Drift since the ticket was blocked" and "Blocked ticket with the auto label" scenarios
 - [x] 3.8 Implement the run limit per ticket (default 3, configurable) and the `--over-limit` override, and verify the "Fourth run refused", "Override" and "Next skips a ticket at its limit" scenarios
 - [x] 3.9 Compact the oldest runs' attempt details to the archive attachment when the record is over budget, keeping each run's outcome, attempts used, time, cost and report link, and verify with a record holding three runs
+- [x] 3.11 Add `factory advance` with its inputs (what was built, decisions applied, a question, verdict files, a diagnosis), the `--confirm-retry` and `--over-limit` flags on `factory run`, and the real source control, script runner and branch git inputs behind them
 - [ ] 3.10 Pilot gate: 10 pilot tickets processed, and every failure is explained by its report
 
 ## 4. Phase 3: Visibility (ticket provider only)

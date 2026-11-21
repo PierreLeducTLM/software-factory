@@ -9,23 +9,24 @@ import {
   startRefinement,
   type ApprovalResult,
   type GateResult,
-  type RefinementDeps,
   type StatusResult,
 } from '../factory/refinement.js';
+import { advance, type AdvanceInput, type AdvanceResult, type LoopDeps } from '../factory/build-loop.js';
 import { nextTicket, runTicket, type RunResult } from '../factory/run-lifecycle.js';
 import type { SpecFolder } from './inputs.js';
 
 type CliOptions = {
   readonly argv: readonly string[];
-  readonly deps: () => Promise<RefinementDeps>;
+  readonly deps: () => Promise<LoopDeps>;
   readonly folder: SpecFolder;
+  readonly readFile: (path: string) => Promise<string>;
   readonly write: (line: string) => void;
   readonly writeError: (line: string) => void;
 };
 
 type Outcome = { readonly result: { readonly ok: boolean }; readonly lines: readonly string[]; readonly succeeded: boolean };
 
-type Command = (deps: RefinementDeps, folder: SpecFolder) => Promise<Outcome>;
+type Command = (deps: LoopDeps, folder: SpecFolder, readFile: CliOptions['readFile']) => Promise<Outcome>;
 
 const USAGE = [
   'Usage: factory <command> <KEY> [options]',
@@ -35,7 +36,9 @@ const USAGE = [
   '  push <KEY> --from <folder>      attach the spec files that changed',
   '  ready-gate <KEY>                run the ready gate',
   '  approve <KEY> [--preview] [--ceiling human]',
-  '  run <KEY> [--confirm-takeover] [--accept-edited-record]',
+  '  run <KEY> [--confirm-takeover] [--accept-edited-record] [--confirm-retry] [--over-limit]',
+  '  advance <KEY> [--changed <text>] [--decision <id>] [--question <text> --recommended <text>]',
+  '                [--verdict <id>=<file>] [--diagnosis code|spec|environment] [--next-step <text>]',
   '  revalidate <KEY>                check the spec and main for drift',
   '  next                            claim the next eligible ticket',
   'Add --json to any command for one line of JSON.',
@@ -44,7 +47,8 @@ const USAGE = [
 const OK = 0;
 const REFUSED = 1;
 const USAGE_ERROR = 2;
-const VALUED = ['--ceiling', '--to', '--from'];
+const VALUED = ['--ceiling', '--to', '--from', '--changed', '--decision', '--question', '--recommended', '--verdict', '--diagnosis', '--next-step'];
+const DIAGNOSES = ['code', 'spec', 'environment'] as const;
 
 const outcome = (result: { readonly ok: boolean }, lines: readonly string[], succeeded: boolean = result.ok): Outcome => ({ result, lines, succeeded });
 
@@ -78,9 +82,26 @@ const statusOutcome = (result: StatusResult): Outcome => {
   ]);
 };
 
+const failureLines = (failures: readonly { readonly id: string; readonly station: string; readonly reason?: string | undefined; readonly detail?: string | undefined }[]): readonly string[] =>
+  failures.flatMap((failure) => [`- ${failure.id} (${failure.station}): ${String(failure.reason)}`, ...(failure.detail === undefined ? [] : [`  ${failure.detail.split('\n', 1).join('')}`])]);
+
+const advanceOutcome = (result: AdvanceResult): Outcome => {
+  if (!result.ok) return outcome(result, []);
+  if (result.next === 'build') return outcome(result, [`Next: build (attempt ${result.attempt})`, ...failureLines(result.feedback)]);
+  if (result.next === 'verify') return outcome(result, [`Next: verify (attempt ${result.attempt}). Hand in the verdict of openspec-verify`]);
+  if (result.next === 'review') return outcome(result, [`Next: review (attempt ${result.attempt}). Hand in a verdict for: ${result.checks.map((check) => check.id).join(', ')}`]);
+  if (result.next === 'diagnose') {
+    return outcome(result, ['Next: diagnose. Every attempt failed:', ...result.attempts.flatMap((attempt) => [`Attempt ${attempt.number}: ${attempt.changed}`, ...failureLines(attempt.failures)])]);
+  }
+  if (result.exit === 'pull_request') return outcome(result, [`Pull request opened: ${result.url}`]);
+  if (result.exit === 'blocked') return outcome(result, [`Blocked. Failure report: ${result.report}`], false);
+  return outcome(result, ['Sent back to refinement', ...result.findings.map((finding) => `- ${finding}`)], false);
+};
+
 const parse = (argv: readonly string[]): Command | undefined => {
   const [name, ...rest] = argv;
-  const valueOf = (flag: string): string | undefined => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
+  const valuesOf = (flag: string): readonly string[] => rest.flatMap((argument, index) => (argument === flag ? [rest[index + 1] ?? ''] : []));
+  const valueOf = (flag: string): string | undefined => valuesOf(flag)[0];
   const isValue = (index: number): boolean => VALUED.includes(rest[index - 1] ?? '');
   const [key] = rest.filter((argument, index) => !argument.startsWith('--') && !isValue(index));
   const has = (flag: string): boolean => rest.includes(flag);
@@ -94,7 +115,36 @@ const parse = (argv: readonly string[]): Command | undefined => {
   if (name === 'ready-gate') return async (deps) => gateOutcome(await runReadyGate(deps, key), 'Ready gate passed', 'Ready gate failed');
   if (name === 'revalidate') return async (deps) => gateOutcome(await revalidate(deps, key), 'No drift since approval', 'Sent back to refinement');
   if (name === 'run') {
-    return async (deps) => runOutcome(await runTicket(deps, key, { confirmTakeover: has('--confirm-takeover'), acceptEditedRecord: has('--accept-edited-record') }));
+    return async (deps) =>
+      runOutcome(
+        await runTicket(deps, key, {
+          confirmTakeover: has('--confirm-takeover'),
+          acceptEditedRecord: has('--accept-edited-record'),
+          confirmRetry: has('--confirm-retry'),
+          overLimit: has('--over-limit'),
+        }),
+      );
+  }
+  if (name === 'advance') {
+    const kind = DIAGNOSES.find((candidate) => candidate === valueOf('--diagnosis'));
+    const recommended = valuesOf('--recommended');
+    const questions = valuesOf('--question').map((question, index) => ({ question, recommended: recommended[index] ?? '' }));
+    const verdictFiles = valuesOf('--verdict').map((pair) => ({ id: pair.slice(0, Math.max(pair.indexOf('='), 0)), path: pair.slice(pair.indexOf('=') + 1) }));
+    const changed = valueOf('--changed');
+    const nextStep = valueOf('--next-step');
+    const [question] = questions;
+    if (has('--diagnosis') && kind === undefined) return undefined;
+    if (verdictFiles.some(({ id, path }) => id === '' || path === '') || questions.some((asked) => asked.recommended === '')) return undefined;
+    return async (deps, _folder, readFile) => {
+      const verdicts = Object.fromEntries(await Promise.all(verdictFiles.map(async ({ id, path }) => [id, await readFile(path)] as const)));
+      const input: AdvanceInput = {
+        ...(changed === undefined ? {} : { built: { changed, decisions: valuesOf('--decision') } }),
+        ...(kind === undefined && question !== undefined ? { question } : {}),
+        ...(verdictFiles.length === 0 ? {} : { verdicts }),
+        ...(kind === undefined ? {} : { diagnosis: { kind, questions, ...(nextStep === undefined ? {} : { nextStep }) } }),
+      };
+      return advanceOutcome(await advance(deps, key, input));
+    };
   }
   if (name === 'pull' && to !== undefined) {
     return async (deps, folder) => {
@@ -119,7 +169,7 @@ const parse = (argv: readonly string[]): Command | undefined => {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export const runCli = async ({ argv, deps, folder, write, writeError }: CliOptions): Promise<number> => {
+export const runCli = async ({ argv, deps, folder, readFile, write, writeError }: CliOptions): Promise<number> => {
   const command = parse(argv);
   if (command === undefined) {
     USAGE.forEach(writeError);
@@ -135,7 +185,7 @@ export const runCli = async ({ argv, deps, folder, write, writeError }: CliOptio
     return USAGE_ERROR;
   }
 
-  const ran = await command(built.value, folder).then(
+  const ran = await command(built.value, folder, readFile).then(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, message: messageOf(error) }),
   );
