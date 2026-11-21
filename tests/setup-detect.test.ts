@@ -219,6 +219,15 @@ pipelines:
     ]);
   });
 
+  it('reads the after-script of a Bitbucket step too', async () => {
+    const pipeline = 'pipelines:\n  branches:\n    main:\n      - step:\n          name: Build\n          script: [pnpm build]\n          after-script:\n            - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then factory revert --commit $BITBUCKET_COMMIT; fi\n';
+
+    const detection = await detect({ 'bitbucket-pipelines.yml': pipeline });
+
+    expect(detection.ci.factorySteps).toEqual(['revert']);
+    expect(detection.ci.jobs[0]?.commands).toHaveLength(2);
+  });
+
   it('finds the factory steps already installed, and does not offer them as checks', async () => {
     const workflow = 'jobs:\n  record:\n    steps:\n      - run: factory record-merge\n  undo:\n    steps:\n      - run: npx factory revert --commit $SHA\n  tests:\n    steps:\n      - run: echo factory watcher\n';
     const detection = await detect({ '.github/workflows/factory.yml': workflow });

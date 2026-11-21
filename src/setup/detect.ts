@@ -40,7 +40,7 @@ const PackageSchema = z.object({
 const StepsSchema = z.array(z.object({ run: z.string().optional() }).loose()).default([]);
 const WorkflowSchema = z.object({ jobs: z.record(z.string(), z.object({ name: z.string().optional(), steps: StepsSchema }).loose()).default({}) });
 
-const BitbucketStepSchema = z.object({ step: z.object({ name: z.string().optional(), script: z.array(z.unknown()).default([]) }).loose() });
+const BitbucketStepSchema = z.object({ step: z.object({ name: z.string().optional(), script: z.array(z.unknown()).default([]), 'after-script': z.array(z.unknown()).default([]) }).loose() });
 const BitbucketItemSchema = z.union([BitbucketStepSchema, z.object({ parallel: z.union([z.array(BitbucketStepSchema), z.object({ steps: z.array(BitbucketStepSchema) })]) })]);
 const BitbucketSectionSchema = z.record(z.string(), z.array(z.unknown())).default({});
 const BitbucketSchema = z.object({
@@ -119,7 +119,7 @@ const bitbucketJobs = async (files: ProjectFiles): Promise<readonly CiJob[]> => 
   const jobs = items.flatMap(bitbucketSteps).map(({ step }, index) => ({
     name: step.name ?? `step ${index + 1}`,
     file,
-    commands: step.script.filter((line): line is string => typeof line === 'string'),
+    commands: [...step.script, ...step['after-script']].filter((line): line is string => typeof line === 'string'),
   }));
   return jobs.filter((job, index) => jobs.findIndex((other) => other.name === job.name) === index);
 };
