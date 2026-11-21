@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCommandRunner, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
-import { createGitInputs, createSpecValidator } from '../src/cli/inputs.js';
+import { createGitInputs, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
 
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Test Dev', '-c', 'user.email=test@example.test', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -86,6 +86,33 @@ const FILES = [
   { name: 'proposal.md', content: '# Proposal' },
   { name: 'specs__identity__user-auth__spec.md', content: '# Spec Delta' },
 ];
+
+describe('spec folder', () => {
+  it('writes attached files into folders and reads them back under their attachment names', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'factory-folder-'));
+    const specFolder = createSpecFolder();
+    writeFileSync(join(folder, 'notes.txt'), 'not a spec file');
+
+    await specFolder.write(folder, FILES);
+
+    expect(readFileSync(join(folder, 'specs/identity/user-auth/spec.md'), 'utf8')).toBe('# Spec Delta');
+    expect(await specFolder.read(folder)).toEqual([
+      { name: 'proposal.md', content: '# Proposal' },
+      { name: 'specs__identity__user-auth__spec.md', content: '# Spec Delta' },
+    ]);
+  });
+
+  it('refuses to write a file name that would land outside the folder, writing nothing', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'factory-folder-'));
+
+    await expect(createSpecFolder().write(folder, [...FILES, { name: '..__evil.md', content: 'x' }])).rejects.toThrow('..__evil.md is not a valid spec file name');
+    expect(readdirSync(folder)).toEqual([]);
+  });
+
+  it('fails when asked to read a folder that does not exist', async () => {
+    await expect(createSpecFolder().read(join(tmpdir(), 'factory-folder-missing'))).rejects.toThrow();
+  });
+});
 
 describe('spec validator', () => {
   it('lays the attached files out as an OpenSpec change, validates it strictly, and cleans up', async () => {

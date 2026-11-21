@@ -29,6 +29,19 @@ type Refusal = 'not_found' | 'no_spec' | 'record_edited' | 'not_ready' | 'not_in
 
 type Refused = { readonly ok: false; readonly reason: Refusal; readonly message: string };
 
+export type PullResult = { readonly ok: true; readonly files: readonly SpecFile[] } | Refused;
+export type PushResult = { readonly ok: true; readonly attached: readonly string[] } | Refused;
+
+export type StatusResult =
+  | {
+      readonly ok: true;
+      readonly status: string;
+      readonly gate?: { readonly passed: boolean; readonly findings: readonly string[]; readonly current: boolean };
+      readonly approval?: { readonly approver: string; readonly at: string; readonly predictedRisk: Risk };
+      readonly questions: readonly SendBackQuestion[];
+    }
+  | Refused;
+
 export type GateResult = { readonly ok: true; readonly passed: boolean; readonly findings: readonly string[] } | Refused;
 export type ApprovalResult = { readonly ok: true; readonly risk: Risk; readonly route: string } | Refused;
 
@@ -117,6 +130,39 @@ const routeFor = (config: FactoryConfig, risk: Risk, ceiling?: 'human'): string 
   const label = `${risk.charAt(0).toUpperCase()}${risk.slice(1)} risk`;
   if (ceiling === 'human' || config.risk[risk].merge === 'human') return `${label}, merged by a person`;
   return `${label}, ${config.risk.shadow ? 'would' : 'will'} auto-merge`;
+};
+
+export const pullSpecFiles = async (deps: RefinementDeps, key: string): Promise<PullResult> => {
+  const opened = await open(deps, key);
+  return opened.ok ? { ok: true, files: opened.files } : opened.refusal;
+};
+
+export const pushSpecFiles = async (deps: RefinementDeps, key: string, files: readonly SpecFile[]): Promise<PushResult> => {
+  if ((await deps.tickets.getTicket(key)) === undefined) return refuse('not_found', `${key} does not exist`);
+  const notSpec = files.find((file) => !file.name.endsWith('.md'));
+  if (notSpec !== undefined) return refuse('no_spec', `${notSpec.name} is not a spec file. Spec files end in .md`);
+  const attached = await loadSpecFiles(deps, key);
+  const changed = files.filter((file) => attached.find((existing) => existing.name === file.name)?.content !== file.content);
+  await changed.reduce(async (previous, { name, content }) => {
+    await previous;
+    await deps.tickets.addAttachment({ key, name, content });
+  }, Promise.resolve());
+  return { ok: true, attached: changed.map((file) => file.name) };
+};
+
+export const refinementStatus = async (deps: RefinementDeps, key: string): Promise<StatusResult> => {
+  const opened = await open(deps, key);
+  if (!opened.ok) return opened.refusal;
+  const { readyGate, approval, sendBack } = opened.record.refinement;
+  return {
+    ok: true,
+    status: opened.ticket.status,
+    ...(readyGate === undefined
+      ? {}
+      : { gate: { passed: readyGate.passed, findings: readyGate.findings, current: readyGate.fingerprint === fingerprintOf(opened.files) } }),
+    ...(approval === undefined ? {} : { approval: { approver: approval.approver, at: approval.at, predictedRisk: approval.predictedRisk } }),
+    questions: sendBack?.questions ?? [],
+  };
 };
 
 export const startRefinement = async (deps: RefinementDeps, key: string): Promise<{ readonly ok: true } | Refused> => {

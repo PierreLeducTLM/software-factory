@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import type { CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { SpecFile } from '../factory/refinement.js';
@@ -43,6 +43,34 @@ const reportOf = async (run: CommandRunner, cwd: string): Promise<string> => {
 const pathOf = (name: string): string => name.replaceAll('__', '/');
 
 const escapes = (name: string): boolean => pathOf(name).split('/').includes('..');
+
+export type SpecFolder = {
+  readonly read: (folder: string) => Promise<readonly SpecFile[]>;
+  readonly write: (folder: string, files: readonly SpecFile[]) => Promise<void>;
+};
+
+export const createSpecFolder = (): SpecFolder => ({
+  read: async (folder) => {
+    const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+    const markdown = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.md')).map((entry) => join(entry.parentPath, entry.name));
+    const files = await Promise.all(
+      markdown.map(async (path) => ({ name: relative(folder, path).split(sep).join('__'), content: await readFile(path, 'utf8') })),
+    );
+    return files.toSorted((a, b) => a.name.localeCompare(b.name));
+  },
+
+  write: async (folder, files) => {
+    const invalid = files.find((file) => escapes(file.name));
+    if (invalid !== undefined) throw new Error(`${invalid.name} is not a valid spec file name`);
+    await Promise.all(
+      files.map(async (file) => {
+        const target = join(folder, pathOf(file.name));
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, file.content);
+      }),
+    );
+  },
+});
 
 export const createSpecValidator =
   ({ run }: { readonly run: CommandRunner }) =>

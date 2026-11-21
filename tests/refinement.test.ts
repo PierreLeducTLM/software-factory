@@ -3,7 +3,17 @@ import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runt
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
 import type { Ticket, TicketProvider } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig, type FactoryConfig } from '../src/config/project-config.js';
-import { approve, approvalPreview, revalidate, runReadyGate, startRefinement, type RefinementDeps } from '../src/factory/refinement.js';
+import {
+  approve,
+  approvalPreview,
+  pullSpecFiles,
+  pushSpecFiles,
+  refinementStatus,
+  revalidate,
+  runReadyGate,
+  startRefinement,
+  type RefinementDeps,
+} from '../src/factory/refinement.js';
 import { runTicket } from '../src/factory/run-lifecycle.js';
 import { loadRecord } from '../src/record/record-store.js';
 import { createRecord, renderComment, type TicketRecord } from '../src/record/ticket-record.js';
@@ -499,6 +509,107 @@ describe('approval', () => {
     expect(await approve(depsFor(world), 'PAY-142')).toEqual({ ok: false, reason: 'record_edited', message: 'The record on PAY-142 was edited outside the factory' });
     expect(await runReadyGate(depsFor(world), 'PAY-142')).toMatchObject({ ok: false, reason: 'record_edited' });
     expect(await startRefinement(depsFor(world), 'PAY-142')).toMatchObject({ ok: false, reason: 'record_edited' });
+  });
+});
+
+describe('moving spec files between the ticket and a folder', () => {
+  it('pulls the newest copy of each attached spec file', async () => {
+    const world = await getWorld(inSpecReview());
+    await world.tickets.addAttachment({ key: 'PAY-142', name: 'design.md', content: 'newer design' });
+    await world.tickets.addAttachment({ key: 'PAY-142', name: 'screenshot.png', content: 'binary' });
+
+    const pulled = await pullSpecFiles(depsFor(world), 'PAY-142');
+
+    expect(pulled.ok && pulled.files.map((file) => file.name)).toEqual(['design.md', 'proposal.md', 'specs__billing__spec.md', 'tasks.md']);
+    expect(pulled.ok && pulled.files[0]?.content).toBe('newer design');
+  });
+
+  it('refuses to pull from a ticket with no spec files', async () => {
+    const world = await getWorld(inSpecReview(), {});
+
+    expect(await pullSpecFiles(depsFor(world), 'PAY-142')).toMatchObject({ ok: false, reason: 'no_spec' });
+  });
+
+  it('attaches only the files that changed or are new', async () => {
+    const world = await getWorld(inSpecReview());
+    const files = [
+      { name: 'design.md', content: 'edited design' },
+      { name: 'proposal.md', content: SPEC_FILES['proposal.md'] ?? '' },
+      { name: 'specs__export__spec.md', content: 'new delta' },
+    ];
+
+    const pushed = await pushSpecFiles(depsFor(world), 'PAY-142', files);
+
+    const pulled = await pullSpecFiles(depsFor(world), 'PAY-142');
+    expect(pushed).toEqual({ ok: true, attached: ['design.md', 'specs__export__spec.md'] });
+    expect((await world.tickets.listAttachments('PAY-142')).length).toBe(Object.keys(SPEC_FILES).length + 2);
+    expect(pulled.ok && pulled.files.find((file) => file.name === 'design.md')?.content).toBe('edited design');
+  });
+
+  it('attaches draft files to a ticket that has none yet', async () => {
+    const world = await getWorld(toRefine(), {});
+
+    const pushed = await pushSpecFiles(depsFor(world), 'PAY-142', [{ name: 'proposal.md', content: 'draft' }]);
+
+    expect(pushed).toEqual({ ok: true, attached: ['proposal.md'] });
+  });
+
+  it('refuses to push to a ticket that does not exist, or a file that is not markdown', async () => {
+    const world = await getWorld(inSpecReview());
+
+    expect(await pushSpecFiles(depsFor(world), 'PAY-999', [{ name: 'proposal.md', content: 'x' }])).toEqual({ ok: false, reason: 'not_found', message: 'PAY-999 does not exist' });
+    expect(await pushSpecFiles(depsFor(world), 'PAY-142', [{ name: 'notes.txt', content: 'x' }])).toEqual({
+      ok: false,
+      reason: 'no_spec',
+      message: 'notes.txt is not a spec file. Spec files end in .md',
+    });
+    expect((await world.tickets.listAttachments('PAY-142')).length).toBe(Object.keys(SPEC_FILES).length);
+  });
+});
+
+describe('refinement status', () => {
+  it('shows the state, the last gate, the approval and any questions from a send-back', async () => {
+    const world = await getRunningWorld();
+    world.changedOnMain.push('src/billing/rounding.ts');
+    await revalidate(depsFor(world), 'PAY-142');
+
+    const status = await refinementStatus(depsFor(world), 'PAY-142');
+
+    expect(status).toEqual({
+      ok: true,
+      status: 'Spec review',
+      gate: { passed: true, findings: [], current: true },
+      approval: { approver: 'pierre', at: '2026-11-20T16:00:00Z', predictedRisk: 'low' },
+      questions: [
+        {
+          question: 'These files changed on main after the spec was approved: src/billing/rounding.ts. Does the spec still hold?',
+          recommended: 'Review the changes, update the spec if needed, and approve again.',
+        },
+      ],
+    });
+  });
+
+  it('says the gate result is out of date once the spec files changed', async () => {
+    const world = await getWorld(inSpecReview());
+    await runReadyGate(depsFor(world), 'PAY-142');
+    await pushSpecFiles(depsFor(world), 'PAY-142', [{ name: 'design.md', content: 'edited' }]);
+
+    const status = await refinementStatus(depsFor(world), 'PAY-142');
+
+    expect(status).toMatchObject({ ok: true, gate: { passed: true, current: false }, questions: [] });
+    expect(status.ok && 'approval' in status).toBe(false);
+  });
+
+  it('shows a ticket the factory has not touched yet as having no gate, approval or questions', async () => {
+    const world = await getWorld(toRefine());
+
+    expect(await refinementStatus(depsFor(world), 'PAY-142')).toEqual({ ok: true, status: 'To refine', questions: [] });
+  });
+
+  it('refuses a ticket with no spec files', async () => {
+    const world = await getWorld(toRefine(), {});
+
+    expect(await refinementStatus(depsFor(world), 'PAY-142')).toMatchObject({ ok: false, reason: 'no_spec' });
   });
 });
 
