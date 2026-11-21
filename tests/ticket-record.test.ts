@@ -125,6 +125,7 @@ describe('the record on a ticket', () => {
         attempt: 1,
         attemptLimit: 5,
         steps: [],
+        attempts: [],
       },
     ]);
     expect(record.events.at(-1)).toEqual({ at: '2026-11-21T08:00:00Z', by: 'pierre', type: 'claimed', detail: 'run 1' });

@@ -56,7 +56,7 @@ export const timeoutSecondsOf = (check: Pick<Check, 'timeout'>): number => {
   return Number(amount) * SECONDS_PER[unit];
 };
 
-const inScope = (check: Check, changedFiles: readonly string[]): boolean => {
+export const inScope = (check: Pick<Check, 'applies_when'>, changedFiles: readonly string[]): boolean => {
   if (check.applies_when === undefined) return true;
   const patterns = check.applies_when.slice(SCOPE_PREFIX.length).split(',').map((pattern) => pattern.trim());
   return changedFiles.some((file) => patterns.some((pattern) => matchesPath(pattern, file)));

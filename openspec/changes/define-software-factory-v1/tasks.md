@@ -35,12 +35,12 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 
 ## 3. Phase 2: Reliable loop
 
-- [ ] 3.1 Implement the check contract runner (script exit code, `applies_when`, blocking or advisory, timeout, `source: ci`) and the fixed gate order, and verify each "Uniform check contract" scenario plus the "Non-zero exit" and "Quality gate fails" scenarios
+- [x] 3.1 Implement the check contract runner (script exit code, `applies_when`, blocking or advisory, timeout, `source: ci`) and the fixed gate order, and verify each "Uniform check contract" scenario plus the "Non-zero exit" and "Quality gate fails" scenarios
 - [x] 3.2 Implement agent-check verdict validation (structured verdict, required evidence), and verify the "Free-text answer" and "Missing evidence" scenarios
-- [ ] 3.3 Implement the attempt loop with a per-run limit (default 5) and the failure output fed forward, and verify the "Alternating failures" and "Gate failure feeds the next attempt" scenarios
+- [x] 3.3 Implement the attempt loop with a per-run limit (default 5) and the failure output fed forward, and verify the "Alternating failures" and "Gate failure feeds the next attempt" scenarios
 - [ ] 3.4 Implement the Decisions → delta → canonical lookup and the send-back on an unanswered observable question, and verify both "No questions during development" scenarios
 - [ ] 3.5 Implement the review station (OpenSpec verify, then an independent reviewer agent), and verify the "Verify finds an uncovered scenario" scenario
-- [ ] 3.6 Implement the three exits and their reports, with the diagnosis limited to {code, spec, environment}, and verify the "All gates pass on attempt 2", "Spec diagnosis after five failures", "Flaky end-to-end test" and "Report without diagnosis" scenarios
+- [x] 3.6 Implement the three exits and their reports, with the diagnosis limited to {code, spec, environment}, and verify the "All gates pass on attempt 2", "Spec diagnosis after five failures", "Flaky end-to-end test" and "Report without diagnosis" scenarios
 - [ ] 3.7 Implement the retry of a Blocked ticket through `factory run`, and verify the "Retry after fixing a flaky test", "Drift since the ticket was blocked" and "Blocked ticket with the auto label" scenarios
 - [ ] 3.8 Implement the run limit per ticket (default 3, configurable) and the `--over-limit` override, and verify the "Fourth run refused", "Override" and "Next skips a ticket at its limit" scenarios
 - [ ] 3.9 Compact the oldest runs' attempt details to the archive attachment when the record is over budget, keeping each run's outcome, attempts used, time, cost and report link, and verify with a record holding three runs

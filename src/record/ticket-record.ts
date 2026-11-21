@@ -16,6 +16,23 @@ const StepSchema = z.object({
   timeoutSeconds: z.number().int().min(1),
 });
 
+const OutcomeSchema = z.object({
+  id: z.string(),
+  station: z.string(),
+  status: z.enum(['passed', 'failed', 'warning', 'skipped']),
+  reason: z.string().optional(),
+  detail: z.string().optional(),
+  durationSeconds: z.number(),
+  evidence: z.array(z.string()).optional(),
+});
+
+const AttemptSchema = z.object({
+  number: z.number().int().min(1),
+  changed: z.string(),
+  decisions: z.array(z.string()),
+  outcomes: z.array(OutcomeSchema),
+});
+
 const RunSchema = z.object({
   claimant: z.string(),
   machine: z.string(),
@@ -25,6 +42,10 @@ const RunSchema = z.object({
   attempt: z.number().int().min(1),
   attemptLimit: z.number().int().min(1),
   steps: z.array(StepSchema),
+  attempts: z.array(AttemptSchema),
+  diagnosis: z.enum(['code', 'spec', 'environment']).optional(),
+  report: z.string().optional(),
+  pullRequest: z.object({ number: z.number(), url: z.string() }).optional(),
 });
 
 const FactoryStateSchema = z.enum(['to_refine', 'spec_review', 'ready_for_dev', 'in_development', 'in_review', 'blocked', 'done']);
@@ -62,6 +83,7 @@ const TicketRecordSchema = z.object({
 
 export type FactoryEvent = Readonly<z.infer<typeof EventSchema>>;
 export type Run = Readonly<z.infer<typeof RunSchema>>;
+export type Attempt = Readonly<z.infer<typeof AttemptSchema>>;
 export type FactoryState = z.infer<typeof FactoryStateSchema>;
 export type Approval = Readonly<z.infer<typeof ApprovalSchema>>;
 export type TicketRecord = Readonly<z.infer<typeof TicketRecordSchema>>;
@@ -112,7 +134,7 @@ export const startRun = (record: TicketRecord, { claimant, machine, worktreeId, 
   appendEvent(
     {
       ...record,
-      runs: [...record.runs, { claimant, machine, worktreeId, startedAt: at, status: 'running', attempt: 1, attemptLimit, steps: [] }],
+      runs: [...record.runs, { claimant, machine, worktreeId, startedAt: at, status: 'running', attempt: 1, attemptLimit, steps: [], attempts: [] }],
     },
     { at, by: claimant, type: 'claimed', detail: `run ${record.runs.length + 1}` },
   );
@@ -131,7 +153,7 @@ export const latestRun = (record: TicketRecord): Run => {
   return run;
 };
 
-const changeLatestRun = (record: TicketRecord, change: (run: Run) => Run): TicketRecord => ({
+export const changeLatestRun = (record: TicketRecord, change: (run: Run) => Run): TicketRecord => ({
   ...record,
   runs: record.runs.map((run, index) => (index === record.runs.length - 1 ? change(run) : run)),
 });

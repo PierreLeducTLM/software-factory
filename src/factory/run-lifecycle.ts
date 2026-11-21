@@ -34,7 +34,7 @@ const FIRST_STEP = 'revalidate';
 
 const refuse = (reason: Refusal, message: string): RunResult => ({ ok: false, reason, message });
 
-const summaryOf = (record: TicketRecord, note: string): string => {
+export const summaryOf = (record: TicketRecord, note: string): string => {
   const run = latestRun(record);
   return `Run ${record.runs.length} · attempt ${run.attempt} of ${run.attemptLimit} · ${note}`;
 };

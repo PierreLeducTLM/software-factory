@@ -81,7 +81,7 @@ describe('starting a run on a named ticket', () => {
     expect((await world.tickets.getTicket('PAY-142'))?.status).toBe('In development');
     expect(record.state).toBe('in_development');
     expect(record.runs).toEqual([
-      { claimant: 'pierre', machine: 'pierre-mbp', worktreeId: 'wt-1', startedAt: '2026-11-21T08:00:00Z', status: 'running', attempt: 1, attemptLimit: 5, steps: [] },
+      { claimant: 'pierre', machine: 'pierre-mbp', worktreeId: 'wt-1', startedAt: '2026-11-21T08:00:00Z', status: 'running', attempt: 1, attemptLimit: 5, steps: [], attempts: [] },
     ]);
     expect((await world.tickets.getFactoryComment('PAY-142'))?.startsWith('Run 1 · attempt 1 of 5 · claimed by pierre\n')).toBe(true);
   });
