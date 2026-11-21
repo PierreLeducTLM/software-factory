@@ -40,15 +40,21 @@ const ApprovalSchema = z.object({
 
 const ReadyGateSchema = z.object({
   passed: z.boolean(),
+  fingerprint: z.string(),
   findings: z.array(z.string()),
   at: z.string(),
+});
+
+const SendBackSchema = z.object({
+  at: z.string(),
+  questions: z.array(z.object({ question: z.string(), recommended: z.string() })),
 });
 
 const TicketRecordSchema = z.object({
   schema: z.literal(1),
   repository: z.string(),
   state: FactoryStateSchema.optional(),
-  refinement: z.object({ readyGate: ReadyGateSchema.optional(), approval: ApprovalSchema.optional() }),
+  refinement: z.object({ readyGate: ReadyGateSchema.optional(), approval: ApprovalSchema.optional(), sendBack: SendBackSchema.optional() }),
   runs: z.array(RunSchema),
   events: z.array(EventSchema),
   archives: z.array(z.string()),
@@ -82,14 +88,15 @@ export const appendEvent = (record: TicketRecord, event: FactoryEvent): TicketRe
 
 type ReadyGateResult = {
   readonly passed: boolean;
+  readonly fingerprint: string;
   readonly findings: readonly string[];
   readonly at: string;
   readonly by: string;
 };
 
-export const recordReadyGate = (record: TicketRecord, { passed, findings, at, by }: ReadyGateResult): TicketRecord =>
+export const recordReadyGate = (record: TicketRecord, { passed, fingerprint, findings, at, by }: ReadyGateResult): TicketRecord =>
   appendEvent(
-    { ...record, refinement: { ...record.refinement, readyGate: { passed, findings: [...findings], at } } },
+    { ...record, refinement: { ...record.refinement, readyGate: { passed, fingerprint, findings: [...findings], at } } },
     { at, by, type: 'ready_gate', detail: passed ? 'passed' : 'failed' },
   );
 
@@ -134,11 +141,23 @@ type StateChange = { readonly state: FactoryState; readonly at: string; readonly
 export const setState = (record: TicketRecord, { state, at, by }: StateChange): TicketRecord =>
   appendEvent({ ...record, state }, { at, by, type: 'state', detail: `${record.state ?? 'none'} to ${state}` });
 
-export const recordApproval = (record: TicketRecord, approval: Approval): TicketRecord =>
+export type SendBackQuestion = { readonly question: string; readonly recommended: string };
+
+type SendBack = { readonly questions: readonly SendBackQuestion[]; readonly at: string; readonly by: string };
+
+export const recordSendBack = (record: TicketRecord, { questions, at, by }: SendBack): TicketRecord =>
   appendEvent(
-    { ...record, refinement: { ...record.refinement, approval } },
+    { ...record, refinement: { ...record.refinement, sendBack: { at, questions: [...questions] } } },
+    { at, by, type: 'sent_back', detail: `${questions.length} question${questions.length === 1 ? '' : 's'}` },
+  );
+
+export const recordApproval = (record: TicketRecord, approval: Approval): TicketRecord => {
+  const { sendBack: _answered, ...refinement } = record.refinement;
+  return appendEvent(
+    { ...record, refinement: { ...refinement, approval } },
     { at: approval.at, by: approval.approver, type: 'approved', detail: `${approval.predictedRisk} risk` },
   );
+};
 
 type StepStart = { readonly name: string; readonly at: string; readonly timeoutSeconds: number; readonly by: string };
 

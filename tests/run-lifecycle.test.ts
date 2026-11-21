@@ -36,7 +36,7 @@ risk:
 const getApprovedRecord = (): TicketRecord =>
   setState(
     recordApproval(
-      recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed: true, findings: [], at: '2026-11-20T15:00:00Z', by: 'pierre' }),
+      recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed: true, fingerprint: 'f1', findings: [], at: '2026-11-20T15:00:00Z', by: 'pierre' }),
       { approver: 'pierre', at: '2026-11-20T16:00:00Z', mainCommit: 'a41c9e2', fingerprint: 'f1', predictedRisk: 'low' },
     ),
     { state: 'ready_for_dev', at: '2026-11-20T16:00:00Z', by: 'pierre' },
@@ -136,7 +136,7 @@ describe('starting a run on a named ticket', () => {
   });
 
   it('refuses a ticket whose record has a ready gate but no approval stamp', async () => {
-    const gated = recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed: true, findings: [], at: '2026-11-20T15:00:00Z', by: 'pierre' });
+    const gated = recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed: true, fingerprint: 'f1', findings: [], at: '2026-11-20T15:00:00Z', by: 'pierre' });
     const world = getWorld([getMockTicket({ factoryComment: renderComment({ record: gated, summary: 'Gate passed' }) })]);
 
     expect((await runTicket(depsFor(world), 'PAY-142')).ok).toBe(false);

@@ -7,6 +7,7 @@ import {
   endStep,
   recordApproval,
   recordReadyGate,
+  recordSendBack,
   setState,
   startRun,
   startStep,
@@ -28,6 +29,7 @@ const getMockEvent = (overrides?: Partial<FactoryEvent>): FactoryEvent => ({
 const getApprovedRecord = (): TicketRecord =>
   recordReadyGate(createRecord({ repository: 'acme/billing-service' }), {
     passed: true,
+    fingerprint: 'f1',
     findings: [],
     at: '2026-11-20T15:00:00Z',
     by: 'pierre',
@@ -61,7 +63,7 @@ describe('the record on a ticket', () => {
     expect(after.record.schema).toBe(1);
     expect(after.record.repository).toBe('acme/billing-service');
     expect(after.record.runs).toEqual([]);
-    expect(after.record.refinement.readyGate).toEqual({ passed: true, findings: [], at: '2026-11-20T15:00:00Z' });
+    expect(after.record.refinement.readyGate).toEqual({ passed: true, fingerprint: 'f1', findings: [], at: '2026-11-20T15:00:00Z' });
   });
 
   it('shows people a progress summary above the machine-readable block', async () => {
@@ -86,12 +88,13 @@ describe('the record on a ticket', () => {
   it('records a failed ready gate with its findings and an event naming who ran it', () => {
     const record = recordReadyGate(createRecord({ repository: 'acme/billing-service' }), {
       passed: false,
+      fingerprint: 'f1',
       findings: ['TBD marker at tasks.md:12'],
       at: '2026-11-20T14:00:00Z',
       by: 'maya',
     });
 
-    expect(record.refinement.readyGate).toEqual({ passed: false, findings: ['TBD marker at tasks.md:12'], at: '2026-11-20T14:00:00Z' });
+    expect(record.refinement.readyGate).toEqual({ passed: false, fingerprint: 'f1', findings: ['TBD marker at tasks.md:12'], at: '2026-11-20T14:00:00Z' });
     expect(record.events).toEqual([{ at: '2026-11-20T14:00:00Z', by: 'maya', type: 'ready_gate', detail: 'failed' }]);
   });
 
@@ -193,6 +196,20 @@ describe('factory state, approval and steps in the record', () => {
     expect(second.refinement.approval?.fingerprint).toBe('f2');
     expect(second.refinement.approval?.mergeCeiling).toBe('human');
     expect(second.refinement.readyGate).toEqual(first.refinement.readyGate);
+  });
+
+  it('holds the questions of a send-back until the next approval answers them', () => {
+    const questions = [{ question: 'Should tax rounding follow per-line rounding?', recommended: 'Yes' }];
+    const sentBack = recordSendBack(getRunningRecord(), { questions, at: '2026-11-21T08:10:00Z', by: 'pierre' });
+    const two = recordSendBack(getRunningRecord(), { questions: [...questions, ...questions], at: '2026-11-21T08:10:00Z', by: 'pierre' });
+
+    const approvedAgain = recordApproval(sentBack, { approver: 'pierre', at: '2026-11-22T09:00:00Z', mainCommit: 'b52d0f3', fingerprint: 'f2', predictedRisk: 'low' });
+
+    expect(sentBack.refinement.sendBack).toEqual({ at: '2026-11-21T08:10:00Z', questions });
+    expect(sentBack.events.at(-1)).toEqual({ at: '2026-11-21T08:10:00Z', by: 'pierre', type: 'sent_back', detail: '1 question' });
+    expect(two.events.at(-1)?.detail).toBe('2 questions');
+    expect(approvedAgain.refinement.sendBack).toBeUndefined();
+    expect('sendBack' in approvedAgain.refinement).toBe(false);
   });
 
   it('writes when a step starts and when it ends, on the latest run only', () => {
