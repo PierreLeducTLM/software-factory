@@ -35,6 +35,7 @@ const RiskRouteSchema = z.object({
 const FactoryConfigSchema = z.object({
   schema: z.literal(1),
   engine: z.string().min(1),
+  main_branch: z.string().min(1).default('main'),
   states: z.object({
     to_refine: z.string().min(1),
     spec_review: z.string().min(1),
@@ -77,6 +78,7 @@ const AdaptersConfigSchema = z.object({
         base_url: z.string().optional(),
         filter: z.string().optional(),
         token_env: z.string().optional(),
+        email_env: z.string().optional(),
       }),
     )
     .min(1),

@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { AgentRuntime, Worktree } from './agent-runtime.js';
 
-export type CommandRunner = (args: readonly string[]) => Promise<{ readonly stdout: string }>;
+export type CommandRunner = (args: readonly string[], options?: { readonly cwd: string }) => Promise<{ readonly stdout: string }>;
 
 const EnvelopeSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), result: z.unknown() }),
@@ -33,7 +33,7 @@ const toWorktree = (result: unknown): Worktree => {
 
 export const createCommandRunner = (binary: string): CommandRunner => {
   const run = promisify(execFile);
-  return async (args) => ({ stdout: (await run(binary, [...args])).stdout });
+  return async (args, options) => ({ stdout: (await run(binary, [...args], options === undefined ? {} : { cwd: options.cwd })).stdout });
 };
 
 export const createOrcaAgentRuntime = ({ run }: { readonly run: CommandRunner }): AgentRuntime => {

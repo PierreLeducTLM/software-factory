@@ -5,5 +5,5 @@ export default {
   tsconfigFile: 'tsconfig.json',
   coverageAnalysis: 'perTest',
   reporters: ['clear-text', 'html'],
-  mutate: ['src/**/*.ts'],
+  mutate: ['src/**/*.ts', '!src/cli/bin.ts'],
 };

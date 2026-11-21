@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { createFetchHttp, withRateLimitRetry, type Http, type HttpResponse } from '../src/adapters/http.js';
+import { createFetchHttp, sleep, withRateLimitRetry, type Http, type HttpResponse } from '../src/adapters/http.js';
 
 const respond = (status: number, headers: Record<string, string> = {}): HttpResponse => ({ status, headers, body: `status ${status}` });
 
@@ -63,6 +63,16 @@ describe('rate-limit back-off', () => {
     expect(response.status).toBe(429);
     expect(calls).toHaveLength(3);
     expect(waits).toEqual([1000, 1000]);
+  });
+});
+
+describe('sleep', () => {
+  it('waits at least the time asked for', async () => {
+    const started = Date.now();
+
+    await sleep(20);
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(15);
   });
 });
 

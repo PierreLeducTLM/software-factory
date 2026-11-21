@@ -143,4 +143,12 @@ describe('command runner', () => {
 
     expect(stdout.trim()).toBe('a+b c');
   });
+
+  it('runs in the folder it is given', async () => {
+    const run = createCommandRunner(process.execPath);
+
+    const { stdout } = await run(['-e', 'console.log(process.cwd())'], { cwd: '/' });
+
+    expect(stdout.trim()).toBe('/');
+  });
 });

@@ -46,6 +46,7 @@ ticket_providers:
     base_url: https://acme.atlassian.net
     filter: project = PAY AND component = billing-service
     token_env: JIRA_TOKEN
+    email_env: JIRA_EMAIL
 ${extra}source_control:
   kind: github
   repo: acme/billing-service
@@ -74,6 +75,13 @@ describe('factory.yaml', () => {
 
     expect(result.ok && result.value.limits).toEqual({ attempts: 5, runs: 3 });
     expect(result.ok && result.value.risk.shadow_threshold).toBe(20);
+  });
+
+  it('builds from main unless the project names another main branch', () => {
+    const named = parseFactoryConfig(sampleFactoryYaml('main_branch: develop'));
+
+    expect((() => { const r = parseFactoryConfig(sampleFactoryYaml()); return r.ok && r.value.main_branch; })()).toBe('main');
+    expect(named.ok && named.value.main_branch).toBe('develop');
   });
 
   it('lets a project set its own limits', () => {
@@ -191,6 +199,7 @@ describe('adapters.yaml', () => {
     if (!result.ok) return;
     expect(result.value.repository).toBe('acme/billing-service');
     expect(result.value.ticket_providers[0]?.token_env).toBe('JIRA_TOKEN');
+    expect(result.value.ticket_providers[0]?.email_env).toBe('JIRA_EMAIL');
     expect(result.value.source_control.kind).toBe('github');
   });
 

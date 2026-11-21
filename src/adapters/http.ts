@@ -23,6 +23,8 @@ const waitSeconds = (response: HttpResponse): number => {
   return Number.isFinite(indicated) ? indicated : DEFAULT_WAIT_SECONDS;
 };
 
+export const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 export const withRateLimitRetry = (http: Http, { sleep, maxRetries }: RetryOptions): Http => {
   const attempt = async (request: HttpRequest, retriesLeft: number): Promise<HttpResponse> => {
     const response = await http(request);
