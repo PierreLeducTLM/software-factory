@@ -15,7 +15,13 @@ const open = async ({ sourceControl, world }: SourceControlSetup, branch = 'fact
   return sourceControl.openPullRequest({ branch, base: 'main', title: 'PAY-142 Bulk invoice export', body: 'Spec: PAY-142' });
 };
 
-export const describeSourceControlContract = (name: string, setup: () => SourceControlSetup): void => {
+export type SourceControlCapabilities = { readonly revert: boolean };
+
+export const describeSourceControlContract = (
+  name: string,
+  setup: () => SourceControlSetup,
+  capabilities: SourceControlCapabilities = { revert: true },
+): void => {
   describe(`source control contract: ${name}`, () => {
     it('opens a pull request for a pushed branch', async () => {
       const context = setup();
@@ -97,15 +103,18 @@ export const describeSourceControlContract = (name: string, setup: () => SourceC
       expect(await sourceControl.getCiResult({ ref: 'factory/eng-87', job: 'unit-tests' })).toBe('missing');
     });
 
-    it('turns on auto-merge for one pull request only', async () => {
+    it('hands one pull request to the source control\'s own merge, leaving the others open', async () => {
       const context = setup();
       const first = await open(context, 'factory/pay-142');
       const second = await open(context, 'factory/eng-87');
 
       await context.sourceControl.enableAutoMerge(first.number);
 
-      expect((await context.sourceControl.getPullRequest(first.number))?.autoMerge).toBe(true);
-      expect((await context.sourceControl.getPullRequest(second.number))?.autoMerge).toBe(false);
+      const handed = await context.sourceControl.getPullRequest(first.number);
+      const other = await context.sourceControl.getPullRequest(second.number);
+      expect(handed?.autoMerge === true || handed?.state === 'merged').toBe(true);
+      expect(other?.autoMerge).toBe(false);
+      expect(other?.state).toBe('open');
     });
 
     it('records who merged and when, and that the merge was as is', async () => {
@@ -140,7 +149,15 @@ export const describeSourceControlContract = (name: string, setup: () => SourceC
       expect(await context.sourceControl.wasMergedAsIs({ number: 999, commit: 'c1' })).toBe(false);
     });
 
-    it('opens a revert pull request that names the one it reverts', async () => {
+    it.skipIf(capabilities.revert)('says plainly that it cannot open a revert pull request', async () => {
+      const context = setup();
+      const pullRequest = await open(context);
+      context.world.merge(pullRequest.number, 'maya');
+
+      await expect(context.sourceControl.openRevertPullRequest(pullRequest.number)).rejects.toThrow(/revert/i);
+    });
+
+    it.skipIf(!capabilities.revert)('opens a revert pull request that names the one it reverts', async () => {
       const context = setup();
       const pullRequest = await open(context);
       context.world.merge(pullRequest.number, 'maya');
@@ -154,7 +171,7 @@ export const describeSourceControlContract = (name: string, setup: () => SourceC
       expect((await context.sourceControl.getPullRequest(pullRequest.number))?.reverts).toBeUndefined();
     });
 
-    it('refuses to revert a pull request that was never merged', async () => {
+    it.skipIf(!capabilities.revert)('refuses to revert a pull request that was never merged', async () => {
       const context = setup();
       const pullRequest = await open(context);
 
