@@ -21,12 +21,13 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 - [ ] 2.5 Implement the Jira adapter against the contract, and verify that the shared contract tests pass against a recorded Jira sandbox, including rate-limit back-off
 - [x] 2.6 Implement the source-control adapter (GitHub) for branches, PRs, CI results, auto-merge, revert and the merged-as-is comparison, and verify that its contract tests pass
 - [x] 2.7 Check whether Orca can report a session's cost, then implement the agent-runtime adapter (Orca) for worktree, headless session, progress, session reference and optional cost at step end; verify that its contract tests pass, including the "Runtime without cost reporting" and "Open in Orca" scenarios
+- [x] 2.15 Implement the Bitbucket source-control adapter against the shared contract, with a simulated Bitbucket built from Bitbucket's published API description; it merges directly in place of per-PR auto-merge and refuses to open revert PRs, which Bitbucket's API does not offer
 - [ ] 2.8 Implement the factory states mapping and the claim-by-transition step, and verify the "Two developers race", "Status mapped to a custom name", "Claim without a factory comment" and "Agent tries to transition" scenarios
 - [ ] 2.9 Implement `factory run` / `factory next` pickup with repository scoping and one run per worktree, and verify the "Run a named ticket", "Next ticket", "Nothing eligible", "Nobody runs a command", "Run after re-approval" and "Second run in the same worktree" scenarios
 - [ ] 2.10 Implement resume, takeover confirmation and step start and end timestamps, and verify the "Resume after laptop closed", "Resume by a different developer" and "Long build step" scenarios
 - [ ] 2.11 Add listing a ticket's attachments by name to the ticket-provider contract, the fake and the Jira adapter, so the official OpenSpec files attached to a ticket can be loaded and fingerprinted. Then implement `factory ready-gate` and `factory approve`, and port the existing openspec-refine and openspec-revalidate skills to call them: ready gate script, approval stamp with fingerprint, predicted risk, and the drift check. Verify every `refinement` scenario and the `gates-and-checks` revalidate scenarios
 - [ ] 2.12 Verify the "Factory installed with nothing running" scenario with a test that runs a full ticket and asserts no factory process is alive between commands
-- [ ] 2.13 Run the Jira, GitHub and Orca adapters once against the real services (a Jira sandbox, a test repository, a scratch Orca worktree), and verify the shared contract tests and the create, launch and progress commands behave as the simulated services assume
+- [ ] 2.13 Run the Jira, GitHub, Bitbucket and Orca adapters once against the real services (a Jira sandbox, a test repository on each host, a scratch Orca worktree), and verify the shared contract tests and the create, launch and progress commands behave as the simulated services assume
 - [ ] 2.14 Pilot gate: one pilot ticket goes from Ready for Dev to a merged PR, and its run record alone explains every step
 
 ## 3. Phase 2: Reliable loop
@@ -67,9 +68,9 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 ## 6. Phase 5: Risk and auto-merge
 
 - [ ] 6.1 Implement the risk scoring script (signals, score, level, reasons, the higher of predicted and actual), and verify the "Diff riskier than predicted", "Reviewer attempts to lower" and "Risk report present" scenarios
-- [ ] 6.2 Implement the merge policy, the overrides and shadow mode, and verify the "Ticket-level override" and "Low risk in shadow mode" scenarios
+- [ ] 6.2 Implement the merge policy, the overrides and shadow mode, and verify the "Ticket-level override", "Source control without per-PR auto-merge" and "Low risk in shadow mode" scenarios
 - [ ] 6.3 Implement the `factory record-merge` CI step under the service account, with revert detection on every merge to main, and verify the "Human edits before merge", "Provider already moved to Done", "Person reverts a shadow-mode merge", "Ordinary merge" and "CI step without a service account" scenarios
-- [ ] 6.4 Implement the `factory revert` and `factory watch` CI steps, and verify the "Red main after auto-merge" and "Watch disabled" scenarios
+- [ ] 6.4 Implement the `factory revert` and `factory watch` CI steps, and verify the "Red main after auto-merge", "Source control that cannot open a revert" and "Watch disabled" scenarios
 - [ ] 6.5 Implement Health from records only (all metrics, by provider, period switch, several runs per ticket, shadow threshold suggestion), and verify the "Time waiting for merge", "Period switch", "Ticket merged on its second run" and "Threshold reached" scenarios
-- [ ] 6.6 Implement the Linear and GitHub Issues ticket adapters and the Bitbucket source-control adapter against the shared contract tests, and verify the "Same pipeline for Jira and Linear" and "GitHub Issues added" scenarios
+- [ ] 6.6 Implement the Linear and GitHub Issues ticket adapters against the shared contract tests, and verify the "Same pipeline for Jira and Linear" and "GitHub Issues added" scenarios
 - [ ] 6.7 Pilot gate: low risk meets its shadow threshold, and auto-merge is enabled through a `/factory-workflow` PR

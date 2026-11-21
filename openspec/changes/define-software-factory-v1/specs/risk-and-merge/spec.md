@@ -43,7 +43,11 @@ Each risk level SHALL map to a merge route configured in `.factory/factory.yaml`
 | medium | human merge, 1 reviewer |
 | high | human merge, 2 reviewers, plus extra checks |
 
-Auto-merge SHALL use source control's own auto-merge, so branch protection still applies.
+Auto-merge SHALL use source control's own auto-merge, so branch protection still applies. Where source control offers no auto-merge for a single pull request, the factory SHALL call its merge once, and only after all gates passed and CI is green, so branch restrictions still apply.
+
+#### Scenario: Source control without per-PR auto-merge
+- **WHEN** a low-risk PR on Bitbucket is eligible for auto-merge and Bitbucket refuses the merge because a build has not passed
+- **THEN** the PR stays open, the refusal reason is recorded, and the ticket waits for a person to merge
 
 #### Scenario: Ticket-level override
 - **WHEN** a low-risk ticket carries the `factory:no-automerge` label or a human-merge ceiling in its approval stamp
@@ -100,6 +104,12 @@ If CI on main fails after an auto-merge, the project's CI SHALL run `factory rev
 - returns that risk level to shadow mode.
 
 The ticket SHALL then appear in Needs you.
+
+Where source control has no way to open a revert PR, `factory revert` SHALL record that a revert is needed, link the original pull request, and leave the revert to a person. The risk level still returns to shadow mode.
+
+#### Scenario: Source control that cannot open a revert
+- **WHEN** main's CI fails after an auto-merged PR on Bitbucket
+- **THEN** no revert PR is opened, the ticket appears in Needs you as "revert needed" with a link to the pull request, and low returns to shadow mode
 
 #### Scenario: Red main after auto-merge
 - **WHEN** main's CI fails on the commit produced by an auto-merged factory PR
