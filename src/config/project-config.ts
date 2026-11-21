@@ -10,6 +10,9 @@ export type ConfigResult<T> =
 const DEFAULT_ATTEMPTS_PER_RUN = 5;
 const DEFAULT_RUNS_PER_TICKET = 3;
 const DEFAULT_SHADOW_THRESHOLD = 20;
+const DEFAULT_POLL_SECONDS = 60;
+const DEFAULT_NOT_STARTED_AFTER_HOURS = 24;
+const DEFAULT_INTERRUPTED_GRACE_MINUTES = 10;
 
 const checkBase = {
   id: z.string().min(1),
@@ -51,6 +54,13 @@ const FactoryConfigSchema = z.object({
     .object({
       attempts: z.number().int().min(1).default(DEFAULT_ATTEMPTS_PER_RUN),
       runs: z.number().int().min(1).default(DEFAULT_RUNS_PER_TICKET),
+    })
+    .prefault({}),
+  view: z
+    .object({
+      poll_seconds: z.number().int().min(5).default(DEFAULT_POLL_SECONDS),
+      not_started_after_hours: z.number().min(0).default(DEFAULT_NOT_STARTED_AFTER_HOURS),
+      interrupted_grace_minutes: z.number().min(0).default(DEFAULT_INTERRUPTED_GRACE_MINUTES),
     })
     .prefault({}),
   checks: z.array(CheckSchema).superRefine((checks, context) => {

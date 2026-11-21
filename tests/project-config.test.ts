@@ -84,6 +84,28 @@ describe('factory.yaml', () => {
     expect(named.ok && named.value.main_branch).toBe('develop');
   });
 
+  it('refreshes the view every 60 seconds, flags a ready ticket after a day and an interrupted run after 10 minutes, unless set otherwise', () => {
+    const defaults = parseFactoryConfig(sampleFactoryYaml());
+    const custom = parseFactoryConfig(sampleFactoryYaml('view: { poll_seconds: 30, not_started_after_hours: 4, interrupted_grace_minutes: 2 }'));
+
+    expect(defaults.ok && defaults.value.view).toEqual({ poll_seconds: 60, not_started_after_hours: 24, interrupted_grace_minutes: 10 });
+    expect(custom.ok && custom.value.view).toEqual({ poll_seconds: 30, not_started_after_hours: 4, interrupted_grace_minutes: 2 });
+  });
+
+  it.each([
+    ['poll_seconds: 4', 'view.poll_seconds'],
+    ['not_started_after_hours: -1', 'view.not_started_after_hours'],
+    ['interrupted_grace_minutes: -1', 'view.interrupted_grace_minutes'],
+  ])('rejects a view setting that is too low (%s)', (setting, path) => {
+    expect(issuesOf(parseFactoryConfig(sampleFactoryYaml(`view: { ${setting} }`))).map((issue) => issue.path)).toEqual([path]);
+  });
+
+  it('accepts the lowest view settings', () => {
+    const lowest = parseFactoryConfig(sampleFactoryYaml('view: { poll_seconds: 5, not_started_after_hours: 0, interrupted_grace_minutes: 0 }'));
+
+    expect(lowest.ok && lowest.value.view).toEqual({ poll_seconds: 5, not_started_after_hours: 0, interrupted_grace_minutes: 0 });
+  });
+
   it('lets a project set its own limits', () => {
     const result = parseFactoryConfig(sampleFactoryYaml('limits: { attempts: 4, runs: 2 }'));
 
