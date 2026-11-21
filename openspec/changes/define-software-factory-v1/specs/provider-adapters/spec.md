@@ -20,7 +20,7 @@ A ticket-provider adapter SHALL support these operations:
 - read and edit the factory comment
 - add attachments
 - read labels
-- search tickets by factory state, label, repository and updated-since time.
+- search tickets by factory state, label and updated-since time. Every search is scoped to the adapter's configured repository, and each ticket it returns names that repository.
 
 #### Scenario: Incremental search
 - **WHEN** the view asks for tickets updated since its last refresh

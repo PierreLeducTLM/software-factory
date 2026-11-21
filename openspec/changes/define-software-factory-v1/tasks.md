@@ -14,19 +14,20 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 
 ## 2. Phase 1: Foundation
 
-- [ ] 2.1 Define the `factory.yaml` and `adapters.yaml` schemas (versioned, no secrets), and verify that schema tests accept the doc's sample config and reject a config containing a token
-- [ ] 2.2 Implement the record codec (machine block, schema version, checksum, refinement section, list of runs, append-only events naming their writer), and verify the `run-record` scenarios "First refine session", "Later updates", "Status change", "Second run after a send-back" and "Person edits the factory comment" as tests
-- [ ] 2.3 Implement record size budgeting and compaction to an attachment, and verify the "Record near the Jira limit" scenario with a fake adapter
-- [ ] 2.4 Implement the ticket-provider adapter contract with an in-memory fake, and verify contract tests for read, transition, comment edit, attachment, labels and incremental search
+- [x] 2.1 Define the `factory.yaml` and `adapters.yaml` schemas (versioned, no secrets), and verify that schema tests accept the doc's sample config and reject a config containing a token
+- [x] 2.2 Implement the record codec (machine block, schema version, checksum, refinement section, list of runs, append-only events naming their writer), and verify the `run-record` scenarios "First refine session", "Later updates", "Status change", "Second run after a send-back" and "Person edits the factory comment" as tests
+- [x] 2.3 Implement record size budgeting and compaction to an attachment, and verify the "Record near the Jira limit" scenario with a fake adapter
+- [x] 2.4 Implement the ticket-provider adapter contract with an in-memory fake, and verify contract tests for read, transition, comment edit, attachment, labels and incremental search
 - [ ] 2.5 Implement the Jira adapter against the contract, and verify that the shared contract tests pass against a recorded Jira sandbox, including rate-limit back-off
-- [ ] 2.6 Implement the source-control adapter (GitHub) for branches, PRs, CI results, auto-merge, revert and the merged-as-is comparison, and verify that its contract tests pass
-- [ ] 2.7 Check whether Orca can report a session's cost, then implement the agent-runtime adapter (Orca) for worktree, headless session, progress, session reference and optional cost at step end; verify that its contract tests pass, including the "Runtime without cost reporting" and "Open in Orca" scenarios
+- [x] 2.6 Implement the source-control adapter (GitHub) for branches, PRs, CI results, auto-merge, revert and the merged-as-is comparison, and verify that its contract tests pass
+- [x] 2.7 Check whether Orca can report a session's cost, then implement the agent-runtime adapter (Orca) for worktree, headless session, progress, session reference and optional cost at step end; verify that its contract tests pass, including the "Runtime without cost reporting" and "Open in Orca" scenarios
 - [ ] 2.8 Implement the factory states mapping and the claim-by-transition step, and verify the "Two developers race", "Status mapped to a custom name", "Claim without a factory comment" and "Agent tries to transition" scenarios
 - [ ] 2.9 Implement `factory run` / `factory next` pickup with repository scoping and one run per worktree, and verify the "Run a named ticket", "Next ticket", "Nothing eligible", "Nobody runs a command", "Run after re-approval" and "Second run in the same worktree" scenarios
 - [ ] 2.10 Implement resume, takeover confirmation and step start and end timestamps, and verify the "Resume after laptop closed", "Resume by a different developer" and "Long build step" scenarios
-- [ ] 2.11 Implement `factory ready-gate` and `factory approve`, and port the existing openspec-refine and openspec-revalidate skills to call them: ready gate script, approval stamp with fingerprint, predicted risk, and the drift check. Verify every `refinement` scenario and the `gates-and-checks` revalidate scenarios
+- [ ] 2.11 Add listing a ticket's attachments by name to the ticket-provider contract, the fake and the Jira adapter, so the official OpenSpec files attached to a ticket can be loaded and fingerprinted. Then implement `factory ready-gate` and `factory approve`, and port the existing openspec-refine and openspec-revalidate skills to call them: ready gate script, approval stamp with fingerprint, predicted risk, and the drift check. Verify every `refinement` scenario and the `gates-and-checks` revalidate scenarios
 - [ ] 2.12 Verify the "Factory installed with nothing running" scenario with a test that runs a full ticket and asserts no factory process is alive between commands
-- [ ] 2.13 Pilot gate: one pilot ticket goes from Ready for Dev to a merged PR, and its run record alone explains every step
+- [ ] 2.13 Run the Jira, GitHub and Orca adapters once against the real services (a Jira sandbox, a test repository, a scratch Orca worktree), and verify the shared contract tests and the create, launch and progress commands behave as the simulated services assume
+- [ ] 2.14 Pilot gate: one pilot ticket goes from Ready for Dev to a merged PR, and its run record alone explains every step
 
 ## 3. Phase 2: Reliable loop
 
@@ -38,7 +39,8 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 - [ ] 3.6 Implement the three exits and their reports, with the diagnosis limited to {code, spec, environment}, and verify the "All gates pass on attempt 2", "Spec diagnosis after five failures", "Flaky end-to-end test" and "Report without diagnosis" scenarios
 - [ ] 3.7 Implement the retry of a Blocked ticket through `factory run`, and verify the "Retry after fixing a flaky test", "Drift since the ticket was blocked" and "Blocked ticket with the auto label" scenarios
 - [ ] 3.8 Implement the run limit per ticket (default 3, configurable) and the `--over-limit` override, and verify the "Fourth run refused", "Override" and "Next skips a ticket at its limit" scenarios
-- [ ] 3.9 Pilot gate: 10 pilot tickets processed, and every failure is explained by its report
+- [ ] 3.9 Compact the oldest runs' attempt details to the archive attachment when the record is over budget, keeping each run's outcome, attempts used, time, cost and report link, and verify with a record holding three runs
+- [ ] 3.10 Pilot gate: 10 pilot tickets processed, and every failure is explained by its report
 
 ## 4. Phase 3: Visibility (ticket provider only)
 

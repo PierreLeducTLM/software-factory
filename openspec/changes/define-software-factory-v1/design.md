@@ -127,6 +127,15 @@ Health's first-pass rate counts only tickets merged on attempt 1 of their first 
 - *Alternative considered:* a person drags the ticket back to Ready for Dev. Rejected: a status change outside the CLI.
 - *Alternative considered:* always back through refinement. Rejected: a human approval to retry after fixing a flaky test.
 
+### D15. Adapter choices found while building
+- **Repository scoping is the adapter's configuration, not a search criterion.** A ticket-provider adapter is created for one repository with one filter, and every ticket it returns names that repository.
+- **Jira: the factory comment is found through an issue property.** The property holds only the comment's id. The comment itself is always read, so a hand edit is seen by a single read and by a search. The cost is one extra request per ticket in a search.
+- **Jira: the claim lock relies on the workflow.** Jira has no compare-and-set. A second claim fails only because the workflow offers no transition from In development to In development. The install wizard and `factory doctor` must check that.
+- **The spec lives in two places in the ticket.** The description holds the general spec for people. The official OpenSpec files (proposal, design, delta specs, tasks) are attached to the ticket, and those attachments are what the factory loads, fingerprints at approval and builds from. The ticket-provider contract therefore needs to list a ticket's attachments by name, which it does not do yet.
+- **GitHub: "merged as is" means the pull request's head commit at merge is the factory's last pushed commit.** A commit pushed by a person, including a conflict resolution, changes the head.
+- **GitHub: branches are not created through the adapter.** The Orca worktree creates the branch and git pushes it.
+- **Orca reports no session cost.** Checked against Orca CLI 1.4.265: none of its 413 commands exposes cost or token usage. The adapter always answers "unknown", so cards show no cost and cost per merge stays empty until another source is found.
+
 ## Risks / Trade-offs
 
 - [Provider rate limits when many developers keep the view open] → Incremental search, a configurable interval, back-off on throttling, and a visible "stale since" indicator. In Jira, one search with comment expansion per refresh. Consider entity-property mirroring (D3) if this proves costly.
