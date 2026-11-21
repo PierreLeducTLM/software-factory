@@ -7,9 +7,11 @@ import { createFakeJira } from './fakes/fake-jira.js';
 
 const BASE_URL = 'https://acme.atlassian.net';
 
-const getSetup = (tickets: readonly Ticket[], options?: { readonly pageSize?: number; readonly wrap?: (http: Http) => Http }) => {
+type FakeOptions = Omit<Parameters<typeof createFakeJira>[0], 'baseUrl' | 'tickets' | 'now'>;
+
+const getSetup = (tickets: readonly Ticket[], options?: { readonly pageSize?: number; readonly wrap?: (http: Http) => Http; readonly fake?: FakeOptions }) => {
   const clock = { now: '2026-11-21T08:00:00Z' };
-  const jira = createFakeJira({ baseUrl: BASE_URL, tickets, now: () => clock.now, ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize }) });
+  const jira = createFakeJira({ baseUrl: BASE_URL, tickets, now: () => clock.now, ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize }), ...options?.fake });
   const provider = createJiraTicketProvider({
     baseUrl: BASE_URL,
     email: 'factory@acme.test',
@@ -33,6 +35,34 @@ describeTicketProviderContract('Jira over a simulated Jira', (seed) => {
 });
 
 describe('Jira ticket provider', () => {
+  it('lists the statuses of the workflow once each, with their category', async () => {
+    const extraStatuses = [{ name: 'Done', statusCategory: { key: 'done' } }, { name: 'Parked' }, { name: 'Odd', statusCategory: { key: 'undefined' } }];
+    const { provider } = getSetup([getMockTicket()], { fake: { extraStatuses } });
+
+    expect(await provider.listStatuses()).toEqual([
+      { name: 'To refine', category: 'todo' },
+      { name: 'Spec review', category: 'todo' },
+      { name: 'Ready for Dev', category: 'todo' },
+      { name: 'In development', category: 'in_progress' },
+      { name: 'In review', category: 'in_progress' },
+      { name: 'Blocked', category: 'in_progress' },
+      { name: 'Done', category: 'done' },
+      { name: 'Parked', category: 'unknown' },
+      { name: 'Odd', category: 'unknown' },
+    ]);
+  });
+
+  it('says whether the account can comment on and transition a ticket', async () => {
+    const full = getSetup([getMockTicket()]);
+    const readOnly = getSetup([getMockTicket()], { fake: { permissions: { comment: true, transition: false } } });
+    const silent = getSetup([getMockTicket()], { fake: { permissions: { comment: false, transition: true } } });
+
+    expect(await full.provider.checkAccess('PAY-142')).toEqual({ comment: true, transition: true });
+    expect(await readOnly.provider.checkAccess('PAY-142')).toEqual({ comment: true, transition: false });
+    expect(await silent.provider.checkAccess('PAY-142')).toEqual({ comment: false, transition: true });
+    await expect(full.provider.checkAccess('PAY-999')).rejects.toThrow('Jira answered 404 to GET /rest/api/2/mypermissions?issueKey=PAY-999&permissions=ADD_COMMENTS,TRANSITION_ISSUES');
+  });
+
   it('keeps exactly one factory comment on the ticket however often it is written', async () => {
     const { jira, provider } = getSetup([getMockTicket()]);
 

@@ -1,6 +1,8 @@
-import type { Ticket, TicketProvider, TicketSearch } from './ticket-provider.js';
+import type { Access, ProviderStatus, Ticket, TicketProvider, TicketSearch } from './ticket-provider.js';
 
-type Options = { readonly tickets: readonly Ticket[]; readonly now: () => string };
+type Options = { readonly tickets: readonly Ticket[]; readonly now: () => string; readonly statuses?: readonly ProviderStatus[]; readonly access?: Access };
+
+const FULL_ACCESS: Access = { comment: true, transition: true };
 
 const LINK_PREFIX = 'memory://attachment/';
 
@@ -9,7 +11,7 @@ const matches = (ticket: Ticket, criteria: TicketSearch): boolean =>
   (criteria.label === undefined || ticket.labels.includes(criteria.label)) &&
   (criteria.updatedSince === undefined || Date.parse(ticket.updatedAt) > Date.parse(criteria.updatedSince));
 
-export const createInMemoryTicketProvider = ({ tickets, now }: Options): TicketProvider => {
+export const createInMemoryTicketProvider = ({ tickets, now, statuses, access = FULL_ACCESS }: Options): TicketProvider => {
   const state: { tickets: readonly Ticket[]; attachments: readonly string[]; listed: readonly { key: string; name: string; link: string }[] } = {
     tickets,
     attachments: [],
@@ -57,5 +59,12 @@ export const createInMemoryTicketProvider = ({ tickets, now }: Options): TicketP
     },
 
     search: async (criteria) => state.tickets.filter((ticket) => matches(ticket, criteria)),
+
+    listStatuses: async () => statuses ?? [...new Set(state.tickets.map((ticket) => ticket.status))].map((name) => ({ name, category: 'unknown' as const })),
+
+    checkAccess: async (key) => {
+      if (find(key) === undefined) throw new Error(`Ticket ${key} was not found`);
+      return access;
+    },
   };
 };

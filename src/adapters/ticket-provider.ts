@@ -27,6 +27,10 @@ export type TicketSearch = {
   readonly updatedSince?: string;
 };
 
+export type ProviderStatus = { readonly name: string; readonly category: 'todo' | 'in_progress' | 'done' | 'unknown' };
+
+export type Access = { readonly comment: boolean; readonly transition: boolean };
+
 export interface TicketProvider {
   getTicket(key: string): Promise<Ticket | undefined>;
   transition(request: TransitionRequest): Promise<TransitionResult>;
@@ -36,4 +40,6 @@ export interface TicketProvider {
   listAttachments(key: string): Promise<readonly Attachment[]>;
   readAttachment(link: string): Promise<string>;
   search(criteria: TicketSearch): Promise<readonly Ticket[]>;
+  listStatuses(): Promise<readonly ProviderStatus[]>;
+  checkAccess(key: string): Promise<Access>;
 }

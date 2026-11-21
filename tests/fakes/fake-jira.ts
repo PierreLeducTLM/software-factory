@@ -19,6 +19,8 @@ type Options = {
   readonly tickets: readonly Ticket[];
   readonly now: () => string;
   readonly pageSize?: number;
+  readonly permissions?: { readonly comment: boolean; readonly transition: boolean };
+  readonly extraStatuses?: readonly { readonly name: string; readonly statusCategory?: { readonly key: string } }[];
 };
 
 const jiraTime = (iso: string): string => iso.replace('Z', '.000+0000');
@@ -53,7 +55,9 @@ const matchesJql = (issue: Issue, jql: string, now: string): boolean => {
   );
 };
 
-export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100 }: Options) => {
+const CATEGORY_KEYS: Readonly<Record<string, string>> = { 'To refine': 'new', 'Spec review': 'new', 'Ready for Dev': 'new', Done: 'done' };
+
+export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100, permissions = { comment: true, transition: true }, extraStatuses = [] }: Options) => {
   const issues: Issue[] = tickets.map((ticket) => ({
     key: ticket.key,
     summary: ticket.title,
@@ -90,6 +94,16 @@ export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100 }: Option
         issues: page.map((issue) => ({ key: issue.key, fields: fieldsOf(issue, fields), properties: propertiesOf(issue, properties) })),
         ...(start + pageSize < matching.length ? { nextPageToken: String(start + pageSize) } : {}),
       });
+    }
+
+    if (path === '/rest/api/2/status' && request.method === 'GET') {
+      return json(200, [...statuses.map((name) => ({ name, statusCategory: { key: CATEGORY_KEYS[name] ?? 'indeterminate' } })), ...extraStatuses]);
+    }
+
+    const permissionCheck = /^\/rest\/api\/2\/mypermissions\?issueKey=([^&]+)&permissions=ADD_COMMENTS,TRANSITION_ISSUES$/.exec(path);
+    if (permissionCheck !== null && request.method === 'GET') {
+      if (!issues.some((issue) => issue.key === decodeURIComponent(String(permissionCheck[1])))) return empty(404);
+      return json(200, { permissions: { ADD_COMMENTS: { havePermission: permissions.comment }, TRANSITION_ISSUES: { havePermission: permissions.transition } } });
     }
 
     const attachment = /^\/rest\/api\/2\/attachment\/content\/(\d+)$/.exec(path);

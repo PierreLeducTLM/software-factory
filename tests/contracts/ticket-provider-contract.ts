@@ -193,5 +193,18 @@ export const describeTicketProviderContract = (
 
       expect(keysOf(await provider.search({ updatedSince: '2026-11-21T00:00:00Z' }))).toEqual(['PAY-2']);
     });
+
+    it('lists the statuses a ticket can be in', async () => {
+      const { provider } = setup([getMockTicket()]);
+
+      expect((await provider.listStatuses()).map((status) => status.name)).toContain('Ready for Dev');
+    });
+
+    it('says what the account may do on a ticket, and fails for a ticket that does not exist', async () => {
+      const { provider } = setup([getMockTicket()]);
+
+      expect(await provider.checkAccess('PAY-142')).toEqual({ comment: true, transition: true });
+      await expect(provider.checkAccess('PAY-999')).rejects.toThrow();
+    });
   });
 };

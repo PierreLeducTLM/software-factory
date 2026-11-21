@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Http, HttpResponse } from './http.js';
-import type { Ticket, TicketProvider, TicketSearch } from './ticket-provider.js';
+import type { ProviderStatus, Ticket, TicketProvider, TicketSearch } from './ticket-provider.js';
 
 type Options = {
   readonly baseUrl: string;
@@ -35,6 +35,12 @@ const ListedAttachmentsSchema = z.object({
   fields: z.object({ attachment: z.array(z.object({ filename: z.string(), content: z.string() })) }),
 });
 const AttachmentsSchema = z.tuple([z.object({ content: z.string() })]).rest(z.unknown());
+
+const StatusesSchema = z.array(z.object({ name: z.string(), statusCategory: z.object({ key: z.string() }).optional() }));
+const Permission = z.object({ havePermission: z.boolean() });
+const PermissionsSchema = z.object({ permissions: z.object({ ADD_COMMENTS: Permission, TRANSITION_ISSUES: Permission }) });
+
+const STATUS_CATEGORIES: Readonly<Record<string, ProviderStatus['category']>> = { new: 'todo', indeterminate: 'in_progress', done: 'done' };
 
 type Issue = z.infer<typeof IssueSchema>;
 
@@ -190,6 +196,18 @@ export const createJiraTicketProvider = ({ baseUrl, email, token, repository, fi
       const since = criteria.updatedSince;
       const tickets = await Promise.all((await searchPages(jqlFor(criteria))).map(toTicket));
       return since === undefined ? tickets : tickets.filter((ticket) => Date.parse(ticket.updatedAt) > Date.parse(since));
+    },
+
+    listStatuses: async () => {
+      const listed = StatusesSchema.parse(JSON.parse((await call('GET', '/rest/api/2/status')).body));
+      const statuses = listed.map(({ name, statusCategory }) => ({ name, category: STATUS_CATEGORIES[statusCategory?.key ?? ''] ?? ('unknown' as const) }));
+      return statuses.filter((status, index) => statuses.findIndex((other) => other.name === status.name) === index);
+    },
+
+    checkAccess: async (issueKey) => {
+      const response = await call('GET', `/rest/api/2/mypermissions?issueKey=${encodeURIComponent(issueKey)}&permissions=ADD_COMMENTS,TRANSITION_ISSUES`);
+      const { ADD_COMMENTS: comment, TRANSITION_ISSUES: transition } = PermissionsSchema.parse(JSON.parse(response.body)).permissions;
+      return { comment: comment.havePermission, transition: transition.havePermission };
     },
   };
 };

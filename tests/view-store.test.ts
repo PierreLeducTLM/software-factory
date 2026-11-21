@@ -24,6 +24,8 @@ const getWorld = (seed: readonly Ticket[]) => {
     addAttachment: spy('addAttachment', inner.addAttachment),
     listAttachments: spy('listAttachments', inner.listAttachments),
     readAttachment: spy('readAttachment', inner.readAttachment),
+    listStatuses: spy('listStatuses', inner.listStatuses),
+    checkAccess: spy('checkAccess', inner.checkAccess),
     search: async (criteria) => {
       searches.push(criteria);
       if (failing.on) throw new Error('Jira answered 503 to POST /rest/api/3/search/jql');
