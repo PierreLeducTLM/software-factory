@@ -127,6 +127,24 @@ Health's first-pass rate counts only tickets merged on attempt 1 of their first 
 - *Alternative considered:* a person drags the ticket back to Ready for Dev. Rejected: a status change outside the CLI.
 - *Alternative considered:* always back through refinement. Rejected: a human approval to retry after fixing a flaky test.
 
+### D16. The developer's session drives the loop
+The agent in the session where `/factory-run` was typed is the builder. The skill calls `factory advance` repeatedly. Each call moves the run one step and says what comes next: build, verify, review, diagnose, or done. The gates run inside the command, and the ticket is written once per call.
+
+| Where the run stands | What `advance` needs | What it does |
+|---|---|---|
+| Just claimed | nothing | Revalidates. Drift sends the ticket back. Otherwise it asks for the build |
+| Build in progress | what was built and the decisions applied, or a question | Runs the quality gate. A question sends the ticket back |
+| Verify in progress | the OpenSpec verify verdict | Judges it, then asks for the review |
+| Review in progress | the reviewer's verdict, and one per agent check in scope | Judges them, runs the review station's scripts, then opens the pull request |
+| Any gate failed | | Starts the next attempt with the failures as feedback, or asks for a diagnosis after the last one |
+| Diagnosis needed | one of code, spec, environment | Spec sends the ticket back with questions. Code or environment blocks it with a failure report attached |
+
+- *Alternative considered:* `factory run` staying in the foreground and launching headless Orca sessions for the builder and the reviewer. Rejected for now: it depends on waiting for and reading Orca sessions, which is unverified, and one long command must stay alive.
+- *Cost:* the reviewer is a fresh subagent started by the skill, so its verdict passes through the builder's session before the command checks it. The command validates the verdict's format and evidence, but cannot prove who wrote it.
+- **Step timeouts are fixed for now:** revalidate 2 minutes, build 30, verify 10, review 15, diagnose 10. The quality step's timeout is the sum of its checks' timeouts. They are not in `factory.yaml` yet.
+- **The factory's own attachments start with `factory-`:** the failure report and the record archive. They are never read as spec files. Without the prefix, a failure report changed the spec's fingerprint and the retry was sent back.
+- **The pull request is opened without a risk level beyond the predicted one.** Risk assessment before the PR belongs to phase 5.
+
 ### D15. Adapter choices found while building
 - **Repository scoping is the adapter's configuration, not a search criterion.** A ticket-provider adapter is created for one repository with one filter, and every ticket it returns names that repository.
 - **The refine skill is written from scratch, and there is no revalidate skill.** The first design doc assumed drafts of `openspec-refine` and `openspec-revalidate` existed. They do not, and OpenSpec ships neither. The factory gets one skill, `factory-refine`, named for the factory so it is not mistaken for an OpenSpec skill. Revalidation is a step `factory run` performs through the CLI, not a skill.
