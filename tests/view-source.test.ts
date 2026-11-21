@@ -140,6 +140,25 @@ describe('view source', () => {
     expect(await source.detail('PAY-999')).toBeUndefined();
   });
 
+  it('computes health from the tickets updated in the period it is asked for, read from the provider each time', async () => {
+    const merged = (at: string): TicketRecord => {
+      const record = building('2026-11-21T08:05:00Z');
+      return { ...record, runs: record.runs.map((run) => ({ ...run, status: 'merged' as const, merge: { route: 'human' as const, wouldAutoMerge: true, reason: 'x', at, by: 'sam', asIs: true } })) };
+    };
+    const { source, searches } = getWorld([
+      withRecord(merged('2026-11-20T10:00:00Z'), { key: 'PAY-1', status: 'Done', updatedAt: '2026-11-20T10:00:00Z' }),
+      withRecord(merged('2026-11-01T10:00:00Z'), { key: 'PAY-2', status: 'Done', updatedAt: '2026-11-01T10:00:00Z' }),
+      withRecord(merged('2026-11-14T08:10:01Z'), { key: 'PAY-3', status: 'Done', updatedAt: '2026-11-14T08:10:01Z' }),
+    ]);
+
+    const week = await source.health(7);
+    const month = await source.health(30);
+
+    expect(week).toMatchObject({ periodDays: 7, providers: [{ provider: 'Jira', merged: 2 }] });
+    expect(month).toMatchObject({ periodDays: 30, providers: [{ provider: 'Jira', merged: 3 }] });
+    expect(searches.count).toBe(2);
+  });
+
   it('loads the tickets before giving a detail when nothing was loaded yet', async () => {
     const { source, searches } = getWorld([withRecord(building('2026-11-21T08:05:00Z'), { key: 'PAY-142' })]);
 

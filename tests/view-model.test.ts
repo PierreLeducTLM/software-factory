@@ -12,6 +12,7 @@ import {
   startRun,
   startStep,
   type Attempt,
+  type Run,
   type TicketRecord,
 } from '../src/record/ticket-record.js';
 import { buildBoard, buildNeedsYou, buildRunDetail, type Card, type ViewOptions, type ViewTicket } from '../src/view/model.js';
@@ -66,6 +67,16 @@ const ticketWith = (record: TicketRecord | undefined, overrides?: Partial<ViewTi
   ...(record === undefined ? {} : { factoryComment: renderComment({ record, summary: 'x' }) }),
   ...overrides,
 });
+
+const inReviewWith = (merge: Run['merge'], withPullRequest = true): TicketRecord =>
+  endRun(
+    changeLatestRun(claimed(), (run) => ({
+      ...run,
+      ...(withPullRequest ? { pullRequest: { number: 412, url: 'https://github.test/pull/412' } } : {}),
+      ...(merge === undefined ? {} : { merge }),
+    })),
+    { status: 'in_review', at: '2026-11-21T08:40:00Z', by: 'pierre' },
+  );
 
 const cardsIn = (tickets: readonly ViewTicket[], column: string, options = getOptions()): readonly Card[] =>
   buildBoard(tickets, options).find((candidate) => candidate.id === column)?.cards ?? [];
@@ -186,19 +197,45 @@ describe('pipeline board', () => {
     ]);
   });
 
-  it('shows a pull request with how it will be merged', () => {
-    const inReview = (risk: 'low' | 'medium') =>
-      endRun(changeLatestRun(claimed(approvedRecord(risk)), (run) => ({ ...run, pullRequest: { number: 412, url: 'https://github.test/pull/412' } })), { status: 'in_review', at: '2026-11-21T08:40:00Z', by: 'pierre' });
-    const tickets = [ticketWith(inReview('low'), { key: 'A-1', status: 'In review' }), ticketWith(inReview('medium'), { key: 'A-2', status: 'In review' })];
+  it('shows a pull request with how it will be merged, as the run recorded it', () => {
+    const tickets = [
+      ticketWith(inReviewWith({ route: 'human', wouldAutoMerge: true, reason: 'low risk is in shadow mode' }), { key: 'A-1', status: 'In review' }),
+      ticketWith(inReviewWith({ route: 'human', wouldAutoMerge: false, reason: 'medium risk is merged by a person' }), { key: 'A-2', status: 'In review' }),
+      ticketWith(inReviewWith({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' }), { key: 'A-3', status: 'In review' }),
+      ticketWith(inReviewWith({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically', refused: 'a build has not passed' }), { key: 'A-4', status: 'In review' }),
+      ticketWith(inReviewWith(undefined), { key: 'A-5', status: 'In review' }),
+    ];
 
-    const shadow = cardsIn(tickets, 'pr');
-    const live = cardsIn(tickets, 'pr', getOptions({ config: getConfig('').risk.shadow ? { ...getConfig(), risk: { ...getConfig().risk, shadow: false } } : getConfig() }));
-
-    expect(shadow.map((card) => [card.key, card.note, card.pullRequest])).toEqual([
+    expect(cardsIn(tickets, 'pr').map((card) => [card.key, card.note, card.pullRequest])).toEqual([
       ['A-1', 'Would have auto-merged', 'https://github.test/pull/412'],
       ['A-2', 'Merge by a person', 'https://github.test/pull/412'],
+      ['A-3', 'Auto-merge is on', 'https://github.test/pull/412'],
+      ['A-4', 'Auto-merge refused', 'https://github.test/pull/412'],
+      ['A-5', 'Merge by a person', 'https://github.test/pull/412'],
     ]);
-    expect(live.map((card) => card.note)).toEqual(['Auto-merge is on', 'Merge by a person']);
+  });
+
+  it('shows the final risk of a run once it is known, and the predicted one before', () => {
+    const final = changeLatestRun(claimed(approvedRecord('low')), (run) => ({ ...run, risk: { predicted: 'low', actual: 'high', level: 'high', score: 7, signals: [] } }));
+
+    expect(cardsIn([ticketWith(final)], 'revalidate')[0]?.risk).toBe('high');
+    expect(cardsIn([ticketWith(claimed(approvedRecord('medium')))], 'revalidate')[0]?.risk).toBe('medium');
+  });
+
+  it('says what became of a merged change', () => {
+    const done = (change: Partial<Run>) => ticketWith(changeLatestRun(endRun(claimed(), { status: 'merged', at: '2026-11-21T08:40:00Z', by: 'pierre' }), (run) => ({ ...run, ...change })), { status: 'Done' });
+    const at = '2026-11-21T08:50:00Z';
+
+    const notes = [
+      done({}),
+      done({ watch: { at, passed: true } }),
+      done({ watch: { at, passed: false, detail: 'x' } }),
+      done({ revert: { at, by: 'main failed at m1', pullRequest: 'https://github.test/pull/413' } }),
+      done({ revert: { at, by: 'main failed at m1', needed: true } }),
+      done({ revert: { at, by: 'pull request 413', merged: true }, watch: { at, passed: true } }),
+    ].map((ticket) => cardsIn([ticket], 'done')[0]?.note);
+
+    expect(notes).toEqual(['Merged', 'Delivered', 'Merged', 'Revert opened', 'Revert needed', 'Reverted']);
   });
 
   it('puts blocked and sent-back tickets in Needs you, and merged ones in Done', () => {
@@ -386,14 +423,41 @@ describe('needs you', () => {
     expect(buildNeedsYou([ticketWith(blockedRecord(2), { status: 'Blocked' })], getOptions()).map((item) => item.category)).toEqual(['blocked']);
   });
 
-  it('lists a low-risk pull request while shadow mode is on, and not once auto-merge is on', () => {
-    const inReview = endRun(claimed(), { status: 'in_review', at: '2026-11-21T08:40:00Z', by: 'pierre' });
-    const ticket = ticketWith(inReview, { status: 'In review' });
-    const live = { ...getConfig(), risk: { ...getConfig().risk, shadow: false } };
+  it('lists a pull request a person must merge, and not one that merges by itself', () => {
+    const shadow = ticketWith(inReviewWith({ route: 'human', wouldAutoMerge: true, reason: 'low risk is in shadow mode' }, false), { status: 'In review' });
+    const automatic = ticketWith(inReviewWith({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' }), { status: 'In review' });
+    const refused = ticketWith(inReviewWith({ route: 'auto', wouldAutoMerge: true, reason: 'x', refused: 'a build has not passed' }), { status: 'In review' });
 
-    expect(buildNeedsYou([ticket], getOptions())).toMatchObject([{ category: 'merge', why: 'Would have auto-merged.' }]);
-    expect('link' in (buildNeedsYou([ticket], getOptions())[0] ?? {})).toBe(false);
-    expect(buildNeedsYou([ticket], getOptions({ config: live }))).toEqual([]);
+    expect(buildNeedsYou([shadow], getOptions())).toMatchObject([{ category: 'merge', why: 'Would have auto-merged.' }]);
+    expect('link' in (buildNeedsYou([shadow], getOptions())[0] ?? {})).toBe(false);
+    expect(buildNeedsYou([automatic], getOptions())).toEqual([]);
+    expect(buildNeedsYou([refused], getOptions())).toMatchObject([{ category: 'merge', why: 'Auto-merge refused: a build has not passed.', link: 'https://github.test/pull/412' }]);
+  });
+
+  it('lists a merged change whose revert still waits for a person, first of all', () => {
+    const at = '2026-11-21T08:50:00Z';
+    const done = (key: string, revert: NonNullable<Run['revert']>, pullRequest = true) =>
+      ticketWith(
+        changeLatestRun(endRun(claimed(), { status: 'merged', at: '2026-11-21T08:40:00Z', by: 'pierre' }), (run) => ({ ...run, revert, ...(pullRequest ? { pullRequest: { number: 412, url: 'https://github.test/pull/412' } } : {}) })),
+        { key, status: 'Done', statusSince: '2026-11-21T08:45:00Z' },
+      );
+    const blocked = ticketWith(blockedRecord(1), { key: 'BLOCKED', status: 'Blocked' });
+    const tickets = [
+      blocked,
+      done('OPENED', { at, by: 'main failed at m1', pullRequest: 'https://github.test/pull/413' }),
+      done('NEEDED', { at: '2026-11-21T08:55:00Z', by: 'the staging watch failed on ./smoke.sh', needed: true }),
+      done('NO-LINK', { at: '2026-11-21T08:56:00Z', by: 'main failed at m2', needed: true }, false),
+      done('REVERTED', { at, by: 'pull request 413', merged: true }),
+      { ...done('REOPENED', { at, by: 'main failed at m1', needed: true }), status: 'Ready for Dev' },
+    ];
+
+    const items = buildNeedsYou(tickets, getOptions());
+
+    expect(items.map((item) => [item.category, item.key])).toEqual([['revert', 'OPENED'], ['revert', 'NEEDED'], ['revert', 'NO-LINK'], ['blocked', 'BLOCKED']]);
+    expect(items[0]).toMatchObject({ since: at, why: 'Merge the revert pull request: main failed at m1.', link: 'https://github.test/pull/413' });
+    expect(items[1]).toMatchObject({ why: 'Revert this change by hand: the staging watch failed on ./smoke.sh.', link: 'https://github.test/pull/412' });
+    expect(items[0]).not.toHaveProperty('command');
+    expect(items[2]).not.toHaveProperty('link');
   });
 
   it('lists an unlabelled ready ticket only once it has waited longer than the configured time', () => {
@@ -508,6 +572,41 @@ describe('run detail', () => {
     const merged = endRun(changeLatestRun(claimed(), (run) => ({ ...run, pullRequest: { number: 412, url: 'u' } })), { status: 'merged', at: '2026-11-21T08:31:00Z', by: 'pierre' });
 
     expect(buildRunDetail(ticketWith(merged, { status: 'Done' }), getOptions())?.sections.at(-1)).toEqual({ title: 'Outcome', steps: [{ label: 'Pull request', status: 'pass', lines: [], links: ['u'] }] });
+  });
+
+  it('shows the risk report, the merge and what followed on the pull request', () => {
+    const outcome = (change: Partial<Run>) => {
+      const merged = endRun(changeLatestRun(claimed(), (run) => ({ ...run, pullRequest: { number: 412, url: 'u' }, ...change })), { status: 'merged', at: '2026-11-21T08:31:00Z', by: 'pierre' });
+      return buildRunDetail(ticketWith(merged, { status: 'Done' }), getOptions())?.sections.at(-1)?.steps[0];
+    };
+    const risk: NonNullable<Run['risk']> = { predicted: 'low', actual: 'medium', level: 'high', score: 4, signals: [{ name: 'sensitive paths', points: 4, reason: 'touches src/auth/session.ts' }], raised: 'Changes rounding' };
+    const at = '2026-11-21T09:00:00Z';
+
+    expect(outcome({ risk, merge: { route: 'human', wouldAutoMerge: false, reason: 'high risk is merged by a person', at, by: 'sam', asIs: true }, watch: { at, passed: true } })).toEqual({
+      label: 'Pull request',
+      status: 'pass',
+      lines: [
+        'Risk: high (predicted low, actual medium, score 4)',
+        'sensitive paths: touches src/auth/session.ts',
+        'Raised by the reviewer: Changes rounding',
+        'Merge: high risk is merged by a person',
+        'Merged by sam at 2026-11-21T09:00:00Z, merged as is',
+        'Delivered at 2026-11-21T09:00:00Z: the staging watch passed',
+      ],
+      links: ['u'],
+    });
+    expect(outcome({ merge: { route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically', refused: 'a build has not passed', at, asIs: false } })?.lines).toEqual([
+      'Merge: low risk merges automatically',
+      'Auto-merge refused: a build has not passed',
+      'Merged by unknown at 2026-11-21T09:00:00Z, changed by a human',
+    ]);
+    expect(outcome({ watch: { at, passed: false, detail: './smoke.sh: 500' }, revert: { at, by: 'the staging watch failed on ./smoke.sh', pullRequest: 'r' } })).toEqual({
+      label: 'Pull request',
+      status: 'fail',
+      lines: ['The staging watch failed at 2026-11-21T09:00:00Z: ./smoke.sh: 500', 'Revert opened at 2026-11-21T09:00:00Z: the staging watch failed on ./smoke.sh'],
+      links: ['u', 'r'],
+    });
+    expect(outcome({ watch: { at, passed: false }, revert: { at, by: 'commit r1', merged: true } })?.lines).toEqual(['The staging watch failed at 2026-11-21T09:00:00Z: no detail', 'Reverted at 2026-11-21T09:00:00Z: commit r1']);
   });
 
   it('shows the failure report of a blocked run, and the questions of a sent-back one', () => {

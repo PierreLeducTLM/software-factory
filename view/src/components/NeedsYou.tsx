@@ -5,9 +5,10 @@ import { CopyCommand } from './CopyCommand';
 
 type Props = { readonly items: readonly NeedsYouItem[]; readonly now: string; readonly copy?: (text: string) => Promise<void> };
 
-const CATEGORIES: readonly NeedsYouCategory[] = ['blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
+const CATEGORIES: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
 
 const LABELS: Readonly<Record<NeedsYouCategory, string>> = {
+  revert: 'Revert',
   blocked: 'Blocked',
   run_limit: 'Run limit reached',
   interrupted: 'Interrupted',
@@ -19,6 +20,7 @@ const LABELS: Readonly<Record<NeedsYouCategory, string>> = {
 };
 
 const TONES: Readonly<Record<NeedsYouCategory, string>> = {
+  revert: 'fail',
   blocked: 'fail',
   run_limit: 'fail',
   interrupted: 'warn',
@@ -75,7 +77,7 @@ export function NeedsYou({ items, now, copy }: Props) {
               {item.command === undefined ? null : <CopyCommand command={item.command} {...(copy === undefined ? {} : { copy })} />}
               {item.link === undefined ? null : (
                 <a className="button" href={item.link}>
-                  {item.category === 'merge' ? 'Open pull request' : 'Open report'}
+                  {item.category === 'merge' || item.category === 'revert' ? 'Open pull request' : 'Open report'}
                 </a>
               )}
             </div>

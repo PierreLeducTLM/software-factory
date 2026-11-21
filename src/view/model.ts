@@ -38,7 +38,7 @@ export type Card = {
 
 export type Column = { readonly id: ColumnId; readonly name: string; readonly cards: readonly Card[] };
 
-export type NeedsYouCategory = 'blocked' | 'run_limit' | 'interrupted' | 'record_edited' | 'sent_back' | 'merge' | 'approve' | 'not_started';
+export type NeedsYouCategory = 'revert' | 'blocked' | 'run_limit' | 'interrupted' | 'record_edited' | 'sent_back' | 'merge' | 'approve' | 'not_started';
 
 export type NeedsYouItem = {
   readonly category: NeedsYouCategory;
@@ -81,7 +81,7 @@ const COLUMNS: readonly { readonly id: ColumnId; readonly name: string }[] = [
   { id: 'done', name: 'Done' },
 ];
 
-const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
+const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
 const STEP_COLUMNS: Readonly<Record<string, ColumnId>> = { revalidate: 'revalidate', build: 'build', quality: 'build', verify: 'review', review: 'review', diagnose: 'build' };
 const VERIFY = 'openspec-verify';
 const SHOWN_ATTEMPTS = 2;
@@ -152,20 +152,31 @@ const rowsFor = (run: Run): readonly AttemptRow[] =>
 const secondsOf = (run: Run): number =>
   run.steps.reduce((total, step) => total + (step.endedAt === undefined ? 0 : Math.round((Date.parse(step.endedAt) - Date.parse(step.startedAt)) / 1000)), 0);
 
-const mergeNote = (config: FactoryConfig, risk: 'low' | 'medium' | 'high' | undefined): string => {
-  if (risk === undefined || config.risk[risk].merge === 'human') return 'Merge by a person';
-  return config.risk.shadow ? 'Would have auto-merged' : 'Auto-merge is on';
+const AUTO_MERGE_ON = 'Auto-merge is on';
+
+const mergeNote = ({ run }: Entry): string => {
+  const merge = run?.merge;
+  if (merge === undefined || !merge.wouldAutoMerge) return 'Merge by a person';
+  if (merge.refused !== undefined) return 'Auto-merge refused';
+  return merge.route === 'auto' ? AUTO_MERGE_ON : 'Would have auto-merged';
+};
+
+const doneNote = (run: Run | undefined): string => {
+  const revert = run?.revert;
+  if (revert?.merged === true) return 'Reverted';
+  if (revert !== undefined) return revert.needed === true ? 'Revert needed' : 'Revert opened';
+  return run?.watch?.passed === true ? 'Delivered' : 'Merged';
 };
 
 const noteFor = (entry: Entry, column: ColumnId, config: FactoryConfig): string => {
-  const { ticket, record, run } = entry;
+  const { ticket, run } = entry;
   if (entry.interrupted) return 'Interrupted';
   if (column === 'ready') return ticket.labels.includes(config.labels.auto) ? 'Eligible for /factory-next' : 'Waiting for a developer';
   if (column === 'revalidate') return 'Checking drift';
   if (column === 'build') return 'Building';
   if (column === 'review') return 'Reviewing';
-  if (column === 'pr') return mergeNote(config, record?.refinement.approval?.predictedRisk);
-  if (column === 'done') return 'Merged';
+  if (column === 'pr') return mergeNote(entry);
+  if (column === 'done') return doneNote(run);
   return entry.state === 'blocked' ? `Blocked · ${run?.diagnosis ?? 'no diagnosis'}` : `Sent back · ${plural(entry.questions.length, 'question')}`;
 };
 
@@ -180,7 +191,7 @@ const cardFor = (entry: Entry, column: ColumnId, { config, machine }: ViewOption
   const { ticket, record, run } = entry;
   const claimed = run !== undefined && column !== 'ready';
   const rows = claimed ? rowsFor(run) : [];
-  const risk = record?.refinement.approval?.predictedRisk;
+  const risk = run?.risk?.level ?? record?.refinement.approval?.predictedRisk;
   const command = commandFor(entry, column, config);
   return {
     key: ticket.key,
@@ -216,6 +227,12 @@ const reasonFor = (entry: Entry, { config, now }: ViewOptions): Reason | undefin
   const runsUsed = record?.runs.length ?? 0;
   const { limits, labels, view } = config;
 
+  const revert = run?.revert;
+  if (state === 'done' && revert !== undefined && revert.merged !== true) {
+    const link = revert.pullRequest ?? run?.pullRequest?.url;
+    const why = revert.needed === true ? `Revert this change by hand: ${revert.by}.` : `Merge the revert pull request: ${revert.by}.`;
+    return { category: 'revert', since: revert.at, why, ...(link === undefined ? {} : { link }) };
+  }
   if (entry.recordEdited) return { category: 'record_edited', since, why: 'The factory comment was edited outside the factory.', command: `/factory-run ${key}` };
   if ((state === 'blocked' || state === 'ready_for_dev') && runsUsed >= limits.runs) {
     return { category: 'run_limit', since, why: `Used ${runsUsed} of ${plural(limits.runs, 'run')}.`, command: `/factory-run ${key} --over-limit` };
@@ -233,10 +250,10 @@ const reasonFor = (entry: Entry, { config, now }: ViewOptions): Reason | undefin
     return { category: 'sent_back', since, why: `Sent back with ${plural(questions.length, 'question')}.`, command: `/factory-refine ${key}`, questions };
   }
   if (state === 'in_review') {
-    const risk = record?.refinement.approval?.predictedRisk;
-    const note = mergeNote(config, risk);
-    if (note === 'Auto-merge is on') return undefined;
-    return { category: 'merge', since, why: `${note}.`, ...(run?.pullRequest === undefined ? {} : { link: run.pullRequest.url }) };
+    const note = mergeNote(entry);
+    if (note === AUTO_MERGE_ON) return undefined;
+    const refused = run?.merge?.refused;
+    return { category: 'merge', since, why: refused === undefined ? `${note}.` : `${note}: ${refused}.`, ...(run?.pullRequest === undefined ? {} : { link: run.pullRequest.url }) };
   }
   if (state === 'spec_review' && record?.refinement.readyGate?.passed === true) {
     return { category: 'approve', since, why: 'The ready gate passed. Waiting for approval.', command: `/factory-refine ${key}` };
@@ -283,7 +300,18 @@ const attemptSteps = (run: Run, number: number): readonly DetailStep[] => {
 
 const outcomeSteps = (record: TicketRecord, run: Run): readonly DetailStep[] => {
   if (run.pullRequest !== undefined) {
-    return [{ label: 'Pull request', status: run.status === 'merged' ? 'pass' : 'running', lines: [], links: [run.pullRequest.url] }];
+    const { risk, merge, revert, watch } = run;
+    const lines = [
+      ...(risk === undefined ? [] : [`Risk: ${risk.level} (predicted ${risk.predicted}, actual ${risk.actual}, score ${risk.score})`, ...risk.signals.map((signal) => `${signal.name}: ${signal.reason}`)]),
+      ...(risk?.raised === undefined ? [] : [`Raised by the reviewer: ${risk.raised}`]),
+      ...(merge === undefined ? [] : [`Merge: ${merge.reason}`]),
+      ...(merge?.refused === undefined ? [] : [`Auto-merge refused: ${merge.refused}`]),
+      ...(merge?.at === undefined ? [] : [`Merged by ${merge.by ?? 'unknown'} at ${merge.at}, ${merge.asIs === true ? 'merged as is' : 'changed by a human'}`]),
+      ...(watch === undefined ? [] : [watch.passed ? `Delivered at ${watch.at}: the staging watch passed` : `The staging watch failed at ${watch.at}: ${watch.detail ?? 'no detail'}`]),
+      ...(revert === undefined ? [] : [`${doneNote(run)} at ${revert.at}: ${revert.by}`]),
+    ];
+    const status = revert !== undefined ? 'fail' : run.status === 'merged' ? 'pass' : 'running';
+    return [{ label: 'Pull request', status, lines, links: [run.pullRequest.url, ...(revert?.pullRequest === undefined ? [] : [revert.pullRequest])] }];
   }
   if (run.status === 'blocked') {
     return [{ label: 'Failure report', status: 'fail', lines: [`Diagnosis: ${run.diagnosis ?? 'none'}`], links: run.report === undefined ? [] : [run.report] }];

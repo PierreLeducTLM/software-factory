@@ -46,6 +46,9 @@ function RootComponent() {
               <Link to="/needs-you" className="tab" activeProps={{ className: 'tab tab--active' }}>
                 Needs you{view.ok ? ` · ${view.data.needsYou.length}` : ''}
               </Link>
+              <Link to="/health" search={{ days: 7 }} className="tab" activeProps={{ className: 'tab tab--active' }}>
+                Health
+              </Link>
             </nav>
           </div>
           {view.ok ? (

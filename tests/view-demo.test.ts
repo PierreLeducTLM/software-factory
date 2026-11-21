@@ -28,9 +28,10 @@ it('fills every column and every kind of item with sample tickets, whatever the 
     ['review', ['GH-231']],
     ['pr', ['PAY-138', 'ENG-88']],
     ['needs_you', ['PAY-133', 'PAY-147']],
-    ['done', ['PAY-130']],
+    ['done', ['PAY-130', 'PAY-128', 'PAY-127', 'ENG-84', 'ENG-82', 'ENG-85']],
   ]);
   expect(data.needsYou.map((item) => [item.category, item.key])).toEqual([
+    ['revert', 'ENG-85'],
     ['blocked', 'PAY-133'],
     ['interrupted', 'ENG-95'],
     ['sent_back', 'PAY-147'],
@@ -40,6 +41,27 @@ it('fills every column and every kind of item with sample tickets, whatever the 
     ['not_started', 'PAY-151'],
   ]);
   expect(data.running).toBe(4);
+});
+
+it('has merged work to show on Health: changes merged as is, one edited by a person and two reverted', async () => {
+  const source = createDemoViewSource({ config: getConfig(), now: () => '2026-11-21T09:00:00Z' });
+
+  const [health] = (await source.health(7)).providers;
+
+  expect(health).toMatchObject({ provider: 'Sample data', merged: 6, firstPassRate: 1, averageAttempts: 1, sendBacks: 1, blocked: 1, failures: [{ gate: 'unit-tests', count: 2 }] });
+  expect(health?.levels.map(({ level, merged, mergedAsIs, changed, reverted, streak }) => [level, merged, mergedAsIs, changed, reverted, streak])).toEqual([
+    ['low', 4, 3, 1, 1, 2],
+    ['medium', 1, 1, 0, 1, 0],
+    ['high', 1, 1, 0, 0, 1],
+  ]);
+  expect(health?.stations).toEqual([
+    { name: 'revalidate', medianSeconds: 60 },
+    { name: 'build', medianSeconds: 840 },
+    { name: 'quality', medianSeconds: 300 },
+    { name: 'verify', medianSeconds: 240 },
+    { name: 'review', medianSeconds: 360 },
+    { name: 'waiting for merge', medianSeconds: 9000 },
+  ]);
 });
 
 it('shows a run with a failed first attempt and a second one being built', async () => {

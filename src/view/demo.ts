@@ -13,6 +13,7 @@ import {
   startRun,
   startStep,
   type Attempt,
+  type Run,
   type TicketRecord,
 } from '../record/ticket-record.js';
 import { createViewSource, type ViewSource } from './source.js';
@@ -22,6 +23,8 @@ type Options = { readonly config: FactoryConfig; readonly now: () => string };
 const REPOSITORY = 'acme/billing-service';
 const MACHINE = 'this-machine';
 const MINUTE = 60_000;
+
+type Risk = 'low' | 'medium' | 'high';
 
 export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
   const start = Date.parse(now());
@@ -60,20 +63,39 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
       (run) => ({ ...run, attempt: 2 }),
     );
 
-  const reviewed = (record: TicketRecord): TicketRecord =>
-    attempt(step(step(step(step(step(record, 'revalidate', 60, 59), 'build', 59, 45), 'quality', 45, 40), 'verify', 40, 36), 'review', 36, 30), {
+  const reviewed = (record: TicketRecord, earlier: number): TicketRecord =>
+    attempt(step(step(step(step(step(record, 'revalidate', earlier + 60, earlier + 59), 'build', earlier + 59, earlier + 45), 'quality', earlier + 45, earlier + 40), 'verify', earlier + 40, earlier + 36), 'review', earlier + 36, earlier + 30), {
       number: 1,
       changed: 'Required an amount for partial refunds',
       decisions: ['D-002'],
       outcomes: [passed('unit-tests', 'quality'), passed('openspec-verify', 'review'), passed('reviewer', 'review')],
     });
 
-  const inReview = (risk: 'low' | 'medium', number: number): TicketRecord =>
-    endRun(changeLatestRun(reviewed(claimed(approved(risk), 'pierre', MACHINE, 61)), (run) => ({ ...run, pullRequest: { number, url: `https://example.test/pull/${number}` } })), {
-      status: 'in_review',
-      at: ago(30),
-      by: 'pierre',
-    });
+  const decision = (risk: Risk): NonNullable<Run['merge']> =>
+    risk === 'low' ? { route: 'human', wouldAutoMerge: true, reason: 'low risk is in shadow mode' } : { route: 'human', wouldAutoMerge: false, reason: `${risk} risk is merged by a person` };
+
+  const delivered = (risk: Risk, number: number, claimant: string, startedAgo: number): TicketRecord =>
+    changeLatestRun(reviewed(claimed(approved(risk), claimant, MACHINE, startedAgo + 61), startedAgo), (run) => ({
+      ...run,
+      pullRequest: { number, url: `https://example.test/pull/${number}`, headCommit: 'c0ffee1' },
+      risk: {
+        predicted: risk,
+        actual: risk,
+        level: risk,
+        score: risk === 'low' ? 0 : 4,
+        signals: risk === 'low' ? [] : [{ name: 'sensitive paths', points: 4, reason: 'touches src/billing/rounding.ts' }],
+      },
+      merge: decision(risk),
+    }));
+
+  const inReview = (risk: Risk, number: number): TicketRecord => endRun(delivered(risk, number, 'pierre', 0), { status: 'in_review', at: ago(30), by: 'pierre' });
+
+  const merged = (risk: Risk, number: number, mergedAgo: number, outcome: { readonly asIs: boolean; readonly revert?: NonNullable<Run['revert']> }): TicketRecord =>
+    changeLatestRun(endRun(delivered(risk, number, 'maya', mergedAgo + 120), { status: 'merged', at: ago(mergedAgo), by: 'factory-ci' }), (run) => ({
+      ...run,
+      merge: { ...decision(risk), at: ago(mergedAgo), by: 'maya', asIs: outcome.asIs },
+      ...(outcome.revert === undefined ? {} : { revert: outcome.revert }),
+    }));
 
   const blocked = endRun(
     changeLatestRun(firstAttemptFailed(claimed(approved('medium'), 'pierre', MACHINE, 41)), (run) => ({ ...run, attempt: run.attemptLimit, diagnosis: 'environment' as const, report: 'https://example.test/report/PAY-133' })),
@@ -111,7 +133,12 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     ticket('PAY-133', 'Multi-currency totals', states.blocked, 25, blocked),
     ticket('PAY-147', 'Tax rounding rules', states.spec_review, 60, sentBack),
     ticket('PAY-155', 'Credit notes', states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), { passed: true, fingerprint: 'demo', findings: [], at: ago(180), by: 'pierre' })),
-    ticket('PAY-130', 'Billing rules v2', states.done, 300, endRun(reviewed(claimed(approved('high'), 'maya', 'maya-mbp', 361)), { status: 'merged', at: ago(300), by: 'maya' })),
+    ticket('PAY-130', 'Billing rules v2', states.done, 300, merged('high', 398, 300, { asIs: true })),
+    ticket('PAY-128', 'Invoice footer text', states.done, 1500, merged('low', 396, 1500, { asIs: true })),
+    ticket('PAY-127', 'Currency symbol placement', states.done, 2900, merged('low', 395, 2900, { asIs: true })),
+    ticket('ENG-84', 'Pagination for audit log', states.done, 4300, merged('low', 392, 4300, { asIs: false })),
+    ticket('ENG-82', 'Export file naming', states.done, 5700, merged('low', 390, 5700, { asIs: true, revert: { at: ago(5000), by: 'pull request 391', merged: true } })),
+    ticket('ENG-85', 'Cache invoice totals', states.done, 200, merged('medium', 397, 200, { asIs: true, revert: { at: ago(90), by: 'the staging watch failed on ./smoke.sh', needed: true } })),
   ];
 
   return createViewSource({

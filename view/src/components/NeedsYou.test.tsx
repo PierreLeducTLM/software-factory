@@ -32,6 +32,17 @@ describe('needs you', () => {
     expect(textOf(rows.nth(3))).toContain('waiting 1 day');
   });
 
+  it('shows a change waiting for its revert, with a link to the pull request', async () => {
+    const { command: _none, ...revert } = getItem({ category: 'revert', key: 'ENG-85', title: 'Cache invoice totals', why: 'Revert this change by hand: main failed at m1.', link: 'https://github.test/pull/397' });
+    const screen = await render(<NeedsYou items={[revert]} now={NOW} />);
+    const row = screen.getByRole('listitem').nth(0);
+
+    expect(textOf(row)).toContain('Revert');
+    expect(textOf(row)).toContain('Revert this change by hand: main failed at m1.');
+    await expect.element(row.getByRole('link', { name: 'Open pull request' })).toHaveAttribute('href', 'https://github.test/pull/397');
+    await expect.element(screen.getByRole('button', { name: 'Revert 1' })).toBeVisible();
+  });
+
   it('copies the command of an item, and links to its pull request or report', async () => {
     const copy = vi.fn(async () => undefined);
     const screen = await render(<NeedsYou items={items} now={NOW} copy={copy} />);

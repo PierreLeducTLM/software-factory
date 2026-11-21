@@ -1,5 +1,6 @@
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import type { FactoryConfig } from '../config/project-config.js';
+import { buildHealth, type Health } from './health.js';
 import { buildBoard, buildNeedsYou, buildRunDetail, type Column, type NeedsYouItem, type RunDetail } from './model.js';
 import { createViewStore } from './store.js';
 
@@ -27,9 +28,11 @@ export type ViewData = {
 export type ViewSource = {
   readonly load: () => Promise<ViewData>;
   readonly detail: (key: string) => Promise<RunDetail | undefined>;
+  readonly health: (periodDays: number) => Promise<Health>;
 };
 
 const DONE_WINDOW_DAYS = 7;
+const MS_PER_DAY = 86_400_000;
 const RUNNING_COLUMNS = ['revalidate', 'build', 'review'];
 
 export const createViewSource = ({ providers, config, repository, machine, now }: Options): ViewSource => {
@@ -67,6 +70,13 @@ export const createViewSource = ({ providers, config, repository, machine, now }
       await fresh();
       const ticket = store.snapshot().tickets.find((candidate) => candidate.key === key);
       return ticket === undefined ? undefined : buildRunDetail(ticket, { config, now: now(), machine, repository });
+    },
+
+    health: async (periodDays) => {
+      const at = now();
+      const updatedSince = new Date(Date.parse(at) - periodDays * MS_PER_DAY).toISOString().replace('.000Z', 'Z');
+      const perProvider = await Promise.all(providers.map(async ({ name, provider }) => (await provider.search({ updatedSince })).map((ticket) => ({ ...ticket, provider: name }))));
+      return buildHealth(perProvider.flat(), { config, now: at, repository, periodDays });
     },
   };
 };

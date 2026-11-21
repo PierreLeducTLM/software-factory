@@ -560,3 +560,80 @@ p {
   font-size: 12.5px;
   color: var(--ink-2);
 }
+
+.health {
+  display: grid;
+  gap: 16px;
+  max-width: 980px;
+  padding-top: 8px;
+}
+
+.health__provider {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 18px;
+}
+
+.health__note {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.health__tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+}
+
+.health__suggestion {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--pass);
+  border-radius: 8px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.stat {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.stat__label {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.stat__value {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 24px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.table th {
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+}
