@@ -3,9 +3,13 @@ import { parseComment, renderComment, type ParsedComment, type TicketRecord } fr
 
 const ARCHIVE_LINK_ALLOWANCE = 200;
 
-export const loadRecord = async (provider: TicketProvider, key: string): Promise<ParsedComment> => {
+export const loadRecord = async (
+  provider: TicketProvider,
+  key: string,
+  options: { readonly trustEdited: boolean } = { trustEdited: false },
+): Promise<ParsedComment> => {
   const comment = await provider.getFactoryComment(key);
-  return comment === undefined ? { status: 'none' } : parseComment(comment);
+  return comment === undefined ? { status: 'none' } : parseComment(comment, options);
 };
 
 type SaveRequest = {

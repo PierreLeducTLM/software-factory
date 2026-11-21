@@ -4,8 +4,13 @@ import {
   appendEvent,
   createRecord,
   endRun,
+  endStep,
+  recordApproval,
   recordReadyGate,
+  setState,
   startRun,
+  startStep,
+  takeOverRun,
   type FactoryEvent,
   type TicketRecord,
 } from '../src/record/ticket-record.js';
@@ -32,6 +37,7 @@ const getRunningRecord = (): TicketRecord =>
   startRun(getApprovedRecord(), {
     claimant: 'pierre',
     machine: 'pierre-mbp',
+    worktreeId: 'wt-1',
     at: '2026-11-21T08:00:00Z',
     attemptLimit: 5,
   });
@@ -110,10 +116,12 @@ describe('the record on a ticket', () => {
       {
         claimant: 'pierre',
         machine: 'pierre-mbp',
+        worktreeId: 'wt-1',
         startedAt: '2026-11-21T08:00:00Z',
         status: 'running',
         attempt: 1,
         attemptLimit: 5,
+        steps: [],
       },
     ]);
     expect(record.events.at(-1)).toEqual({ at: '2026-11-21T08:00:00Z', by: 'pierre', type: 'claimed', detail: 'run 1' });
@@ -122,7 +130,7 @@ describe('the record on a ticket', () => {
   it('keeps the first run and starts the second at attempt 1 after a send-back', () => {
     const sentBack = endRun(getRunningRecord(), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' });
 
-    const record = startRun(sentBack, { claimant: 'maya', machine: 'maya-mbp', at: '2026-11-22T10:00:00Z', attemptLimit: 5 });
+    const record = startRun(sentBack, { claimant: 'maya', machine: 'maya-mbp', worktreeId: 'wt-2', at: '2026-11-22T10:00:00Z', attemptLimit: 5 });
 
     expect(record.runs.map((run) => [run.claimant, run.status, run.attempt])).toEqual([
       ['pierre', 'sent_back', 1],
@@ -134,7 +142,7 @@ describe('the record on a ticket', () => {
   it('ends only the latest run and says so in an event', () => {
     const twoRuns = startRun(
       endRun(getRunningRecord(), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' }),
-      { claimant: 'maya', machine: 'maya-mbp', at: '2026-11-22T10:00:00Z', attemptLimit: 5 },
+      { claimant: 'maya', machine: 'maya-mbp', worktreeId: 'wt-2', at: '2026-11-22T10:00:00Z', attemptLimit: 5 },
     );
 
     const record = endRun(twoRuns, { status: 'blocked', at: '2026-11-22T11:00:00Z', by: 'maya' });
@@ -157,10 +165,102 @@ describe('the record on a ticket', () => {
     const original = getApprovedRecord();
     const snapshot = structuredClone(original);
 
-    startRun(original, { claimant: 'pierre', machine: 'pierre-mbp', at: '2026-11-21T08:00:00Z', attemptLimit: 5 });
+    startRun(original, { claimant: 'pierre', machine: 'pierre-mbp', worktreeId: 'wt-1', at: '2026-11-21T08:00:00Z', attemptLimit: 5 });
     appendEvent(original, getMockEvent());
 
     expect(original).toEqual(snapshot);
+  });
+});
+
+describe('factory state, approval and steps in the record', () => {
+  it('remembers the factory state the CLI last set, with an event saying from where', () => {
+    const first = setState(getApprovedRecord(), { state: 'spec_review', at: '2026-11-20T15:01:00Z', by: 'pierre' });
+    const second = setState(first, { state: 'ready_for_dev', at: '2026-11-20T15:02:00Z', by: 'pierre' });
+
+    expect(second.state).toBe('ready_for_dev');
+    expect(first.events.at(-1)).toEqual({ at: '2026-11-20T15:01:00Z', by: 'pierre', type: 'state', detail: 'none to spec_review' });
+    expect(second.events.at(-1)).toEqual({ at: '2026-11-20T15:02:00Z', by: 'pierre', type: 'state', detail: 'spec_review to ready_for_dev' });
+  });
+
+  it('holds the approval stamp and replaces it on a new approval', () => {
+    const stamp = { approver: 'pierre', at: '2026-11-20T16:00:00Z', mainCommit: 'a41c9e2', fingerprint: 'f1', predictedRisk: 'low' as const };
+    const first = recordApproval(getApprovedRecord(), stamp);
+
+    const second = recordApproval(first, { ...stamp, at: '2026-11-22T09:00:00Z', mainCommit: 'b52d0f3', fingerprint: 'f2', mergeCeiling: 'human' });
+
+    expect(first.refinement.approval).toEqual(stamp);
+    expect(first.events.at(-1)).toEqual({ at: '2026-11-20T16:00:00Z', by: 'pierre', type: 'approved', detail: 'low risk' });
+    expect(second.refinement.approval?.fingerprint).toBe('f2');
+    expect(second.refinement.approval?.mergeCeiling).toBe('human');
+    expect(second.refinement.readyGate).toEqual(first.refinement.readyGate);
+  });
+
+  it('writes when a step starts and when it ends, on the latest run only', () => {
+    const started = startStep(getRunningRecord(), { name: 'build', at: '2026-11-21T08:05:00Z', timeoutSeconds: 1500, by: 'pierre' });
+
+    const ended = endStep(started, { at: '2026-11-21T08:23:00Z', by: 'pierre' });
+
+    expect(started.runs[0]?.steps).toEqual([{ name: 'build', attempt: 1, startedAt: '2026-11-21T08:05:00Z', timeoutSeconds: 1500 }]);
+    expect(ended.runs[0]?.steps).toEqual([
+      { name: 'build', attempt: 1, startedAt: '2026-11-21T08:05:00Z', timeoutSeconds: 1500, endedAt: '2026-11-21T08:23:00Z' },
+    ]);
+    expect(started.events.at(-1)).toEqual({ at: '2026-11-21T08:05:00Z', by: 'pierre', type: 'step_started', detail: 'build' });
+    expect(ended.events.at(-1)).toEqual({ at: '2026-11-21T08:23:00Z', by: 'pierre', type: 'step_ended', detail: 'build' });
+  });
+
+  it('ends only the step that is still open', () => {
+    const one = endStep(startStep(getRunningRecord(), { name: 'revalidate', at: '2026-11-21T08:01:00Z', timeoutSeconds: 120, by: 'pierre' }), {
+      at: '2026-11-21T08:02:00Z',
+      by: 'pierre',
+    });
+    const two = startStep(one, { name: 'build', at: '2026-11-21T08:05:00Z', timeoutSeconds: 1500, by: 'pierre' });
+
+    const ended = endStep(two, { at: '2026-11-21T08:23:00Z', by: 'pierre' });
+
+    expect(ended.runs[0]?.steps.map((step) => step.endedAt)).toEqual(['2026-11-21T08:02:00Z', '2026-11-21T08:23:00Z']);
+  });
+
+  it('leaves the record as it is when no step is in progress', () => {
+    const record = getRunningRecord();
+
+    expect(endStep(record, { at: '2026-11-21T08:23:00Z', by: 'pierre' })).toBe(record);
+  });
+
+  it('cannot hand over a run that does not exist', () => {
+    expect(() => takeOverRun(getApprovedRecord(), { by: 'maya', machine: 'maya-mbp', worktreeId: 'wt-9', at: '2026-11-21T10:00:00Z' })).toThrow(
+      'The record has no run',
+    );
+  });
+
+  it.each(['low', 'medium', 'high'] as const)('keeps a %s predicted risk when saved and read back', async (predictedRisk) => {
+    const provider = getProvider();
+    const record = recordApproval(getApprovedRecord(), { approver: 'pierre', at: '2026-11-20T16:00:00Z', mainCommit: 'a41c9e2', fingerprint: 'f1', predictedRisk });
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'Approved', budget: BIG_BUDGET });
+    const loaded = await loadRecord(provider, 'PAY-142');
+
+    expect(loaded.status === 'ok' && loaded.record.refinement.approval?.predictedRisk).toBe(predictedRisk);
+  });
+
+  it('keeps a run on a later attempt when saved and read back', async () => {
+    const provider = getProvider();
+    const running = getRunningRecord();
+    const record = { ...running, runs: running.runs.map((run) => ({ ...run, attempt: 3 })) };
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'Building', budget: BIG_BUDGET });
+    const loaded = await loadRecord(provider, 'PAY-142');
+
+    expect(loaded.status === 'ok' && loaded.record.runs[0]?.attempt).toBe(3);
+  });
+
+  it('hands a run to another developer and worktree, and says so in an event', () => {
+    const record = takeOverRun(getRunningRecord(), { by: 'maya', machine: 'maya-mbp', worktreeId: 'wt-9', at: '2026-11-21T10:00:00Z' });
+
+    expect(record.runs[0]?.claimant).toBe('maya');
+    expect(record.runs[0]?.machine).toBe('maya-mbp');
+    expect(record.runs[0]?.worktreeId).toBe('wt-9');
+    expect(record.runs[0]?.attempt).toBe(1);
+    expect(record.events.at(-1)).toEqual({ at: '2026-11-21T10:00:00Z', by: 'maya', type: 'takeover', detail: 'from pierre' });
   });
 });
 
