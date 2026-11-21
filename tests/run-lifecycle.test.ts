@@ -45,7 +45,7 @@ const getApprovedRecord = (): TicketRecord =>
 const approved = (overrides?: Partial<Ticket>): Ticket =>
   getMockTicket({ factoryComment: renderComment({ record: getApprovedRecord(), summary: 'Approved' }), ...overrides });
 
-const getWorktree = (overrides?: Partial<Worktree>): Worktree => ({ id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp', ...overrides });
+const getWorktree = (overrides?: Partial<Worktree>): Worktree => ({ id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'local', ...overrides });
 
 type World = { readonly tickets: TicketProvider; readonly clock: { now: string } };
 
@@ -61,6 +61,7 @@ const depsFor = (world: World, overrides?: Partial<FactoryDeps>): FactoryDeps =>
   user: 'pierre',
   now: () => world.clock.now,
   recordBudget: 100_000,
+  machine: 'pierre-mbp',
   ...overrides,
 });
 
@@ -106,7 +107,7 @@ describe('starting a run on a named ticket', () => {
   it('lets exactly one of two developers racing for a ticket claim it, and tells the other who has it', async () => {
     const world = getWorld([approved()]);
     const pierre = depsFor(world, { user: 'pierre' });
-    const maya = depsFor(world, { user: 'maya', runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ id: 'wt-2', host: 'maya-mbp' }) }) });
+    const maya = depsFor(world, { user: 'maya', machine: 'maya-mbp', runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ id: 'wt-2' }) }) });
 
     const first = await runTicket(pierre, 'PAY-142');
     const record = await recordOf(world, 'PAY-142');
@@ -193,7 +194,7 @@ describe('starting a run on a named ticket', () => {
     await runTicket(depsFor(world), 'PAY-142');
 
     const otherWorktree = await runTicket(depsFor(world, { runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ id: 'wt-2' }) }) }), 'ENG-87');
-    const otherMachine = await runTicket(depsFor(world, { runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ host: 'maya-mbp' }) }) }), 'ENG-90');
+    const otherMachine = await runTicket(depsFor(world, { machine: 'maya-mbp' }), 'ENG-90');
 
     expect(otherWorktree.ok).toBe(true);
     expect(otherMachine.ok).toBe(true);
@@ -457,7 +458,7 @@ describe('resuming a run', () => {
   it('asks another developer to confirm before taking the run over, then records the takeover', async () => {
     const world = getWorld([approved()]);
     await runTicket(depsFor(world), 'PAY-142');
-    const maya = depsFor(world, { user: 'maya', runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ id: 'wt-9', host: 'maya-mbp' }) }) });
+    const maya = depsFor(world, { user: 'maya', machine: 'maya-mbp', runtime: createInMemoryAgentRuntime({ worktree: getWorktree({ id: 'wt-9' }) }) });
 
     const asked = await runTicket(maya, 'PAY-142');
     const untouched = await recordOf(world, 'PAY-142');

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { createBitbucketSourceControl } from '../adapters/bitbucket-source-control.js';
 import { createGitHubSourceControl } from '../adapters/github-source-control.js';
@@ -81,6 +82,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     runtime: createOrcaAgentRuntime({ run: createCommandRunner('orca') }),
     config,
     user: await git.userName(),
+    machine: hostname(),
     now,
     recordBudget: RECORD_BUDGET,
     validateSpec: createSpecValidator({ run: createCommandRunner('openspec') }),

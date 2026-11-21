@@ -62,6 +62,7 @@ const getWorld = async (options?: { readonly attempts?: number; readonly changed
     user: 'pierre',
     now,
     recordBudget: 100_000,
+    machine: 'pierre-mbp',
     validateSpec: async () => [],
     predictRisk: async () => 'low',
     mainCommit: async () => 'a41c9e2',

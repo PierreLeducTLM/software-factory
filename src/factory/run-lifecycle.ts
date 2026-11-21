@@ -10,6 +10,7 @@ export type FactoryDeps = {
   readonly runtime: AgentRuntime;
   readonly config: FactoryConfig;
   readonly user: string;
+  readonly machine: string;
   readonly now: () => string;
   readonly recordBudget: number;
 };
@@ -75,7 +76,7 @@ const runningIn = async (deps: FactoryDeps, worktree: Worktree): Promise<string 
   const records = await Promise.all(inDevelopment.map(async (ticket) => ({ key: ticket.key, loaded: await loadRecord(deps.tickets, ticket.key) })));
   return records.find(({ loaded }) => {
     const run = loaded.status === 'ok' ? loaded.record.runs.at(-1) : undefined;
-    return run?.status === 'running' && run.worktreeId === worktree.id && run.machine === worktree.host;
+    return run?.status === 'running' && run.worktreeId === worktree.id && run.machine === deps.machine;
   })?.key;
 };
 
@@ -106,7 +107,7 @@ const claim = async (deps: FactoryDeps, ticket: Ticket, worktree: Worktree, opti
   const allowed = overLimit ? appendEvent(noted, { at, by: deps.user, type: 'run_limit_overridden', detail: `run ${used + 1} of ${limit}` }) : noted;
   const record = startRun(setState(allowed, { state: 'in_development', at, by: deps.user }), {
     claimant: deps.user,
-    machine: worktree.host,
+    machine: deps.machine,
     worktreeId: worktree.id,
     at,
     attemptLimit: deps.config.limits.attempts,
@@ -128,7 +129,7 @@ const resume = async (deps: FactoryDeps, ticket: Ticket, worktree: Worktree, opt
 
   const noted = withOutsideChangeNoted(deps, loaded.record, ticket);
   const record =
-    run.claimant === deps.user ? noted : takeOverRun(noted, { by: deps.user, machine: worktree.host, worktreeId: worktree.id, at: deps.now() });
+    run.claimant === deps.user ? noted : takeOverRun(noted, { by: deps.user, machine: deps.machine, worktreeId: worktree.id, at: deps.now() });
   if (loaded.unsaved || record !== loaded.record) {
     await saveRecord(deps.tickets, { key, record, summary: summaryOf(record, `resumed by ${deps.user}`), budget: deps.recordBudget });
   }

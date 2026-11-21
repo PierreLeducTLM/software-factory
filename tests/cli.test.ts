@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runtime.js';
@@ -72,6 +72,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     user: 'pierre',
     now: () => '2026-11-21T08:00:00Z',
     recordBudget: 100_000,
+    machine: 'pierre-mbp',
     validateSpec: async () => [],
     predictRisk: async () => 'low',
     mainCommit: async () => 'a41c9e2',
@@ -511,6 +512,7 @@ describe('setting the command line up in a project', () => {
     expect(deps.config.states.ready_for_dev).toBe('Ready for Dev');
     expect(await deps.predictRisk([])).toBe('high');
     expect(deps.recordBudget).toBe(30_000);
+    expect(deps.machine).toBe(hostname());
     expect(deps.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 

@@ -66,6 +66,7 @@ const depsFor = (world: World, overrides?: Partial<RefinementDeps>): RefinementD
   user: 'pierre',
   now: () => world.clock.now,
   recordBudget: 100_000,
+  machine: 'pierre-mbp',
   validateSpec: async () => [],
   predictRisk: async () => 'low',
   mainCommit: async () => 'a41c9e2',
