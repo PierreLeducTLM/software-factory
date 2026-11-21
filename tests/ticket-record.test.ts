@@ -429,6 +429,75 @@ describe('record size budget', () => {
     expect(loaded.status === 'ok' && loaded.record.events).toEqual([record.events.at(-1)]);
   });
 
+  const getThreeRuns = (): TicketRecord => {
+    const heavy = { number: 1, changed: 'c'.repeat(300), decisions: ['D-001'], outcomes: [{ id: 'unit-tests', station: 'quality', status: 'failed' as const, reason: 'exit code 1', detail: 'd'.repeat(600), durationSeconds: 10 }] };
+    const step = { name: 'build', attempt: 1, startedAt: '2026-11-21T08:05:00Z', endedAt: '2026-11-21T08:20:00Z', timeoutSeconds: 1800 };
+    const ended = (record: TicketRecord, index: number): TicketRecord => {
+      const started = startRun(record, { claimant: 'pierre', machine: 'pierre-mbp', worktreeId: `wt-${index}`, at: '2026-11-21T08:00:00Z', attemptLimit: 5 });
+      const filled = { ...started, runs: started.runs.map((run, at) => (at === started.runs.length - 1 ? { ...run, attempt: 3, steps: [step], attempts: [heavy], report: `memory://report-${index}` } : run)) };
+      return index === 2 ? filled : endRun(filled, { status: 'blocked', at: '2026-11-21T09:00:00Z', by: 'pierre' });
+    };
+    return [0, 1, 2].reduce(ended, getApprovedRecord());
+  };
+
+  it('compacts the oldest runs once the events are not enough, keeping what each run came to', async () => {
+    const provider = getProvider();
+    const record = getThreeRuns();
+    const budget = 2600;
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'Building', budget });
+    const loaded = await loadRecord(provider, 'PAY-142');
+    if (loaded.status !== 'ok') throw new Error('expected a record');
+    const archive: { runs: { run: number; steps: unknown[]; attempts: unknown[] }[] } = JSON.parse(await provider.readAttachment(loaded.record.archives[0] ?? ''));
+
+    expect(((await provider.getFactoryComment('PAY-142')) ?? '').length).toBeLessThanOrEqual(budget);
+    expect(loaded.record.runs.map((run) => [run.compacted === true, run.attempts.length, run.steps.length])).toEqual([[true, 0, 0], [true, 0, 0], [false, 1, 1]]);
+    expect(loaded.record.runs[0]).toMatchObject({ status: 'blocked', attempt: 3, startedAt: '2026-11-21T08:00:00Z', report: 'memory://report-0' });
+    expect(loaded.record.runs[2]).toEqual(record.runs[2]);
+    expect(loaded.record.events).toEqual([record.events.at(-1)]);
+    expect(archive.runs).toEqual([
+      { run: 1, steps: record.runs[0]?.steps, attempts: record.runs[0]?.attempts },
+      { run: 2, steps: record.runs[1]?.steps, attempts: record.runs[1]?.attempts },
+    ]);
+  });
+
+  it('compacts no more runs than it needs to, and none while dropping events is enough', async () => {
+    const record = getThreeRuns();
+    const { renderComment } = await import('../src/record/ticket-record.js');
+    const oneRunCompacted = { ...record, events: record.events.slice(-1), runs: record.runs.map((run, index) => (index === 0 ? { ...run, steps: [], attempts: [], compacted: true } : run)), archives: ['x'.repeat(200)] };
+    const eventsOnly = { ...record, events: record.events.slice(-1), archives: ['x'.repeat(200)] };
+    const tight = getProvider();
+    const loose = getProvider();
+
+    await saveRecord(tight, { key: 'PAY-142', record, summary: 'Building', budget: renderComment({ record: oneRunCompacted, summary: 'Building' }).length });
+    await saveRecord(loose, { key: 'PAY-142', record, summary: 'Building', budget: renderComment({ record: eventsOnly, summary: 'Building' }).length });
+    const tightLoaded = await loadRecord(tight, 'PAY-142');
+    const looseLoaded = await loadRecord(loose, 'PAY-142');
+
+    expect(tightLoaded.status === 'ok' && tightLoaded.record.runs.map((run) => run.compacted === true)).toEqual([true, false, false]);
+    expect(looseLoaded.status === 'ok' && looseLoaded.record.runs.map((run) => run.compacted === true)).toEqual([false, false, false]);
+  });
+
+  it('never compacts the latest run, even when the budget is too small for it', async () => {
+    const provider = getProvider();
+    const record = getThreeRuns();
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'Building', budget: 10 });
+    const loaded = await loadRecord(provider, 'PAY-142');
+
+    expect(loaded.status === 'ok' && loaded.record.runs[2]).toEqual(record.runs[2]);
+  });
+
+  it('saves a record that is over budget as it is when there is nothing to move out', async () => {
+    const provider = getProvider();
+    const record = createRecord({ repository: 'acme/billing-service' });
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'Building', budget: 10 });
+
+    expect(await loadRecord(provider, 'PAY-142')).toEqual({ status: 'ok', record });
+    expect(await provider.listAttachments('PAY-142')).toEqual([]);
+  });
+
   it('adds a second archive link on a later compaction instead of replacing the first', async () => {
     const provider = getProvider();
     await saveRecord(provider, { key: 'PAY-142', record: withEvents(20), summary: 'Building', budget: 3000 });

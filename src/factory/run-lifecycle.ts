@@ -2,6 +2,7 @@ import type { AgentRuntime, Worktree } from '../adapters/agent-runtime.js';
 import type { Ticket, TicketProvider } from '../adapters/ticket-provider.js';
 import type { FactoryConfig } from '../config/project-config.js';
 import { loadRecord, saveRecord } from '../record/record-store.js';
+import { parseComment } from '../record/ticket-record.js';
 import { appendEvent, endStep, latestRun, setState, startRun, startStep, takeOverRun, type TicketRecord } from '../record/ticket-record.js';
 
 export type FactoryDeps = {
@@ -13,7 +14,12 @@ export type FactoryDeps = {
   readonly recordBudget: number;
 };
 
-export type RunOptions = { readonly confirmTakeover?: boolean; readonly acceptEditedRecord?: boolean };
+export type RunOptions = {
+  readonly confirmTakeover?: boolean;
+  readonly acceptEditedRecord?: boolean;
+  readonly confirmRetry?: boolean;
+  readonly overLimit?: boolean;
+};
 
 type Refusal =
   | 'not_found'
@@ -24,6 +30,8 @@ type Refusal =
   | 'already_claimed'
   | 'worktree_busy'
   | 'needs_takeover_confirmation'
+  | 'needs_retry_confirmation'
+  | 'run_limit'
   | 'nothing_eligible';
 
 export type RunResult =
@@ -82,15 +90,21 @@ const claim = async (deps: FactoryDeps, ticket: Ticket, worktree: Worktree, opti
   const loaded = await loadApproved(deps, key, options);
   if (!loaded.ok) return loaded.refusal;
 
+  const used = loaded.record.runs.length;
+  const limit = deps.config.limits.runs;
+  const overLimit = used >= limit;
+  if (overLimit && options.overLimit !== true) return refuse('run_limit', `${key} has used ${used} of ${limit} runs. Use --over-limit to start one more`);
+
   const busyWith = await runningIn(deps, worktree);
   if (busyWith !== undefined) return refuse('worktree_busy', `This worktree is running ${busyWith}. Open a new worktree for ${key}`);
 
-  const { ready_for_dev: from, in_development: to } = deps.config.states;
-  const moved = await deps.tickets.transition({ key, from, to });
+  const moved = await deps.tickets.transition({ key, from: ticket.status, to: deps.config.states.in_development });
   if (!moved.ok) return refuse('already_claimed', `${key} is already claimed by ${await claimantOf(deps, key)}`);
 
   const at = deps.now();
-  const record = startRun(setState(withOutsideChangeNoted(deps, loaded.record, ticket), { state: 'in_development', at, by: deps.user }), {
+  const noted = withOutsideChangeNoted(deps, loaded.record, ticket);
+  const allowed = overLimit ? appendEvent(noted, { at, by: deps.user, type: 'run_limit_overridden', detail: `run ${used + 1} of ${limit}` }) : noted;
+  const record = startRun(setState(allowed, { state: 'in_development', at, by: deps.user }), {
     claimant: deps.user,
     machine: worktree.host,
     worktreeId: worktree.id,
@@ -128,16 +142,23 @@ export const runTicket = async (deps: FactoryDeps, key: string, options: RunOpti
   const ticket = await deps.tickets.getTicket(key);
   if (ticket === undefined) return refuse('not_found', `${key} does not exist`);
 
-  const { ready_for_dev: ready, in_development: inDevelopment } = deps.config.states;
+  const { ready_for_dev: ready, in_development: inDevelopment, blocked } = deps.config.states;
   if (ticket.status === inDevelopment) return resume(deps, ticket, worktree, options);
-  if (ticket.status !== ready) return refuse('not_ready', `${key} is in "${ticket.status}", not "${ready}"`);
+  if (ticket.status === blocked && options.confirmRetry !== true) {
+    return refuse('needs_retry_confirmation', `${key} is in "${blocked}". Confirm to retry it with a new run`);
+  }
+  if (ticket.status !== ready && ticket.status !== blocked) return refuse('not_ready', `${key} is in "${ticket.status}", not "${ready}"`);
   return claim(deps, ticket, worktree, options);
 };
 
 export const nextTicket = async (deps: FactoryDeps): Promise<RunResult> => {
   const { auto } = deps.config.labels;
   const ready = deps.config.states.ready_for_dev;
-  const eligible = await deps.tickets.search({ statuses: [ready], label: auto });
+  const runsUsed = (ticket: Ticket): number => {
+    const parsed = ticket.factoryComment === undefined ? undefined : parseComment(ticket.factoryComment, { trustEdited: false });
+    return parsed?.status === 'ok' ? parsed.record.runs.length : 0;
+  };
+  const eligible = (await deps.tickets.search({ statuses: [ready], label: auto })).filter((ticket) => runsUsed(ticket) < deps.config.limits.runs);
   const oldest = eligible.toSorted((a, b) => Date.parse(a.statusSince) - Date.parse(b.statusSince))[0];
   return oldest === undefined ? refuse('nothing_eligible', `No ticket with the "${auto}" label is in "${ready}"`) : runTicket(deps, oldest.key);
 };

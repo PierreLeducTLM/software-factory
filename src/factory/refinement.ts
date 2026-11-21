@@ -46,6 +46,7 @@ export type StatusResult =
 export type GateResult = { readonly ok: true; readonly passed: boolean; readonly findings: readonly string[] } | Refused;
 export type ApprovalResult = { readonly ok: true; readonly risk: Risk; readonly route: string } | Refused;
 
+const FACTORY_PREFIX = 'factory-';
 const DELTA_SPEC = /^specs__(.+)__spec\.md$/;
 const TASK_LINE = /^\s*- \[[ xX]\] /;
 const SAYS_HOW_VERIFIED = /\bverif(y|ies|ied)\b/i;
@@ -56,7 +57,7 @@ const NOTHING_OPEN = /^none\.?$/i;
 const refuse = (reason: Refusal, message: string): Refused => ({ ok: false, reason, message });
 
 const loadSpecFiles = async (deps: RefinementDeps, key: string): Promise<readonly SpecFile[]> => {
-  const markdown = (await deps.tickets.listAttachments(key)).filter((attachment) => attachment.name.endsWith('.md'));
+  const markdown = (await deps.tickets.listAttachments(key)).filter(({ name }) => name.endsWith('.md') && !name.startsWith(FACTORY_PREFIX));
   const newest = markdown.filter((attachment, index) => markdown.findLastIndex((other) => other.name === attachment.name) === index);
   const files = await Promise.all(newest.map(async ({ name, link }) => ({ name, content: await deps.tickets.readAttachment(link) })));
   return files.toSorted((a, b) => a.name.localeCompare(b.name));
@@ -140,8 +141,8 @@ export const pullSpecFiles = async (deps: RefinementDeps, key: string): Promise<
 
 export const pushSpecFiles = async (deps: RefinementDeps, key: string, files: readonly SpecFile[]): Promise<PushResult> => {
   if ((await deps.tickets.getTicket(key)) === undefined) return refuse('not_found', `${key} does not exist`);
-  const notSpec = files.find((file) => !file.name.endsWith('.md'));
-  if (notSpec !== undefined) return refuse('no_spec', `${notSpec.name} is not a spec file. Spec files end in .md`);
+  const notSpec = files.find((file) => !file.name.endsWith('.md') || file.name.startsWith(FACTORY_PREFIX));
+  if (notSpec !== undefined) return refuse('no_spec', `${notSpec.name} is not a spec file. Spec files end in .md and do not start with ${FACTORY_PREFIX}`);
   const attached = await loadSpecFiles(deps, key);
   const changed = files.filter((file) => attached.find((existing) => existing.name === file.name)?.content !== file.content);
   await changed.reduce(async (previous, { name, content }) => {

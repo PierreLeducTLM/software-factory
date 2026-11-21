@@ -255,7 +255,7 @@ const afterDiagnosis = async (context: Context, record: TicketRecord, input: Adv
 
   const report = await deps.tickets.addAttachment({
     key,
-    name: `failure-report-run-${record.runs.length}.md`,
+    name: `factory-failure-report-run-${record.runs.length}.md`,
     content: failureReport(context, record, diagnosis),
   });
   await leave(context, changeLatestRun(diagnosed, (run) => ({ ...run, report })), 'blocked', 'blocked', `blocked (${diagnosis.kind})`);

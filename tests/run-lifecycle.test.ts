@@ -6,7 +6,7 @@ import type { Ticket, TicketProvider } from '../src/adapters/ticket-provider.js'
 import { parseFactoryConfig, type FactoryConfig } from '../src/config/project-config.js';
 import { beginStep, finishStep, nextTicket, runTicket, type FactoryDeps } from '../src/factory/run-lifecycle.js';
 import { loadRecord, saveRecord } from '../src/record/record-store.js';
-import { createRecord, recordApproval, recordReadyGate, renderComment, setState, type TicketRecord } from '../src/record/ticket-record.js';
+import { createRecord, endRun, recordApproval, recordReadyGate, renderComment, setState, startRun, type TicketRecord } from '../src/record/ticket-record.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
 
 const getConfig = (inDevelopment = 'In development'): FactoryConfig => {
@@ -276,6 +276,120 @@ const claimFromStaleRead = async (world: World, deps: FactoryDeps) => {
   const tickets: TicketProvider = { ...world.tickets, getTicket: async () => stale };
   return runTicket({ ...deps, tickets }, 'PAY-142');
 };
+
+const withEndedRuns = (count: number, status: 'sent_back' | 'blocked' = 'sent_back'): TicketRecord =>
+  Array.from({ length: count }, (_, index) => index).reduce(
+    (record, index) =>
+      endRun(startRun(record, { claimant: 'pierre', machine: 'pierre-mbp', worktreeId: `old-${index}`, at: '2026-11-20T17:00:00Z', attemptLimit: 5 }), {
+        status,
+        at: '2026-11-20T18:00:00Z',
+        by: 'pierre',
+      }),
+    getApprovedRecord(),
+  );
+
+const withRuns = (count: number, overrides?: Partial<Ticket>, status: 'sent_back' | 'blocked' = 'sent_back'): Ticket =>
+  getMockTicket({ factoryComment: renderComment({ record: withEndedRuns(count, status), summary: 'Approved again' }), ...overrides });
+
+describe('run limit', () => {
+  it('refuses a run on a ticket that has used every run it is allowed, changing nothing', async () => {
+    const world = getWorld([withRuns(3)]);
+    const before = await world.tickets.getFactoryComment('PAY-142');
+
+    const result = await runTicket(depsFor(world), 'PAY-142');
+
+    expect(result).toEqual({ ok: false, reason: 'run_limit', message: 'PAY-142 has used 3 of 3 runs. Use --over-limit to start one more' });
+    expect((await world.tickets.getTicket('PAY-142'))?.status).toBe('Ready for Dev');
+    expect(await world.tickets.getFactoryComment('PAY-142')).toBe(before);
+  });
+
+  it('allows the last run the limit permits, with no override recorded', async () => {
+    const world = getWorld([withRuns(2)]);
+
+    const result = await runTicket(depsFor(world), 'PAY-142');
+
+    expect(result).toMatchObject({ ok: true, run: 3, attempt: 1 });
+    expect((await recordOf(world, 'PAY-142')).events.some((event) => event.type === 'run_limit_overridden')).toBe(false);
+  });
+
+  it('starts one more run at attempt 1 when the developer overrides the limit, and records who did', async () => {
+    const world = getWorld([withRuns(3)]);
+
+    const result = await runTicket(depsFor(world), 'PAY-142', { overLimit: true });
+
+    const record = await recordOf(world, 'PAY-142');
+    expect(result).toMatchObject({ ok: true, action: 'started', run: 4, attempt: 1 });
+    expect(record.events).toContainEqual({ at: '2026-11-21T08:00:00Z', by: 'pierre', type: 'run_limit_overridden', detail: 'run 4 of 3' });
+  });
+
+  it('honours the run limit the project configured', async () => {
+    const world = getWorld([withRuns(1)]);
+    const config = { ...getConfig(), limits: { attempts: 5, runs: 1 } };
+
+    expect(await runTicket(depsFor(world, { config }), 'PAY-142')).toMatchObject({ ok: false, reason: 'run_limit', message: 'PAY-142 has used 1 of 1 runs. Use --over-limit to start one more' });
+  });
+
+  it('skips a ticket at its limit when taking the next one', async () => {
+    const world = getWorld([
+      withRuns(3, { key: 'PAY-1', labels: ['factory-auto'], statusSince: '2026-11-18T12:00:00Z' }),
+      withRuns(2, { key: 'PAY-2', labels: ['factory-auto'], statusSince: '2026-11-19T12:00:00Z' }),
+      getMockTicket({ key: 'PAY-3', labels: ['factory-auto'], statusSince: '2026-11-20T12:00:00Z', factoryComment: 'not a record' }),
+    ]);
+
+    const result = await nextTicket(depsFor(world));
+
+    expect(result).toMatchObject({ ok: true, key: 'PAY-2', run: 3 });
+    expect((await world.tickets.getTicket('PAY-1'))?.status).toBe('Ready for Dev');
+  });
+
+  it('still offers a ticket whose record cannot be read, and refuses it at the claim', async () => {
+    const world = getWorld([getMockTicket({ key: 'PAY-3', labels: ['factory-auto'], factoryComment: 'not a record' })]);
+
+    expect(await nextTicket(depsFor(world))).toMatchObject({ ok: false, reason: 'not_approved' });
+  });
+
+  it('still offers a ticket the factory never touched, and refuses it at the claim', async () => {
+    const world = getWorld([getMockTicket({ labels: ['factory-auto'] })]);
+
+    expect(await nextTicket(depsFor(world))).toMatchObject({ ok: false, reason: 'not_approved' });
+  });
+});
+
+describe('retrying a blocked ticket', () => {
+  it('asks for confirmation first, changing nothing', async () => {
+    const world = getWorld([withRuns(1, { status: 'Blocked' }, 'blocked')]);
+
+    const result = await runTicket(depsFor(world), 'PAY-142');
+
+    expect(result).toEqual({ ok: false, reason: 'needs_retry_confirmation', message: 'PAY-142 is in "Blocked". Confirm to retry it with a new run' });
+    expect((await world.tickets.getTicket('PAY-142'))?.status).toBe('Blocked');
+  });
+
+  it('moves the ticket to In development and starts a new run at attempt 1, with no new approval', async () => {
+    const world = getWorld([withRuns(1, { status: 'Blocked' }, 'blocked')]);
+
+    const result = await runTicket(depsFor(world), 'PAY-142', { confirmRetry: true });
+
+    const record = await recordOf(world, 'PAY-142');
+    expect(result).toEqual({ ok: true, action: 'started', key: 'PAY-142', run: 2, attempt: 1, step: 'revalidate' });
+    expect((await world.tickets.getTicket('PAY-142'))?.status).toBe('In development');
+    expect(record.runs.map((run) => run.status)).toEqual(['blocked', 'running']);
+    expect(record.refinement.approval?.at).toBe('2026-11-20T16:00:00Z');
+  });
+
+  it('counts the retry against the run limit', async () => {
+    const world = getWorld([withRuns(3, { status: 'Blocked' }, 'blocked')]);
+
+    expect(await runTicket(depsFor(world), 'PAY-142', { confirmRetry: true })).toMatchObject({ ok: false, reason: 'run_limit' });
+    expect(await runTicket(depsFor(world), 'PAY-142', { confirmRetry: true, overLimit: true })).toMatchObject({ ok: true, run: 4 });
+  });
+
+  it('is never picked by the next command, even with the auto label', async () => {
+    const world = getWorld([withRuns(1, { status: 'Blocked', labels: ['factory-auto'] }, 'blocked')]);
+
+    expect(await nextTicket(depsFor(world))).toMatchObject({ ok: false, reason: 'nothing_eligible' });
+  });
+});
 
 describe('taking the next ticket', () => {
   it('claims the auto-labelled ticket that has been ready the longest', async () => {

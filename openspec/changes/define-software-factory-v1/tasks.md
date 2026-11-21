@@ -41,9 +41,9 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 - [ ] 3.4 Implement the Decisions → delta → canonical lookup and the send-back on an unanswered observable question, and verify both "No questions during development" scenarios
 - [ ] 3.5 Implement the review station (OpenSpec verify, then an independent reviewer agent), and verify the "Verify finds an uncovered scenario" scenario
 - [x] 3.6 Implement the three exits and their reports, with the diagnosis limited to {code, spec, environment}, and verify the "All gates pass on attempt 2", "Spec diagnosis after five failures", "Flaky end-to-end test" and "Report without diagnosis" scenarios
-- [ ] 3.7 Implement the retry of a Blocked ticket through `factory run`, and verify the "Retry after fixing a flaky test", "Drift since the ticket was blocked" and "Blocked ticket with the auto label" scenarios
-- [ ] 3.8 Implement the run limit per ticket (default 3, configurable) and the `--over-limit` override, and verify the "Fourth run refused", "Override" and "Next skips a ticket at its limit" scenarios
-- [ ] 3.9 Compact the oldest runs' attempt details to the archive attachment when the record is over budget, keeping each run's outcome, attempts used, time, cost and report link, and verify with a record holding three runs
+- [x] 3.7 Implement the retry of a Blocked ticket through `factory run`, and verify the "Retry after fixing a flaky test", "Drift since the ticket was blocked" and "Blocked ticket with the auto label" scenarios
+- [x] 3.8 Implement the run limit per ticket (default 3, configurable) and the `--over-limit` override, and verify the "Fourth run refused", "Override" and "Next skips a ticket at its limit" scenarios
+- [x] 3.9 Compact the oldest runs' attempt details to the archive attachment when the record is over budget, keeping each run's outcome, attempts used, time, cost and report link, and verify with a record holding three runs
 - [ ] 3.10 Pilot gate: 10 pilot tickets processed, and every failure is explained by its report
 
 ## 4. Phase 3: Visibility (ticket provider only)

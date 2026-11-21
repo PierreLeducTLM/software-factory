@@ -46,6 +46,7 @@ const RunSchema = z.object({
   diagnosis: z.enum(['code', 'spec', 'environment']).optional(),
   report: z.string().optional(),
   pullRequest: z.object({ number: z.number(), url: z.string() }).optional(),
+  compacted: z.boolean().optional(),
 });
 
 const FactoryStateSchema = z.enum(['to_refine', 'spec_review', 'ready_for_dev', 'in_development', 'in_review', 'blocked', 'done']);

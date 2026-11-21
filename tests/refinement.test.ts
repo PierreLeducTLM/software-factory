@@ -554,6 +554,17 @@ describe('moving spec files between the ticket and a folder', () => {
     expect(pushed).toEqual({ ok: true, attached: ['proposal.md'] });
   });
 
+  it('never treats the factory\'s own attachments as spec files', async () => {
+    const world = await getWorld(inSpecReview());
+    await world.tickets.addAttachment({ key: 'PAY-142', name: 'factory-failure-report-run-1.md', content: '# Failure report' });
+
+    const pulled = await pullSpecFiles(depsFor(world), 'PAY-142');
+    const pushed = await pushSpecFiles(depsFor(world), 'PAY-142', [{ name: 'factory-notes.md', content: 'x' }]);
+
+    expect(pulled.ok && pulled.files.map((file) => file.name)).toEqual(['design.md', 'proposal.md', 'specs__billing__spec.md', 'tasks.md']);
+    expect(pushed).toMatchObject({ ok: false, reason: 'no_spec', message: 'factory-notes.md is not a spec file. Spec files end in .md and do not start with factory-' });
+  });
+
   it('refuses to push to a ticket that does not exist, or a file that is not markdown', async () => {
     const world = await getWorld(inSpecReview());
 
@@ -561,7 +572,7 @@ describe('moving spec files between the ticket and a folder', () => {
     expect(await pushSpecFiles(depsFor(world), 'PAY-142', [{ name: 'notes.txt', content: 'x' }])).toEqual({
       ok: false,
       reason: 'no_spec',
-      message: 'notes.txt is not a spec file. Spec files end in .md',
+      message: 'notes.txt is not a spec file. Spec files end in .md and do not start with factory-',
     });
     expect((await world.tickets.listAttachments('PAY-142')).length).toBe(Object.keys(SPEC_FILES).length);
   });

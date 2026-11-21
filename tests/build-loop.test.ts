@@ -399,7 +399,7 @@ describe('after the last attempt', () => {
 
     expect(result).toEqual({ ok: false, reason: 'input_required', message: 'Give one diagnosis: code, spec or environment' });
     expect(await world.status()).toBe('In development');
-    expect((await world.tickets.listAttachments('PAY-142')).some((attachment) => attachment.name.startsWith('failure-report'))).toBe(false);
+    expect((await world.tickets.listAttachments('PAY-142')).some((attachment) => attachment.name.startsWith('factory-failure-report'))).toBe(false);
   });
 
   it.each(['code', 'environment'] as const)('blocks the ticket with a failure report on a %s diagnosis', async (kind) => {
@@ -409,7 +409,7 @@ describe('after the last attempt', () => {
     const result = await world.step({ diagnosis: { kind, nextStep: 'Stabilize the exchange-rate fixture' } });
 
     const record = await world.record();
-    const report = (await world.tickets.listAttachments('PAY-142')).find((attachment) => attachment.name === 'failure-report-run-1.md');
+    const report = (await world.tickets.listAttachments('PAY-142')).find((attachment) => attachment.name === 'factory-failure-report-run-1.md');
     expect(result).toEqual({ ok: true, next: 'done', exit: 'blocked', report: report?.link });
     expect(await world.status()).toBe('Blocked');
     expect(record.state).toBe('blocked');
@@ -469,6 +469,37 @@ describe('after the last attempt', () => {
     expect(await world.step({ diagnosis: { kind: 'spec' } })).toEqual({ ok: false, reason: 'input_required', message: 'A spec diagnosis needs at least one question with a recommended answer' });
     expect(await world.step({ diagnosis: { kind: 'spec', questions: [] } })).toMatchObject({ ok: false, reason: 'input_required' });
     expect(await world.status()).toBe('In development');
+  });
+});
+
+describe('retrying a blocked ticket', () => {
+  const block = async (world: World) => {
+    await failQualityGate(world, 1);
+    await world.step({ diagnosis: { kind: 'environment' } });
+  };
+
+  it('revalidates and builds again in a new run once the developer confirms the retry', async () => {
+    const world = await getWorld({ attempts: 1 });
+    await block(world);
+
+    const retried = await runTicket(world.deps, 'PAY-142', { confirmRetry: true });
+    const result = await world.step();
+
+    expect(retried).toMatchObject({ ok: true, action: 'started', run: 2, attempt: 1 });
+    expect(result).toEqual({ ok: true, next: 'build', attempt: 1, feedback: [] });
+    expect((await world.record()).runs.map((run) => run.status)).toEqual(['blocked', 'running']);
+  });
+
+  it('sends the ticket back instead of building when main drifted while it was blocked', async () => {
+    const world = await getWorld({ attempts: 1 });
+    await block(world);
+    world.changedOnMain.push('src/billing/rounding.ts');
+    await runTicket(world.deps, 'PAY-142', { confirmRetry: true });
+
+    const result = await world.step();
+
+    expect(result).toMatchObject({ next: 'done', exit: 'sent_back' });
+    expect(await world.status()).toBe('Spec review');
   });
 });
 
