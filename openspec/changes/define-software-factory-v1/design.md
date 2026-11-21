@@ -1,0 +1,177 @@
+# Design
+
+## Context
+
+**Sources analyzed (read in full):**
+- *Software factory: design doc*, rev 461: all sections, the 3 diagrams (end-to-end process, architecture, implementation plan), the 3 code blocks and the Decisions table.
+- *Software factory dashboard* canvas: 3 screens. **Board** has 7 columns and a run-detail drawer with sample runs PAY-151, ENG-90, PAY-149, PAY-142, ENG-87, #231, PAY-138, PAY-133, PAY-147 and PAY-130. **Needs you** has 5 items. **Health** has KPIs, failure reasons, time per station and outcomes by provider.
+
+The repository is greenfield: it has one initial commit and no code and no specs. The baseline is therefore expressed as new capabilities. For motivation and the two adjustments, see proposal.md (Why).
+
+### Analysis: where the two artifacts stand against the adjustments
+
+| # | Finding | Source | Status after this change |
+|---|---|---|---|
+| A1 | The doc already says there is no running service and that `/factory-run` starts runs (Decisions: "Where the orchestrator runs"). | Doc, Architecture + Decisions | Kept, and made normative in `run-lifecycle` ("No orchestrator") |
+| A2 | The canvas still shows an orchestrator: "Auto · queued", "next in line", "picked up by the Orca bot", "bot · drift check", "the bot will not pick it up". | Canvas: Board, run detail, Needs you | Contradiction. Wording replaced (see Migration Plan) |
+| A3 | The doc's view "rebuilds the current state from tickets, PRs, factory/* branches and Orca worktrees". | Doc, Architecture | **Changed:** ticket provider only (`factory-view`) |
+| A4 | The architecture diagram shows run records "stored in tickets and PRs". | Doc, diagram | The ticket is the source of record. The PR is a mirror the view never reads (`run-record`) |
+| A5 | Interrupted runs were inferred from Orca worktrees. | Doc, Architecture | **Changed:** inferred from the current step's start time and timeout (D4) |
+| A6 | Health needs merge outcomes ("merged as is vs. changed", time waiting for merge, reverts within 2 weeks), but nothing in a serviceless design writes them to the ticket. | Doc, Shadow mode; Canvas, Health | **Gap closed:** `factory record-merge` CI step |
+| A7 | Cost per merge and time per station appear on the Board and in Health, but the doc never says where cost comes from. | Canvas | **Gap closed:** the record holds time and cost per attempt, taken from the agent runtime at step end |
+| A8 | Health shows "Outcomes by provider" (Jira, Linear, GitHub at once), but scope says "one repository at a time". | Canvas, Health; Doc, Scope | Compatible: one repository, several ticket providers. The view merges all configured ticket adapters |
+| A9 | Comment size limits (for example, Jira's ~32k characters) and 5 attempts of events can collide. | Doc, State without a database | **Gap closed:** size budget plus compaction to an attachment |
+| A10 | Anyone with edit rights can hand-edit the factory comment. | Doc, "Only the factory CLI writes" | **Gap closed:** checksum. The view flags the record, and the CLI asks before resuming |
+| A11 | Manual reverts (not opened by `factory revert`) are not detected, so the shadow threshold's "no revert" test could never fail. | Doc, Shadow mode aftermath | **Gap closed:** `record-merge` detects revert PRs and `git revert` commits on main (D11) |
+| A12 | The canvas column "Ready: label or manual" implies the label starts work. | Canvas, Board | Reworded: the label means *eligible for `/factory-next`* |
+| A13 | The canvas uses "Live · sample data" with no freshness indicator. | Canvas | The view shows its last refresh time and marks data stale on failure |
+| A14 | "Needs you · 5" counts PRs of every risk level. The doc says medium and high only. | Canvas vs. Doc | Spec: medium and high, or any level while that level is in shadow mode (every level at first) |
+| A15 | The canvas has no risk badge on cards, although the doc's Board row lists one. | Canvas vs. Doc | Spec requires the risk badge. The canvas needs it added |
+| A16 | Several runs can be "In development" for the same developer, but nothing defines what happens when a session dies. | Doc | Resume rules plus takeover confirmation (`run-lifecycle`) |
+| A17 | The CI steps must write to the ticket, but tokens live only in developers' environments. | Doc, Packaging | **Gap closed:** one service account per project, in CI secrets (D12) |
+| A18 | The approval stamp is written before the run record exists, by a skill that is not the CLI. | Doc, State without a database | **Gap closed:** the factory comment starts at the first refine session, and the CLI writes the stamp (D13) |
+| A19 | A sent-back or Blocked ticket runs again, but the doc defines neither a second run nor a way out of Blocked. | Doc, Build loop; Canvas, PAY-133 | **Gap closed:** new run with fresh attempts, and `/factory-run` retries a Blocked ticket (D14) |
+| A20 | The canvas offers "Add auto label", "Start in Orca" and "Retry after fix", which would be writes from a read-only view. | Canvas, Needs you | Buttons open the ticket or copy a command |
+| A21 | "Open in Orca" points at a session on one developer's machine. | Canvas, run detail | Offered only on that machine; otherwise the claimant is shown |
+| A22 | The canvas shows GitHub Issues tickets, but the plan builds no GitHub Issues adapter. | Canvas; Doc, Implementation plan | Task added in phase 5 |
+| A23 | The doc counts "fixes or reverts within 2 weeks". A fix cannot be told apart from ordinary work. | Doc, Shadow mode | Only reverts are counted |
+| A24 | "A pass marks the run delivered" has no place on the Board or in the record. | Doc, Post-merge watch | "Delivered" recorded and shown in Done |
+| A25 | Running cards carry "Manual" and "Auto" badges that meant "started by the bot or by a person". | Canvas, Board | Replaced by the claimant's name |
+
+## Goals / Non-Goals
+
+**Goals:**
+- Each view value can be traced to one field in a ticket's run record or ticket metadata.
+- Every factory write is attributable to one CLI invocation: from a developer's session, or from a CI step.
+- The design works with nothing running, and it survives a closed laptop at any step.
+
+**Non-Goals:**
+- Real-time push to the view. Webhooks would need a receiver, which is a service.
+- A cross-repository portfolio view.
+- Caching across view sessions. Any persistent cache would be a local database by another name.
+- Reading CI dashboards or PR pages to correct the record. If the record is wrong, the fix belongs in the CLI step that wrote it.
+
+## Decisions
+
+### D1. Two kinds of writer, and no third
+The only writers are the factory CLI run from a developer's session, and the factory CLI run as a CI step (`record-merge`, `revert`, `watch`). Provider automation (Done on merge) is tolerated but not relied on.
+- *Alternative considered:* a small webhook service for merges and CI results. Rejected because it contradicts "no orchestrator", and CI already runs at exactly the moments that matter.
+
+### D2. The ticket is the only source the view reads
+The record stores links (PR URL, branch, Orca session) and outcomes rather than asking source control at view time.
+- *Alternative considered:* mixed reads (tickets for state, source control for PR state). Rejected because of the adjustment, and because it needs two sets of credentials and two rate limits, and lets the two sources disagree.
+- *Cost:* PR state in the view is only as fresh as the last CLI or CI write. That is acceptable because every meaningful PR transition is followed by a factory write (open → CLI; merge → record-merge; revert → revert).
+
+### D3. Record lives in one edited comment, with a fenced machine block
+The record is a human summary on top and a fenced, versioned machine block below it, plus a checksum.
+- *Alternative considered:* Jira entity properties. They are invisible, structured and bulk-readable in JQL search, but Jira-only. They stay allowed as an adapter-internal optimization: the Jira adapter may mirror the block into a property for faster bulk reads, as long as the comment remains the canonical copy.
+- *Alternative considered:* one comment per event. Rejected because it floods the ticket and multiplies reads.
+
+### D4. Interruption = a step past its timeout
+The CLI only runs between steps, so nothing can write to the ticket while the agent builds. The CLI therefore writes a start time, an end time and the timeout for each step. The view shows a run as interrupted when its current step has no end time and started longer ago than its timeout plus a 10-minute grace period.
+- *Cost:* a session that dies early in a step is only flagged once that step's timeout has passed.
+- *Alternative considered:* a session-scoped process refreshing a heartbeat every 5 minutes. Rejected: it is a background process, which is what "no orchestrator" rules out.
+- *Alternative considered:* the agent calling `factory heartbeat` while it works. Rejected: it depends on the agent remembering.
+- *Alternative considered:* scanning Orca worktrees. Rejected under D2.
+
+### D5. View refresh = incremental search plus in-memory model
+- On start, the view runs one full search per ticket adapter: the open factory states, plus Done within the Health window.
+- After that, it runs a search for tickets updated since the last refresh every 60 seconds (configurable).
+- It keeps everything in an in-memory map and throws it away on close.
+- Changing the Health window triggers a new provider search, not a local query.
+
+### D6. Repository scoping
+The record carries the repository identifier. Each ticket adapter's search is also narrowed by a per-repository filter in `adapters.yaml` (a JQL fragment, a Linear team or project, or a GitHub repo), so a shared tracker project serves several repositories.
+
+### D7. Merge outcome computation
+`record-merge` compares the merged tree with the factory's last pushed commit through the source-control adapter. Health treats any difference as a disagreement. Only CI steps use source control; the view never does.
+
+### D8. Cost source
+At each step end, the agent-runtime adapter reports token cost for the session. The CLI writes cost per attempt. Health sums the cost across all attempts of every run of a merged ticket.
+
+This assumes Orca can report a session's cost, which has not been checked. Cost is therefore optional in the record: without it, cards show no cost and the ticket is left out of cost per merge.
+
+### D9. Command surface (CLI)
+| Command | Called by | Purpose |
+|---|---|---|
+| `factory ready-gate` / `factory approve` | the refine skill | ready-gate result, approval stamp |
+| `factory run <KEY>` / `factory next` | the skills `/factory-run`, `/factory-next` | claim, revalidate, loop, exits, retry of a Blocked ticket |
+| `factory record-merge` | CI, on every merge to main | merge outcome, Done, revert detection |
+| `factory revert` | CI, on red main after an auto-merge | revert PR, back to shadow mode, Needs you |
+| `factory watch` | deploy pipeline (optional) | smoke checks, delivered or reverted |
+| `factory view` | developer | read-only dashboard |
+| `factory doctor` / `init` / `workflow` | skills | setup and maintenance |
+
+### D10. One comment from refinement to delivery
+The factory comment is created at the first refine session. It holds a refinement section (ready-gate result, approval stamp, predicted risk) and a list of runs. The refine skill calls `factory ready-gate` and `factory approve`, so the CLI stays the only writer and the view reads one place.
+- *Alternative considered:* a separate approval comment written by the refine skill. Rejected: two writers and two formats.
+- *Alternative considered:* the stamp inside the spec text. Rejected: approving would change the content the fingerprint covers.
+
+### D11. Reverts are detected from main
+`record-merge` runs on every merge to main, not only on factory PRs. Besides recording merge outcomes, it recognizes revert PRs and `git revert` commits, which name the change they revert, and marks the original ticket as reverted. This is what makes the shadow threshold's "no revert within 2 weeks" test meaningful while people are still merging.
+- *Alternative considered:* a `factory:reverted` label added by hand. Rejected: the safety check would silently depend on people remembering.
+
+### D12. CI writes as a service account
+The CI steps use one ticket-provider service account per project, with its token in the CI secret store. The wizard sets it up and checks its permissions, and `factory doctor` flags it when missing or expired. Every event names the identity that wrote it, so a CI write is distinguishable from a developer's.
+- *Alternative considered:* CI writes only to the PR and a later developer command copies the outcome into the ticket. Rejected: the view would have to read PRs, or show outcomes late.
+
+### D13. Several runs per ticket
+Each claim appends a new run with fresh attempts. A ticket gets at most 3 runs by default, configurable in `factory.yaml`. At the limit, `/factory-run` refuses, `/factory-next` skips the ticket, and Needs you lists it. A developer can start one more run with `--over-limit`, which is confirmed and recorded. This stops an endless send-back or retry loop while leaving a deliberate way through.
+- *Alternative considered:* no cap, with Health showing tickets that have 3 or more runs. Rejected: it only makes the loop visible.
+- *Alternative considered:* a hard cap with no override. Rejected: a ticket could become impossible to deliver through the factory.
+
+Health's first-pass rate counts only tickets merged on attempt 1 of their first run, while average attempts and cost per merge sum every run.
+
+### D14. Leaving Blocked
+`/factory-run <KEY>` on a Blocked ticket asks for confirmation, moves it to In development, revalidates and starts a new run. No new approval is needed because the spec is unchanged, and revalidation still catches drift. `/factory-next` never picks a Blocked ticket.
+- *Alternative considered:* a person drags the ticket back to Ready for Dev. Rejected: a status change outside the CLI.
+- *Alternative considered:* always back through refinement. Rejected: a human approval to retry after fixing a flaky test.
+
+## Risks / Trade-offs
+
+- [Provider rate limits when many developers keep the view open] → Incremental search, a configurable interval, back-off on throttling, and a visible "stale since" indicator. In Jira, one search with comment expansion per refresh. Consider entity-property mirroring (D3) if this proves costly.
+- [Records drift from reality when a CI step is missing or fails] → `factory doctor` checks that the CI steps exist. The view flags tickets In review for longer than N days with no merge outcome as "outcome unknown".
+- [An undo written by hand, with no reference to the original change, is not detected as a revert] → Accepted for v1. Revert PRs and `git revert` commits are detected (D11).
+- [A dead session is flagged only after its step's timeout (D4)] → Accepted. Timeouts are set from measured durations, so the delay is bounded by how long the step normally takes.
+- [The service account can write to any ticket it can reach] → Give it comment and transition rights on the factory's projects only. Every event names its writer.
+- [The run limit is reached for reasons outside the ticket, such as a flaky environment] → The `--over-limit` override, recorded with the developer's name.
+- [Orca may not report cost] → Cost is optional (D8). Check before building the Health cost tile.
+- [Comment size limit] → Size budget plus compaction to an attachment (`run-record`). Large logs always go to attachments.
+- [Hand-edited record] → Checksum. The view flags the ticket, and the CLI asks for confirmation before resuming.
+- [PR state in the view lags reality] → Accepted (D2). Each PR transition is followed by a factory write within one CI run.
+- [Comment edits notify ticket watchers] → Edit the existing comment only, with no new comments, and write only at step start and end. Where the provider supports it, use a notify-suppressed edit.
+- [No push updates] → Accepted. Polling at 60 seconds is enough for a board measured in minutes and hours.
+
+## Migration Plan
+
+There is no code to migrate. The two source artifacts need these updates once the change is approved:
+
+1. **Design doc, Architecture.** Replace "rebuilds the current state from tickets, PRs, factory/* branches and Orca worktrees" with "rebuilds the current state from the ticket provider only". Add `factory record-merge` to "Two pieces replace a background orchestrator", and name the run record as the single source of truth. In the architecture diagram, change "stored in tickets and PRs" to "stored in tickets (PR mirrors)".
+2. **Design doc, Visibility.** Add the freshness indicator and the interrupted-run rule based on step timeouts.
+3. **Design doc, other sections.**
+   - State without a database: the factory comment starts at the first refine session and holds a list of runs.
+   - Ticket states: Blocked → In development through `/factory-run`.
+   - Shadow mode: only reverts are counted, and `record-merge` detects them.
+   - Packaging: the CI service account. Implementation plan: a GitHub Issues adapter.
+4. **Dashboard, Board.**
+   - Change the column subtitles: Ready to "waiting · /factory-run", and Revalidate to "factory CLI · drift check".
+   - Change the ENG-90 card from "Auto · queued" / "next in line" to "Eligible for /factory-next".
+   - Change the reval-pending detail from "picked up by the Orca bot…" to "Eligible for /factory-next; nothing starts it until a developer runs a command."
+   - Add the risk badge to cards, and a "delivered" mark in Done.
+   - Replace the "Manual" and "Auto" badges on running cards with the claimant's name.
+   - Offer "Open in Orca" only for runs on this machine.
+   - Replace "Live" with "Updated <time> ago".
+5. **Dashboard, Needs you.**
+   - Change PAY-151 from "the bot will not pick it up" to "no developer has started it; add the auto label to make it eligible for /factory-next".
+   - Add the categories Interrupted and Reverted.
+   - Change the buttons that imply a write: "Add auto label" opens the ticket, "Start in Orca" copies `/factory-run PAY-151`, and "Retry after fix" copies `/factory-run PAY-133`.
+   - Change PAY-133's next step from "move the ticket back to Ready for Dev" to "run /factory-run PAY-133".
+6. **Dashboard, Health.** Add shadow-mode agreement per level and reverts within 2 weeks, both listed in the doc's Visibility table but missing from the canvas.
+
+Rollback is not applicable: these are planning artifacts only.
+
+## Open Questions
+
+- **Default poll interval per provider.** 60 seconds suits Jira Cloud. Linear and GitHub limits may justify different defaults. These can be tuned without changing the specs.
+- **Per-adapter comment budget.** The exact size per provider can be set during adapter implementation.
+- **Notify-suppressed edits.** Whether each provider supports them affects only notification noise, not the behavior.
