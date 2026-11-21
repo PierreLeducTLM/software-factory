@@ -87,6 +87,7 @@ factory advance <KEY> --verdict openspec-verify=<file> --json
 For each check, start a fresh subagent that did not write the code. Give it the diff against main, the spec, and for an agent check its criteria file. Ask it for a verdict in the format below and nothing else.
 
 - The reviewer compares the diff with the spec: every requirement and scenario honoured, nothing built that the spec does not ask for.
+- Ask the reviewer to raise the risk when the change is riskier than it looks, for example when it touches behaviour that many features depend on.
 - An agent check applies its criteria file, and attaches the evidence the check requires.
 
 Save each verdict to its own file exactly as the subagent returned it. Never write, edit or summarise a verdict yourself. Then hand them all in together:
@@ -119,7 +120,7 @@ factory advance <KEY> --diagnosis spec --question "<question>" --recommended "<a
 
 Stop and report the `exit`:
 
-- `pull_request`: give the pull request link
+- `pull_request`: give the pull request link, and say who merges it (the pull request's "Merge" section says so)
 - `sent_back`: the ticket is back in refinement; list the questions
 - `blocked`: give the link to the failure report
 
@@ -138,6 +139,15 @@ A verdict is one JSON object and nothing else. Anything else counts as a failed 
 - `verdict` is `pass` or `fail`.
 - `findings` lists what is wrong, one string each. It is empty on a pass.
 - `evidence` lists the proof the check requires, such as screenshot paths. A pass without required evidence fails.
+
+The reviewer, and only the reviewer, may also raise the risk of the change. It adds two fields to its verdict:
+
+```json
+{ "verdict": "pass", "findings": [], "evidence": [], "risk": "high", "riskReason": "Changes how invoices are rounded" }
+```
+
+- `risk` is `low`, `medium` or `high`. A level lower than the one the factory computed is ignored.
+- `riskReason` says why, in one sentence. Without it the raise is ignored.
 
 ## Guardrails
 

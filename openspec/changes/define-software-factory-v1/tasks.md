@@ -74,10 +74,10 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 
 ## 6. Phase 5: Risk and auto-merge
 
-- [ ] 6.1 Implement the risk scoring script (signals, score, level, reasons, the higher of predicted and actual), and verify the "Diff riskier than predicted", "Reviewer attempts to lower" and "Risk report present" scenarios
-- [ ] 6.2 Implement the merge policy, the overrides and shadow mode, and verify the "Ticket-level override", "Source control without per-PR auto-merge" and "Low risk in shadow mode" scenarios
-- [ ] 6.3 Implement the `factory record-merge` CI step under the service account, with revert detection on every merge to main, and verify the "Human edits before merge", "Provider already moved to Done", "Person reverts a shadow-mode merge", "Ordinary merge" and "CI step without a service account" scenarios
-- [ ] 6.4 Implement the `factory revert` and `factory watch` CI steps, and verify the "Red main after auto-merge", "Source control that cannot open a revert" and "Watch disabled" scenarios
-- [ ] 6.5 Implement Health from records only (all metrics, by provider, period switch, several runs per ticket, shadow threshold suggestion), and verify the "Time waiting for merge", "Period switch", "Ticket merged on its second run" and "Threshold reached" scenarios
+- [x] 6.1 Implement the risk scoring script (signals, score, level, reasons, the higher of predicted and actual), and verify the "Diff riskier than predicted", "Reviewer attempts to lower" and "Risk report present" scenarios
+- [x] 6.2 Implement the merge policy, the overrides and shadow mode, and verify the "Ticket-level override", "Source control without per-PR auto-merge" and "Low risk in shadow mode" scenarios
+- [x] 6.3 Implement the `factory record-merge` CI step under the service account, with revert detection on every merge to main, and verify the "Human edits before merge", "Provider already moved to Done", "Person reverts a shadow-mode merge", "Ordinary merge" and "CI step without a service account" scenarios
+- [x] 6.4 Implement the `factory revert` and `factory watch` CI steps, and verify the "Red main after auto-merge", "Source control that cannot open a revert" and "Watch disabled" scenarios
+- [x] 6.5 Implement Health from records only (all metrics, by provider, period switch, several runs per ticket, shadow threshold suggestion), and verify the "Time waiting for merge", "Period switch", "Ticket merged on its second run" and "Threshold reached" scenarios
 - [ ] 6.6 Implement the Linear and GitHub Issues ticket adapters against the shared contract tests, and verify the "Same pipeline for Jira and Linear" and "GitHub Issues added" scenarios
 - [ ] 6.7 Pilot gate: low risk meets its shadow threshold, and auto-merge is enabled through a `/factory-workflow` PR

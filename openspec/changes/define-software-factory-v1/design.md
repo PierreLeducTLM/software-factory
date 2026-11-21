@@ -153,9 +153,44 @@ The agent in the session where `/factory-run` was typed is the builder. The skil
 - **Sample mode.** `factory view --sample` shows sample tickets through the same model and screens, with no project config and no credentials.
 - **Runs record the real machine name.** Orca's host id is "local" on every computer, so it could not tell two machines apart. Runs now record the hostname, which the one-run-per-worktree check and the "on your machine" note use.
 - **No link into Orca yet.** The run detail says whether a run is on this machine or in a teammate's Orca. It does not open the session: the record holds the worktree, and a web page cannot run the Orca command.
-- **Health is not built.** It belongs to phase 5, with the merge outcomes it depends on.
+- **Health** is the third page. See D19.
 - *Alternative considered:* a server-rendered page with no framework. Rejected in favour of TanStack Start.
 - *Alternative considered:* a terminal view. Rejected: it drops the mockup's layout.
+
+### D18. Risk is scored by the factory, and the project can add its own signals
+Risk is scored in code from `risk` in `factory.yaml`, so every project gets the same arithmetic.
+
+| Signal | Points | Source |
+|---|---|---|
+| Sensitive paths | 4 | `risk.sensitive_paths` |
+| Kind of change | per kind: migration 3, dependency update 2, CI or infrastructure 2 by default | `risk.kinds` |
+| Size | 2 for more files than `size.files`, 2 for more lines than `size.lines`, 1 for more than one capability | the diff and the delta specs |
+| Confidence | 1 for 2 attempts, 2 for 3 or more, 1 when an advisory check failed | the run record |
+| Project signals | any, including negative | `risk.script` |
+
+The score becomes a level at `risk.thresholds` (medium 3, high 6 by default), so one sensitive path is always at least medium.
+
+- **Predicted risk** applies the same path rules to the "Affected paths" section of the spec, and counts its delta specs.
+- **Coverage of changed lines and a feature-flag safety net** are not built in, because both depend on the project's tooling. A project reports them through `risk.script`, which prints `{"signals":[{"name","points","reason"}]}`. A script that fails or prints anything else makes the change high risk.
+- **The reviewer raises the level** by adding `risk` and `riskReason` to its verdict. A lower level, or an empty reason, is ignored.
+- **The merge route is decided when the pull request opens** and written on the run with its reason: the level's route, then the approval ceiling, the `no_automerge` label, and shadow mode. The dashboard shows that recorded decision; it does not recompute it.
+- **Shadow mode per level.** `risk.shadow` applies to every level; a level's own `shadow` overrides it. Turning auto-merge on for a level is one line: `low: { merge: auto, shadow: false, auto_since: <date> }`.
+- **"Back to shadow mode" needs no stored switch.** Before turning auto-merge on, the factory searches the tickets updated since the level's `auto_since` date. If one of them was auto-merged at that level and then reverted, the level is treated as in shadow mode. A person turns it back on by moving `auto_since` to a later date, in a reviewed pull request.
+- **A refused auto-merge leaves the pull request open.** The refusal reason is written on the run and the pull request, and the ticket shows in Needs you. On Bitbucket, the first merge attempt comes right after the pull request opens, so it is refused whenever a required build has not finished.
+
+### D19. CI steps and Health
+`factory record-merge`, `factory revert` and `factory watch` take `--commit` (HEAD by default) and, optionally, `--pull-request`.
+
+- **Finding the pull request.** The step reads the commit message: "Merge pull request #N" and "(#N)" on GitHub, "(pull request #N)" on Bitbucket. A rebase merge names no pull request, so its CI must pass `--pull-request`.
+- **Finding the ticket.** A factory pull request starts with `Ticket: <KEY>`. A merge with no such line, or whose ticket has no run for that pull request, writes nothing.
+- **Reverts.** A revert pull request names the one it reverts; a `git revert` commit names the commit, whose message names the pull request.
+- **A CI step never fails the build.** With no service-account token, or when a provider is down, the step prints the reason and "The factory step was skipped", and exits 0. Only `factory watch` exits 1, when a smoke check fails.
+- **A hand-edited record is left alone in CI.** No person is there to confirm it, so the step writes nothing.
+- **Watch.** `watch: { enabled, checks, duration, interval }` in `factory.yaml`. The step runs every smoke command each interval for the duration. The first failure opens a revert, or records that one is needed. A pass marks the run delivered, shown as "Delivered" in Done.
+- **Needs you** lists a merged change whose revert is still open or still to do, before anything else.
+- **Health** reads the tickets updated in the period (7, 30 or 90 days) from the provider on each visit, and computes every metric from their records. "Waiting for merge" runs from the end of the run's last step to the merge time.
+- **Cost per merge is shown as "Not reported".** Orca does not report cost (A-finding), so there is nothing to sum.
+- **The shadow-mode suggestion counts the latest changes of a level in the chosen period.** A threshold of 20 may need the 30- or 90-day period to be reached.
 
 ### D15. Adapter choices found while building
 - **Repository scoping is the adapter's configuration, not a search criterion.** A ticket-provider adapter is created for one repository with one filter, and every ticket it returns names that repository.
