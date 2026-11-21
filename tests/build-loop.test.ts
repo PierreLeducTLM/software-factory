@@ -171,6 +171,20 @@ describe('one attempt, start to finish', () => {
     });
   });
 
+  it('opens a pull request whose gate results and risk are the ones in the ticket\'s record', async () => {
+    const world = await getWorld();
+    await reachReview(world);
+
+    await world.step({ verdicts: { reviewer: PASS } });
+
+    const record = await world.record();
+    const body = (await world.sourceControl.getPullRequest(401))?.body ?? '';
+    const recorded = record.runs[0]?.attempts.at(-1)?.outcomes.map((outcome) => `- ${outcome.id} (${outcome.station}): ${outcome.status}`) ?? [];
+    expect(recorded).toHaveLength(5);
+    expect(recorded.filter((line) => !body.includes(line))).toEqual([]);
+    expect(body).toContain(`Risk: predicted ${record.refinement.approval?.predictedRisk}`);
+  });
+
   it('keeps the evidence of an agent check with its result', async () => {
     const world = await getWorld({ changedFiles: ['README.md', 'src/ui/settings.tsx'] });
     await reachReview(world);
