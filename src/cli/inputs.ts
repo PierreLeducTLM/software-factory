@@ -17,7 +17,7 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
   };
 
   return {
-    userName: async (): Promise<string> => (await run(['config', 'user.name'])).stdout.trim(),
+    userName: async (): Promise<string> => (await run(['config', '--default', '', '--get', 'user.name'])).stdout.trim(),
     mainCommit: (): Promise<string> => fetched(['rev-parse', remoteMain]),
     changedFilesSince: async (commit: string): Promise<readonly string[]> =>
       (await fetched(['diff', '--name-only', commit, remoteMain])).split('\n').filter((line) => line !== ''),
@@ -28,6 +28,7 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
         .split('\n')
         .flatMap((line) => line.split('\t').slice(0, 2))
         .reduce((total, count) => total + (Number(count) || 0), 0),
+    commitMessage: async (commit: string): Promise<string> => (await run(['log', '-1', '--format=%B', commit])).stdout.trim(),
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
     },

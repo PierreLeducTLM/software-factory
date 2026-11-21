@@ -83,6 +83,20 @@ describe('git inputs', () => {
     expect(await inputsFor(clone).linesChangedOnBranch()).toBe(4);
   });
 
+  it('reads the full message of a commit', async () => {
+    const { clone } = getClone();
+    git(clone, 'commit', '-q', '--allow-empty', '-m', 'Revert "Bulk export"', '-m', 'This reverts commit abc1234.');
+
+    expect(await inputsFor(clone).commitMessage('HEAD')).toBe('Revert "Bulk export"\n\nThis reverts commit abc1234.');
+  });
+
+  it('gives an empty user name when git has none', async () => {
+    const { clone } = getClone();
+    git(clone, 'config', 'user.name', '');
+
+    expect(await inputsFor(clone).userName()).toBe('');
+  });
+
   it('pushes the branch to origin', async () => {
     const { origin, clone } = getClone();
     git(clone, 'checkout', '-q', '-b', 'factory/pay-142');

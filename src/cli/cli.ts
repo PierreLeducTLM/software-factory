@@ -12,6 +12,7 @@ import {
   type StatusResult,
 } from '../factory/refinement.js';
 import { advance, type AdvanceInput, type AdvanceResult, type LoopDeps } from '../factory/build-loop.js';
+import { recordMerge, revertMerge, watchRun, type RecordMergeResult, type RevertResult, type WatchResult } from '../factory/merge.js';
 import { nextTicket, runTicket, type RunResult } from '../factory/run-lifecycle.js';
 import type { SpecFolder } from './inputs.js';
 
@@ -42,13 +43,19 @@ const USAGE = [
   '  revalidate <KEY>                check the spec and main for drift',
   '  next                            claim the next eligible ticket',
   '  view [--sample] [--port <n>]    open the read-only dashboard',
+  'In CI, with the service account:',
+  '  record-merge [--commit <sha>] [--pull-request <n>]   on every merge to main',
+  '  revert [--commit <sha>] [--pull-request <n>]         when main fails after an auto-merge',
+  '  watch [--commit <sha>] [--pull-request <n>]          after a deploy to staging',
   'Add --json to any command for one line of JSON.',
 ];
 
 const OK = 0;
 const REFUSED = 1;
 const USAGE_ERROR = 2;
-const VALUED = ['--ceiling', '--to', '--from', '--changed', '--decision', '--question', '--recommended', '--verdict', '--diagnosis', '--next-step'];
+const CI_COMMANDS = ['record-merge', 'revert', 'watch'];
+const SKIPPED = 'The factory step was skipped. The build is not affected.';
+const VALUED = ['--commit', '--pull-request', '--ceiling', '--to', '--from', '--changed', '--decision', '--question', '--recommended', '--verdict', '--diagnosis', '--next-step'];
 const DIAGNOSES = ['code', 'spec', 'environment'] as const;
 
 const outcome = (result: { readonly ok: boolean }, lines: readonly string[], succeeded: boolean = result.ok): Outcome => ({ result, lines, succeeded });
@@ -99,6 +106,29 @@ const advanceOutcome = (result: AdvanceResult): Outcome => {
   return outcome(result, ['Sent back to refinement', ...result.findings.map((finding) => `- ${finding}`)], false);
 };
 
+const mergeOutcome = (result: RecordMergeResult): Outcome => {
+  const { merged, reverted } = result;
+  return outcome(result, [
+    ...(merged === undefined ? [] : [`Recorded the merge of ${merged.key} by ${merged.by} (${merged.asIs ? 'merged as is' : 'changed by a human'})`]),
+    ...(reverted === undefined ? [] : [`Recorded the revert of ${reverted.key} by ${reverted.by}`]),
+    ...(merged === undefined && reverted === undefined ? ['Nothing to record'] : []),
+  ]);
+};
+
+const revertOutcome = (result: RevertResult): Outcome => {
+  if (result.action === 'none') return outcome(result, ['Nothing to revert']);
+  if (result.action === 'opened') return outcome(result, [`Revert opened for ${result.key}: ${result.url}`]);
+  return outcome(result, [`Revert needed for ${result.key}. Revert this pull request by hand: ${result.url}`]);
+};
+
+const watchOutcome = (result: WatchResult): Outcome => {
+  if (result.action === 'off') return outcome(result, ['The watch is off']);
+  if (result.action === 'none') return outcome(result, ['Nothing to watch']);
+  if (result.action === 'delivered') return outcome(result, [`${result.key} delivered: the staging watch passed`]);
+  const revert = result.revert === 'opened' ? `Revert opened: ${result.url}` : `Revert this pull request by hand: ${result.url}`;
+  return outcome(result, [`The staging watch failed for ${result.key} on ${result.check}. ${revert}`], false);
+};
+
 const parse = (argv: readonly string[]): Command | undefined => {
   const [name, ...rest] = argv;
   const valuesOf = (flag: string): readonly string[] => rest.flatMap((argument, index) => (argument === flag ? [rest[index + 1] ?? ''] : []));
@@ -110,6 +140,14 @@ const parse = (argv: readonly string[]): Command | undefined => {
   const from = valueOf('--from');
 
   if (name === 'next') return async (deps) => runOutcome(await nextTicket(deps));
+  if (CI_COMMANDS.includes(name ?? '')) {
+    const given = valueOf('--pull-request');
+    if (given !== undefined && !/^\d+$/.test(given)) return undefined;
+    const change = { commit: valueOf('--commit') ?? 'HEAD', ...(given === undefined ? {} : { pullRequest: Number(given) }) };
+    if (name === 'record-merge') return async (deps) => mergeOutcome(await recordMerge(deps, change));
+    if (name === 'revert') return async (deps) => revertOutcome(await revertMerge(deps, change));
+    return async (deps) => watchOutcome(await watchRun(deps, change));
+  }
   if (key === undefined) return undefined;
   if (name === 'refine') return async (deps) => outcome(await startRefinement(deps, key), [`Refinement started on ${key}`]);
   if (name === 'status') return async (deps) => statusOutcome(await refinementStatus(deps, key));
@@ -181,9 +219,11 @@ export const runCli = async ({ argv, deps, folder, readFile, write, writeError }
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, message: messageOf(error) }),
   );
+  const inCi = CI_COMMANDS.some((name) => name === argv[0]);
   if (!built.ok) {
     writeError(built.message);
-    return USAGE_ERROR;
+    if (inCi) writeError(SKIPPED);
+    return inCi ? OK : USAGE_ERROR;
   }
 
   const ran = await command(built.value, folder, readFile).then(
@@ -192,7 +232,8 @@ export const runCli = async ({ argv, deps, folder, readFile, write, writeError }
   );
   if (!ran.ok) {
     writeError(ran.message);
-    return REFUSED;
+    if (inCi) writeError(SKIPPED);
+    return inCi ? OK : REFUSED;
   }
 
   const { result, lines, succeeded } = ran.value;

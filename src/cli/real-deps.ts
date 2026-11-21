@@ -19,6 +19,7 @@ type Options = { readonly cwd: string; readonly env: Readonly<Record<string, str
 
 const RECORD_BUDGET = 30_000;
 const MAX_RETRIES = 3;
+const CI_USER = 'factory-ci';
 
 const now = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -99,7 +100,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     tickets,
     runtime: createOrcaAgentRuntime({ run: createCommandRunner('orca') }),
     config,
-    user: await git.userName(),
+    user: (await git.userName()) || CI_USER,
     machine: hostname(),
     now,
     recordBudget: RECORD_BUDGET,
@@ -113,5 +114,6 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     changedFilesOnBranch: git.changedFilesOnBranch,
     linesChangedOnBranch: git.linesChangedOnBranch,
     pushBranch: git.pushBranch,
+    commitMessage: git.commitMessage,
   };
 };

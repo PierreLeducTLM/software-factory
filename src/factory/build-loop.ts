@@ -31,6 +31,7 @@ export type LoopDeps = RefinementDeps & {
   readonly changedFilesOnBranch: () => Promise<readonly string[]>;
   readonly linesChangedOnBranch: () => Promise<number>;
   readonly pushBranch: (branch: string) => Promise<void>;
+  readonly commitMessage: (commit: string) => Promise<string>;
 };
 
 export type Diagnosis = {

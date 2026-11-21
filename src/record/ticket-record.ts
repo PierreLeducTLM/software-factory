@@ -59,6 +59,7 @@ const RunRevertSchema = z.object({
   by: z.string(),
   pullRequest: z.string().optional(),
   needed: z.boolean().optional(),
+  merged: z.boolean().optional(),
 });
 
 const RunSchema = z.object({

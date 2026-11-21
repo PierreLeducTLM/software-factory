@@ -11,6 +11,7 @@ import { parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
 import { createProjectViewSource, createRealDeps, createSampleViewSource } from '../src/cli/real-deps.js';
+import type { SourceControl } from '../src/adapters/source-control.js';
 import type { LoopDeps } from '../src/factory/build-loop.js';
 import type { ScriptRun } from '../src/factory/checks.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
@@ -48,8 +49,8 @@ const SPEC_FILES: Readonly<Record<string, string>> = {
   'specs__billing__spec.md': '# Spec Delta\n',
 };
 
-const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = SPEC_FILES) => {
-  const config = parseFactoryConfig(FACTORY_YAML);
+const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = SPEC_FILES, yaml: string = FACTORY_YAML) => {
+  const config = parseFactoryConfig(yaml);
   if (!config.ok) throw new Error('invalid test config');
   const tickets = createInMemoryTicketProvider({ tickets: [ticket], now: () => '2026-11-21T08:00:00Z' });
   await Object.entries(files).reduce(async (previous, [name, content]) => {
@@ -57,15 +58,28 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     await tickets.addAttachment({ key: ticket.key, name, content });
   }, Promise.resolve());
   const changedOnMain: string[] = [];
+  const commits: Record<string, string> = {};
+  const broken: { reason?: string; git?: string; revert?: string } = {};
   const scripts: ScriptRun[] = [];
   const verdictFiles: Record<string, string> = {};
-  const { sourceControl, world: git } = createInMemorySourceControl({ now: () => '2026-11-21T08:00:00Z' });
+  const { sourceControl: memory, world: git } = createInMemorySourceControl({ now: () => '2026-11-21T08:00:00Z' });
+  const sourceControl: SourceControl = {
+    ...memory,
+    openRevertPullRequest: async (number) => {
+      if (broken.revert !== undefined) throw new Error(broken.revert);
+      return memory.openRevertPullRequest(number);
+    },
+  };
   const deps: LoopDeps = {
     sourceControl,
     runScript: async () => scripts.shift() ?? { exitCode: 0, output: 'ok', timedOut: false },
     sleep: async () => undefined,
     changedFilesOnBranch: async () => ['src/billing/export.ts'],
     linesChangedOnBranch: async () => 40,
+    commitMessage: async (commit) => {
+      if (broken.git !== undefined) throw new Error(broken.git);
+      return commits[commit] ?? `Commit ${commit}`;
+    },
     pushBranch: async (branch) => git.push(branch, 'c1'),
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
@@ -84,7 +98,10 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     const errors: string[] = [];
     const code = await runCli({
       argv,
-      deps: async () => deps,
+      deps: async () => {
+        if (broken.reason !== undefined) throw new Error(broken.reason);
+        return deps;
+      },
       folder: createSpecFolder(),
       readFile: async (path) => {
         const content = verdictFiles[path];
@@ -94,7 +111,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
       write: (line) => void out.push(line), writeError: (line) => void errors.push(line) });
     return { code, out, errors };
   };
-  return { run, tickets, changedOnMain, scripts, verdictFiles };
+  return { run, tickets, changedOnMain, scripts, verdictFiles, commits, git, sourceControl, broken };
 };
 
 const statusOf = async (cli: Awaited<ReturnType<typeof getCli>>): Promise<string | undefined> => (await cli.tickets.getTicket('PAY-142'))?.status;
@@ -424,7 +441,7 @@ describe('factory command line', () => {
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(14);
+      expect(errors).toHaveLength(18);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -478,6 +495,133 @@ const hasOpenspec = (() => {
   }
 })();
 
+const AUTO_YAML = `${FACTORY_YAML}  shadow: false\nwatch: { enabled: true, checks: [./smoke.sh], duration: 1m, interval: 1m }\n`;
+
+const getDeliveredCli = async (yaml: string = FACTORY_YAML) => {
+  const cli = await getCli(getMockTicket({ status: 'Spec review' }), SPEC_FILES, yaml);
+  cli.verdictFiles['v.json'] = JSON.stringify({ verdict: 'pass', findings: [], evidence: [] });
+  await cli.run('approve', 'PAY-142');
+  await cli.run('run', 'PAY-142');
+  await cli.run('advance', 'PAY-142');
+  await cli.run('advance', 'PAY-142', '--changed', 'Added the exporter');
+  await cli.run('advance', 'PAY-142', '--verdict', 'openspec-verify=v.json');
+  await cli.run('advance', 'PAY-142', '--verdict', 'reviewer=v.json');
+  cli.commits.HEAD = 'Merge pull request #401 from acme/factory/pay-142';
+  cli.commits.m1 = 'Merge pull request #401 from acme/factory/pay-142';
+  return cli;
+};
+
+describe('factory steps run from CI', () => {
+  it('records a merge, then its revert', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.merge(401, 'sam');
+
+    const merged = await cli.run('record-merge');
+    const nothing = await cli.run('record-merge', '--commit', 'm1');
+    await cli.sourceControl.openRevertPullRequest(401);
+    cli.git.merge(402, 'sam');
+    cli.commits.m2 = 'Merge pull request #402 from acme/revert-401';
+    const reverted = await cli.run('record-merge', '--commit', 'm2');
+    const asJson = await cli.run('record-merge', '--commit', 'm2', '--json');
+
+    expect(merged).toEqual({ code: 0, out: ['Recorded the merge of PAY-142 by sam (merged as is)'], errors: [] });
+    expect(nothing).toEqual({ code: 0, out: ['Nothing to record'], errors: [] });
+    expect(reverted).toEqual({ code: 0, out: ['Recorded the revert of PAY-142 by pull request 402'], errors: [] });
+    expect(asJson).toEqual({ code: 0, out: ['{"ok":true}'], errors: [] });
+    expect(await statusOf(cli)).toBe('Done');
+  });
+
+  it('says when a person changed the change before merging, using the pull request number it is given', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.push('factory/pay-142', 'by-hand');
+    cli.git.merge(401, 'sam');
+    cli.commits.HEAD = 'PAY-142 Bulk invoice export';
+
+    const merged = await cli.run('record-merge', '--pull-request', '401');
+
+    expect(merged.out).toEqual(['Recorded the merge of PAY-142 by sam (changed by a human)']);
+  });
+
+  it('does not fail the build when the service account is missing, and names the missing secret', async () => {
+    const cli = await getDeliveredCli();
+    cli.broken.reason = 'Set the JIRA_TOKEN environment variable';
+
+    const results = await Promise.all([cli.run('record-merge'), cli.run('revert'), cli.run('watch')]);
+    const developer = await cli.run('status', 'PAY-142');
+
+    expect(results).toEqual(Array.from({ length: 3 }, () => ({ code: 0, out: [], errors: ['Set the JIRA_TOKEN environment variable', 'The factory step was skipped. The build is not affected.'] })));
+    expect(developer).toEqual({ code: 2, out: [], errors: ['Set the JIRA_TOKEN environment variable'] });
+  });
+
+  it('does not fail the build when the provider is down', async () => {
+    const cli = await getDeliveredCli();
+    cli.broken.git = 'Jira answered 503';
+
+    const result = await cli.run('record-merge');
+
+    expect(result).toEqual({ code: 0, out: [], errors: ['Jira answered 503', 'The factory step was skipped. The build is not affected.'] });
+  });
+
+  it('opens a revert only for a change that was merged automatically', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.merge(401, 'sam');
+    await cli.run('record-merge');
+
+    expect(await cli.run('revert')).toEqual({ code: 0, out: ['Nothing to revert'], errors: [] });
+  });
+
+  it('opens a revert for an auto-merged change, or asks for one where source control cannot', async () => {
+    const cli = await getDeliveredCli(AUTO_YAML);
+    cli.git.merge(401, 'factory-bot');
+    await cli.run('record-merge');
+    const other = await getDeliveredCli(AUTO_YAML);
+    other.git.merge(401, 'factory-bot');
+    await other.run('record-merge');
+    other.broken.revert = 'Bitbucket has no API to revert a pull request.';
+
+    expect(await cli.run('revert')).toEqual({ code: 0, out: ['Revert opened for PAY-142: memory://pull/402'], errors: [] });
+    expect(await other.run('revert')).toEqual({ code: 0, out: ['Revert needed for PAY-142. Revert this pull request by hand: memory://pull/401'], errors: [] });
+  });
+
+  it('marks a change delivered after the staging watch, and watches nothing twice', async () => {
+    const cli = await getDeliveredCli(AUTO_YAML);
+    cli.git.merge(401, 'factory-bot');
+    await cli.run('record-merge');
+
+    expect(await cli.run('watch')).toEqual({ code: 0, out: ['PAY-142 delivered: the staging watch passed'], errors: [] });
+    expect(await cli.run('watch')).toEqual({ code: 0, out: ['Nothing to watch'], errors: [] });
+  });
+
+  it('exits 1 when the staging watch fails, saying where the revert is', async () => {
+    const cli = await getDeliveredCli(AUTO_YAML);
+    cli.git.merge(401, 'factory-bot');
+    await cli.run('record-merge');
+    cli.scripts.push({ exitCode: 1, output: 'GET /health 500', timedOut: false });
+    const other = await getDeliveredCli(AUTO_YAML);
+    other.git.merge(401, 'factory-bot');
+    await other.run('record-merge');
+    other.scripts.push({ exitCode: 1, output: 'GET /health 500', timedOut: false });
+    other.broken.revert = 'Bitbucket has no API to revert a pull request.';
+
+    expect(await cli.run('watch')).toEqual({ code: 1, out: ['The staging watch failed for PAY-142 on ./smoke.sh. Revert opened: memory://pull/402'], errors: [] });
+    expect(await other.run('watch')).toEqual({ code: 1, out: ['The staging watch failed for PAY-142 on ./smoke.sh. Revert this pull request by hand: memory://pull/401'], errors: [] });
+  });
+
+  it('reports the watch as off when the project has none', async () => {
+    const cli = await getDeliveredCli();
+
+    expect(await cli.run('watch', '--commit', 'm1')).toEqual({ code: 0, out: ['The watch is off'], errors: [] });
+  });
+
+  it.each([['record-merge'], ['revert'], ['watch']])('rejects a pull request number that is not a number for %s', async (command) => {
+    const cli = await getDeliveredCli();
+
+    const codes = await Promise.all(['abc', '401abc', 'abc401'].map(async (number) => (await cli.run(command, '--pull-request', number)).code));
+
+    expect(codes).toEqual([2, 2, 2]);
+  });
+});
+
 describe('setting the command line up in a project', () => {
   it('sets the dashboard up from the ticket provider alone, with no source control token', async () => {
     const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
@@ -528,12 +672,20 @@ describe('setting the command line up in a project', () => {
     const deps = await createRealDeps({ cwd, env: ENV });
 
     expect(deps.user).toBe('Pierre Dev');
+    expect(await deps.commitMessage('HEAD').catch(() => 'no commit')).toBe('no commit');
     expect(deps.config.states.ready_for_dev).toBe('Ready for Dev');
     expect(await deps.predictRisk([])).toBe('low');
     expect(await deps.predictRisk([{ name: 'proposal.md', content: '## Affected paths\n- `db/migrations/0007.sql`\n' }])).toBe('medium');
     expect(deps.recordBudget).toBe(30_000);
     expect(deps.machine).toBe(hostname());
     expect(deps.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it('writes as factory-ci where git has no user name, as in CI', async () => {
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
+    execFileSync('git', ['config', 'user.name', ''], { cwd });
+
+    expect((await createRealDeps({ cwd, env: ENV })).user).toBe('factory-ci');
   });
 
   it.each([

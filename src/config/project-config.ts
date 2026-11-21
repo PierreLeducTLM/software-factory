@@ -19,13 +19,16 @@ const DEFAULT_POLL_SECONDS = 60;
 const DEFAULT_NOT_STARTED_AFTER_HOURS = 24;
 const DEFAULT_INTERRUPTED_GRACE_MINUTES = 10;
 
+const DURATION = /^\d+(s|m|h)$/;
+const DURATION_MESSAGE = 'Use a number followed by s, m or h, such as 90s or 6m';
+
 const checkBase = {
   id: z.string().min(1),
   station: z.string().min(1),
   source: z.enum(['local', 'ci']).default('local'),
   blocking: z.boolean(),
   applies_when: z.string().optional(),
-  timeout: z.string().regex(/^\d+(s|m|h)$/, 'Use a number followed by s, m or h, such as 90s or 6m'),
+  timeout: z.string().regex(DURATION, DURATION_MESSAGE),
   job: z.string().min(1).optional(),
 };
 
@@ -42,6 +45,15 @@ const RiskRouteSchema = z.object({
   reviewers: z.number().int().min(1).optional(),
   extra_checks: z.array(z.string()).optional(),
 });
+
+const WatchSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    checks: z.array(z.string().min(1)).default([]),
+    duration: z.string().regex(DURATION, DURATION_MESSAGE).default('10m'),
+    interval: z.string().regex(DURATION, DURATION_MESSAGE).default('1m'),
+  })
+  .refine((watch) => !watch.enabled || watch.checks.length > 0, { path: ['checks'], message: 'An enabled watch needs at least one smoke check' });
 
 const FactoryConfigSchema = z.object({
   schema: z.literal(1),
@@ -80,6 +92,7 @@ const FactoryConfigSchema = z.object({
       }
     });
   }),
+  watch: WatchSchema.prefault({}),
   risk: z.object({
     low: RiskRouteSchema,
     medium: RiskRouteSchema,
