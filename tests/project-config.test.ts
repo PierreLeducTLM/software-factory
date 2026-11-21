@@ -106,6 +106,41 @@ describe('factory.yaml', () => {
     expect(lowest.ok && lowest.value.view).toEqual({ poll_seconds: 5, not_started_after_hours: 0, interrupted_grace_minutes: 0 });
   });
 
+  it('scores risk with default thresholds, size limits and kinds of change unless the project sets its own', () => {
+    const defaults = parseFactoryConfig(sampleFactoryYaml());
+    const custom = parseFactoryConfig(
+      sampleFactoryYaml().replace('  shadow: true\n', '  shadow: true\n  thresholds: { medium: 2, high: 4 }\n  size: { files: 5, lines: 100 }\n  kinds:\n    - { name: pricing rules, paths: ["src/pricing/**"], points: 5 }\n'),
+    );
+
+    expect(defaults.ok && defaults.value.risk.thresholds).toEqual({ medium: 3, high: 6 });
+    expect(defaults.ok && defaults.value.risk.size).toEqual({ files: 15, lines: 400 });
+    expect(defaults.ok && defaults.value.risk.kinds.map((kind) => [kind.name, kind.points])).toEqual([['schema or data migration', 3], ['dependency update', 2], ['CI or infrastructure', 2]]);
+    expect(custom.ok && custom.value.risk.thresholds).toEqual({ medium: 2, high: 4 });
+    expect(custom.ok && custom.value.risk.size).toEqual({ files: 5, lines: 100 });
+    expect(custom.ok && custom.value.risk.kinds).toEqual([{ name: 'pricing rules', paths: ['src/pricing/**'], points: 5 }]);
+  });
+
+  it('lets one risk level leave shadow mode on its own, from a given date', () => {
+    const result = parseFactoryConfig(sampleFactoryYaml().replace('low:    { merge: auto, require: [all_gates, ci_green] }', 'low:    { merge: auto, shadow: false, auto_since: 2026-11-21 }'));
+    const badDate = parseFactoryConfig(sampleFactoryYaml().replace('low:    { merge: auto, require: [all_gates, ci_green] }', 'low:    { merge: auto, auto_since: "last week" }'));
+
+    expect(result.ok && result.value.risk.low).toEqual({ merge: 'auto', shadow: false, auto_since: '2026-11-21' });
+    expect(issuesOf(badDate)).toEqual([{ path: 'risk.low.auto_since', message: 'Use a date such as 2026-11-21' }]);
+  });
+
+  it.each([
+    ['thresholds: { medium: 0 }', 'risk.thresholds.medium'],
+    ['thresholds: { high: 0 }', 'risk.thresholds.high'],
+    ['size: { files: 0 }', 'risk.size.files'],
+    ['size: { lines: 0 }', 'risk.size.lines'],
+    ['kinds: [{ name: x, paths: [], points: 1 }]', 'risk.kinds.0.paths'],
+    ['kinds: [{ name: x, paths: ["a"], points: 0 }]', 'risk.kinds.0.points'],
+  ])('rejects a risk setting that makes no sense (%s)', (setting, path) => {
+    const result = parseFactoryConfig(sampleFactoryYaml().replace('  shadow: true\n', `  shadow: true\n  ${setting}\n`));
+
+    expect(issuesOf(result).map((issue) => issue.path)).toEqual([path]);
+  });
+
   it('lets a project set its own limits', () => {
     const result = parseFactoryConfig(sampleFactoryYaml('limits: { attempts: 4, runs: 2 }'));
 

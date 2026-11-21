@@ -10,6 +10,11 @@ export type ConfigResult<T> =
 const DEFAULT_ATTEMPTS_PER_RUN = 5;
 const DEFAULT_RUNS_PER_TICKET = 3;
 const DEFAULT_SHADOW_THRESHOLD = 20;
+const DEFAULT_CHANGE_KINDS = [
+  { name: 'schema or data migration', paths: ['**/migrations/**', '**/*.sql'], points: 3 },
+  { name: 'dependency update', paths: ['**/package.json', '**/pnpm-lock.yaml', '**/package-lock.json', '**/yarn.lock', '**/requirements*.txt', '**/poetry.lock', '**/pyproject.toml'], points: 2 },
+  { name: 'CI or infrastructure', paths: ['.github/**', 'infra/**', 'terraform/**', '**/Dockerfile', 'bitbucket-pipelines.yml'], points: 2 },
+];
 const DEFAULT_POLL_SECONDS = 60;
 const DEFAULT_NOT_STARTED_AFTER_HOURS = 24;
 const DEFAULT_INTERRUPTED_GRACE_MINUTES = 10;
@@ -31,6 +36,8 @@ const CheckSchema = z.discriminatedUnion('kind', [
 
 const RiskRouteSchema = z.object({
   merge: z.enum(['auto', 'human']),
+  shadow: z.boolean().optional(),
+  auto_since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date such as 2026-11-21').optional(),
   require: z.array(z.string()).optional(),
   reviewers: z.number().int().min(1).optional(),
   extra_checks: z.array(z.string()).optional(),
@@ -78,6 +85,9 @@ const FactoryConfigSchema = z.object({
     medium: RiskRouteSchema,
     high: RiskRouteSchema,
     sensitive_paths: z.array(z.string()),
+    thresholds: z.object({ medium: z.number().int().min(1).default(3), high: z.number().int().min(1).default(6) }).prefault({}),
+    size: z.object({ files: z.number().int().min(1).default(15), lines: z.number().int().min(1).default(400) }).prefault({}),
+    kinds: z.array(z.object({ name: z.string().min(1), paths: z.array(z.string().min(1)).min(1), points: z.number().int().min(1) })).default(DEFAULT_CHANGE_KINDS),
     shadow: z.boolean().default(true),
     shadow_threshold: z.number().int().min(1).default(DEFAULT_SHADOW_THRESHOLD),
   }),
