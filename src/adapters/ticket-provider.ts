@@ -19,6 +19,8 @@ export type TransitionResult =
 
 export type AttachmentRequest = { readonly key: string; readonly name: string; readonly content: string };
 
+export type Attachment = { readonly name: string; readonly link: string };
+
 export type TicketSearch = {
   readonly statuses?: readonly string[];
   readonly label?: string;
@@ -31,6 +33,7 @@ export interface TicketProvider {
   getFactoryComment(key: string): Promise<string | undefined>;
   putFactoryComment(key: string, body: string): Promise<void>;
   addAttachment(request: AttachmentRequest): Promise<string>;
+  listAttachments(key: string): Promise<readonly Attachment[]>;
   readAttachment(link: string): Promise<string>;
   search(criteria: TicketSearch): Promise<readonly Ticket[]>;
 }

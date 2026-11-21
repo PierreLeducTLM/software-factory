@@ -10,7 +10,11 @@ const matches = (ticket: Ticket, criteria: TicketSearch): boolean =>
   (criteria.updatedSince === undefined || Date.parse(ticket.updatedAt) > Date.parse(criteria.updatedSince));
 
 export const createInMemoryTicketProvider = ({ tickets, now }: Options): TicketProvider => {
-  const state: { tickets: readonly Ticket[]; attachments: readonly string[] } = { tickets, attachments: [] };
+  const state: { tickets: readonly Ticket[]; attachments: readonly string[]; listed: readonly { key: string; name: string; link: string }[] } = {
+    tickets,
+    attachments: [],
+    listed: [],
+  };
 
   const find = (key: string): Ticket | undefined => state.tickets.find((ticket) => ticket.key === key);
 
@@ -37,10 +41,14 @@ export const createInMemoryTicketProvider = ({ tickets, now }: Options): TicketP
       replace(key, { factoryComment: body });
     },
 
-    addAttachment: async ({ name, content }) => {
+    addAttachment: async ({ key, name, content }) => {
       state.attachments = [...state.attachments, content];
-      return `${LINK_PREFIX}${state.attachments.length - 1}/${name}`;
+      const link = `${LINK_PREFIX}${state.attachments.length - 1}/${name}`;
+      state.listed = [...state.listed, { key, name, link }];
+      return link;
     },
+
+    listAttachments: async (key) => state.listed.filter((attachment) => attachment.key === key).map(({ name, link }) => ({ name, link })),
 
     readAttachment: async (link) => {
       const content = state.attachments[Number(link.slice(LINK_PREFIX.length).split('/')[0])];

@@ -122,6 +122,24 @@ export const describeTicketProviderContract = (
       expect(await provider.readAttachment(second)).toBe('two');
     });
 
+    it('lists a ticket\'s attachments by name, oldest first, with links that read them back', async () => {
+      const { provider } = setup([getMockTicket(), getMockTicket({ key: 'PAY-2' })]);
+      await provider.addAttachment({ key: 'PAY-142', name: 'proposal.md', content: 'first' });
+      await provider.addAttachment({ key: 'PAY-2', name: 'other.md', content: 'elsewhere' });
+      await provider.addAttachment({ key: 'PAY-142', name: 'tasks.md', content: 'second' });
+
+      const attachments = await provider.listAttachments('PAY-142');
+
+      expect(attachments.map((attachment) => attachment.name)).toEqual(['proposal.md', 'tasks.md']);
+      expect(await Promise.all(attachments.map((attachment) => provider.readAttachment(attachment.link)))).toEqual(['first', 'second']);
+    });
+
+    it('lists no attachments on a ticket that has none', async () => {
+      const { provider } = setup([getMockTicket()]);
+
+      expect(await provider.listAttachments('PAY-142')).toEqual([]);
+    });
+
     it('searches by status, returning each ticket with its factory comment', async () => {
       const { provider } = setup([
         getMockTicket({ key: 'PAY-1', status: 'Ready for Dev' }),

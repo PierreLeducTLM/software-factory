@@ -11,6 +11,7 @@ type Issue = {
   statusChanged: string;
   properties: Record<string, unknown>;
   comments: { id: string; body: string }[];
+  files: { filename: string; content: string }[];
 };
 
 type Options = {
@@ -34,6 +35,7 @@ const fieldsOf = (issue: Issue, wanted: readonly string[]) =>
       description: issue.description,
       updated: jiraTime(issue.updated),
       statuscategorychangedate: jiraTime(issue.statusChanged),
+      attachment: issue.files,
     }).filter(([name]) => wanted.includes(name)),
   );
 
@@ -62,6 +64,7 @@ export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100 }: Option
     statusChanged: ticket.statusSince,
     properties: {},
     comments: [],
+    files: [],
   }));
   const attachments: string[] = [];
   const requests: HttpRequest[] = [];
@@ -148,9 +151,12 @@ export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100 }: Option
       const boundary = /^multipart\/form-data; boundary=(.+)$/.exec(request.headers['content-type'] ?? '')?.[1];
       const part = boundary === undefined || boundary === '' ? undefined : (request.body ?? '').split(`--${boundary}`)[1];
       const content = part === undefined ? undefined : /\r\n\r\n([\s\S]*)\r\n$/.exec(part)?.[1];
-      if (content === undefined) return empty(400);
+      const filename = /filename="([^"]*)"/.exec(part ?? '')?.[1];
+      if (content === undefined || filename === undefined) return empty(400);
       attachments.push(content);
-      return json(200, [{ id: String(attachments.length - 1), content: `${baseUrl}/rest/api/2/attachment/content/${attachments.length - 1}` }]);
+      const link = `${baseUrl}/rest/api/2/attachment/content/${attachments.length - 1}`;
+      issue.files.push({ filename, content: link });
+      return json(200, [{ id: String(attachments.length - 1), content: link }]);
     }
     return empty(404);
   };

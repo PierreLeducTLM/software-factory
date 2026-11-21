@@ -31,6 +31,9 @@ const SearchPageSchema = z.object({ issues: z.array(IssueSchema), nextPageToken:
 const TransitionsSchema = z.object({ transitions: z.array(z.object({ id: z.string(), to: z.object({ name: z.string() }) })) });
 const CommentSchema = z.object({ id: z.string(), body: z.string() });
 const PropertySchema = z.object({ value: FactoryPropertySchema });
+const ListedAttachmentsSchema = z.object({
+  fields: z.object({ attachment: z.array(z.object({ filename: z.string(), content: z.string() })) }),
+});
 const AttachmentsSchema = z.tuple([z.object({ content: z.string() })]).rest(z.unknown());
 
 type Issue = z.infer<typeof IssueSchema>;
@@ -171,6 +174,11 @@ export const createJiraTicketProvider = ({ baseUrl, email, token, repository, fi
       });
       if (response.status >= 400) throw failure(response, 'POST', path);
       return AttachmentsSchema.parse(JSON.parse(response.body))[0].content;
+    },
+
+    listAttachments: async (issueKey) => {
+      const response = await call('GET', `${issuePath(issueKey)}?fields=attachment`);
+      return ListedAttachmentsSchema.parse(JSON.parse(response.body)).fields.attachment.map(({ filename, content }) => ({ name: filename, link: content }));
     },
 
     readAttachment: async (link) => {
