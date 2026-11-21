@@ -3,3 +3,6 @@ coverage/
 reports/
 .stryker-tmp/
 dist/
+.output/
+.tanstack/
+.nitro/

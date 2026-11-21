@@ -10,6 +10,7 @@ import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
 import type { LoopDeps } from '../factory/build-loop.js';
+import { createViewSource, type ViewSource } from '../view/source.js';
 import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
@@ -64,6 +65,19 @@ const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], htt
     token: fromEnv(env, tokenEnv),
     repository: adapters.repository,
     http,
+    now,
+  });
+};
+
+export const createProjectViewSource = async ({ cwd, env }: Options): Promise<ViewSource> => {
+  const config = await loadConfig(cwd, 'factory.yaml', parseFactoryConfig);
+  const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
+  const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
+  return createViewSource({
+    providers: [{ name: 'Jira', provider: createTicketProvider(adapters, env, http) }],
+    config,
+    repository: adapters.repository,
+    machine: hostname(),
     now,
   });
 };

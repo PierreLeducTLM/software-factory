@@ -10,7 +10,7 @@ import type { Ticket } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
-import { createRealDeps } from '../src/cli/real-deps.js';
+import { createProjectViewSource, createRealDeps } from '../src/cli/real-deps.js';
 import type { LoopDeps } from '../src/factory/build-loop.js';
 import type { ScriptRun } from '../src/factory/checks.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
@@ -478,6 +478,16 @@ const hasOpenspec = (() => {
 })();
 
 describe('setting the command line up in a project', () => {
+  it('sets the dashboard up from the ticket provider alone, with no source control token', async () => {
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
+
+    const source = await createProjectViewSource({ cwd, env: { JIRA_TOKEN: 'secret', JIRA_EMAIL: 'factory@acme.test' } });
+
+    expect(typeof source.load).toBe('function');
+    await expect(createProjectViewSource({ cwd, env: {} })).rejects.toThrow('Set the JIRA_EMAIL environment variable');
+    await expect(createProjectViewSource({ cwd: getProjectFolder({ 'adapters.yaml': ADAPTERS_YAML }), env: ENV })).rejects.toThrow('.factory/factory.yaml is missing');
+  });
+
   it('lists every problem in a config file on its own line', async () => {
     const broken = FACTORY_YAML.replace('schema: 1', 'schema: 9').replace('engine: 0.1.0\n', '');
     const cwd = getProjectFolder({ 'factory.yaml': broken, 'adapters.yaml': ADAPTERS_YAML });
