@@ -65,6 +65,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     runScript: async () => scripts.shift() ?? { exitCode: 0, output: 'ok', timedOut: false },
     sleep: async () => undefined,
     changedFilesOnBranch: async () => ['src/billing/export.ts'],
+    linesChangedOnBranch: async () => 40,
     pushBranch: async (branch) => git.push(branch, 'c1'),
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
@@ -521,14 +522,15 @@ describe('setting the command line up in a project', () => {
     expect(findings.some((finding) => finding.includes('must include at least one scenario'))).toBe(true);
   });
 
-  it('reads the project config, the developer name from git, and predicts high risk until the risk script exists', async () => {
+  it('reads the project config, the developer name from git, and predicts risk from the spec', async () => {
     const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
 
     const deps = await createRealDeps({ cwd, env: ENV });
 
     expect(deps.user).toBe('Pierre Dev');
     expect(deps.config.states.ready_for_dev).toBe('Ready for Dev');
-    expect(await deps.predictRisk([])).toBe('high');
+    expect(await deps.predictRisk([])).toBe('low');
+    expect(await deps.predictRisk([{ name: 'proposal.md', content: '## Affected paths\n- `db/migrations/0007.sql`\n' }])).toBe('medium');
     expect(deps.recordBudget).toBe(30_000);
     expect(deps.machine).toBe(hostname());
     expect(deps.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);

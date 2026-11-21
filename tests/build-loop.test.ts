@@ -8,10 +8,14 @@ import type { ScriptRun } from '../src/factory/checks.js';
 import { approve } from '../src/factory/refinement.js';
 import { runTicket } from '../src/factory/run-lifecycle.js';
 import { loadRecord } from '../src/record/record-store.js';
-import type { TicketRecord } from '../src/record/ticket-record.js';
+import type { SourceControl } from '../src/adapters/source-control.js';
+import type { Ticket } from '../src/adapters/ticket-provider.js';
+import { createRecord, parseComment, renderComment, type Run, type TicketRecord } from '../src/record/ticket-record.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
 
-const getConfig = (attempts = 5): FactoryConfig => {
+const DEFAULT_RISK = 'risk: { low: { merge: auto }, medium: { merge: human }, high: { merge: human }, sensitive_paths: [src/auth/**] }';
+
+const getConfig = (attempts = 5, risk = DEFAULT_RISK): FactoryConfig => {
   const parsed = parseFactoryConfig(`
 schema: 1
 engine: 0.1.0
@@ -24,7 +28,7 @@ checks:
   - { id: security-scan, station: review, kind: script, blocking: true, timeout: 5m, run: pnpm audit }
   - { id: risk-notes, station: risk, kind: agent, blocking: true, timeout: 5m, criteria: .factory/checks/risk.md, evidence: notes }
   - { id: ui-design, station: review, kind: agent, blocking: true, timeout: 10m, applies_when: "changed: src/ui/**", criteria: .factory/checks/ui-design.md, evidence: screenshots }
-risk: { low: { merge: auto }, medium: { merge: human }, high: { merge: human }, sensitive_paths: [] }
+${risk}
 `);
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
   return parsed.value;
@@ -42,15 +46,37 @@ const fail = (...findings: readonly string[]): string => JSON.stringify({ verdic
 const FAILING: ScriptRun = { exitCode: 1, output: 'export.test.ts › splits files: expected 2, got 1', timedOut: false };
 const BUILT: AdvanceInput = { built: { changed: 'Added the exporter', decisions: ['D-001'] } };
 
-const getWorld = async (options?: { readonly attempts?: number; readonly changedFiles?: readonly string[] }) => {
+type WorldOptions = {
+  readonly attempts?: number;
+  readonly changedFiles?: readonly string[];
+  readonly risk?: string;
+  readonly labels?: readonly string[];
+  readonly lines?: number;
+  readonly ceiling?: 'human';
+  readonly others?: readonly Ticket[];
+  readonly refuseAutoMerge?: Error | string;
+  readonly specs?: Readonly<Record<string, string>>;
+};
+
+const getWorld = async (options?: WorldOptions) => {
   const clock = { seconds: 0 };
   const now = (): string => new Date(Date.UTC(2026, 10, 21, 8, 0, clock.seconds)).toISOString().replace('.000Z', 'Z');
-  const tickets = createInMemoryTicketProvider({ tickets: [getMockTicket({ status: 'Spec review' })], now });
-  await Object.entries(SPEC_FILES).reduce(async (previous, [name, content]) => {
+  const tickets = createInMemoryTicketProvider({ tickets: [getMockTicket({ status: 'Spec review', labels: options?.labels ?? [] }), ...(options?.others ?? [])], now });
+  await Object.entries({ ...SPEC_FILES, ...options?.specs }).reduce(async (previous, [name, content]) => {
     await previous;
     await tickets.addAttachment({ key: 'PAY-142', name, content });
   }, Promise.resolve());
-  const { sourceControl, world: git } = createInMemorySourceControl({ now });
+  const { sourceControl: memory, world: git } = createInMemorySourceControl({ now });
+  const refusal = options?.refuseAutoMerge;
+  const sourceControl: SourceControl =
+    refusal === undefined
+      ? memory
+      : {
+          ...memory,
+          enableAutoMerge: async () => {
+            throw refusal;
+          },
+        };
   const scripts: Record<string, ScriptRun[]> = {};
   const commands: string[] = [];
   const pushes: string[] = [];
@@ -58,7 +84,7 @@ const getWorld = async (options?: { readonly attempts?: number; readonly changed
   const deps: LoopDeps = {
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
-    config: getConfig(options?.attempts),
+    config: getConfig(options?.attempts, options?.risk),
     user: 'pierre',
     now,
     recordBudget: 100_000,
@@ -75,12 +101,13 @@ const getWorld = async (options?: { readonly attempts?: number; readonly changed
     },
     sleep: async () => undefined,
     changedFilesOnBranch: async () => options?.changedFiles ?? ['src/billing/export.ts'],
+    linesChangedOnBranch: async () => options?.lines ?? 40,
     pushBranch: async (branch) => {
       pushes.push(branch);
       git.push(branch, `commit-${pushes.length}`);
     },
   };
-  await approve(deps, 'PAY-142');
+  await approve(deps, 'PAY-142', options?.ceiling === undefined ? {} : { mergeCeiling: options.ceiling });
   await runTicket(deps, 'PAY-142');
   const record = async (): Promise<TicketRecord> => {
     const loaded = await loadRecord(tickets, 'PAY-142');
@@ -183,7 +210,7 @@ describe('one attempt, start to finish', () => {
     const recorded = record.runs[0]?.attempts.at(-1)?.outcomes.map((outcome) => `- ${outcome.id} (${outcome.station}): ${outcome.status}`) ?? [];
     expect(recorded).toHaveLength(5);
     expect(recorded.filter((line) => !body.includes(line))).toEqual([]);
-    expect(body).toContain(`Risk: predicted ${record.refinement.approval?.predictedRisk}`);
+    expect(body).toContain(`Level: ${record.runs[0]?.risk?.level} (predicted ${record.refinement.approval?.predictedRisk}, actual low, score 0)`);
   });
 
   it('keeps the evidence of an agent check with its result', async () => {
@@ -231,10 +258,251 @@ describe('one attempt, start to finish', () => {
         '- security-scan (review): passed',
         '',
         'Attempts: 1',
-        'Risk: predicted low',
+        '',
+        '## Risk',
+        'Level: low (predicted low, actual low, score 0)',
+        'No risk signal',
+        '',
+        '## Merge',
+        'Would have auto-merged: low risk is in shadow mode. A person merges this pull request.',
       ].join('\n'),
     );
     expect(await world.summary()).toBe('Run 1 · attempt 1 of 5 · pull request opened');
+  });
+});
+
+const SHADOW_OFF = 'risk: { low: { merge: auto }, medium: { merge: human }, high: { merge: human }, sensitive_paths: [src/auth/**], shadow: false }';
+
+const deliverWith = async (options?: WorldOptions, reviewer: string = PASS) => {
+  const world = await getWorld(options);
+  await reachReview(world);
+  await world.step({ verdicts: { reviewer } });
+  const run = (await world.record()).runs[0];
+  const pullRequest = await world.sourceControl.getPullRequest(401);
+  return { world, run, pullRequest, body: pullRequest?.body ?? '' };
+};
+
+const getRevertedTicket = (change: (run: Run) => Run = (run) => run): Ticket => {
+  const base: Run = {
+    claimant: 'sam',
+    machine: 'sam-mbp',
+    worktreeId: 'wt-9',
+    startedAt: '2026-11-10T08:00:00Z',
+    status: 'merged',
+    attempt: 1,
+    attemptLimit: 5,
+    steps: [],
+    attempts: [],
+    risk: { predicted: 'low', actual: 'low', level: 'low', score: 0, signals: [] },
+    merge: { route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' },
+    revert: { at: '2026-11-12T09:00:00Z', by: 'pull request 77' },
+  };
+  const record = { ...createRecord({ repository: 'acme/billing-service' }), runs: [change(base)] };
+  return getMockTicket({ key: 'PAY-100', status: 'Done', factoryComment: renderComment({ record, summary: 'Reverted' }) });
+};
+
+describe('risk and merge route at delivery', () => {
+  it('records the risk report, the merge route and the pushed commit on the run', async () => {
+    const { run, pullRequest } = await deliverWith();
+
+    expect(run?.risk).toEqual({ predicted: 'low', actual: 'low', level: 'low', score: 0, signals: [] });
+    expect(run?.merge).toStrictEqual({ route: 'human', wouldAutoMerge: true, reason: 'low risk is in shadow mode' });
+    expect(run?.pullRequest).toEqual({ number: 401, url: 'memory://pull/401', headCommit: 'commit-1' });
+    expect(pullRequest?.autoMerge).toBe(false);
+  });
+
+  it('takes the level of the diff when it is riskier than the spec predicted', async () => {
+    const { run, body } = await deliverWith({ changedFiles: ['src/billing/export.ts', 'src/auth/session.ts'], risk: SHADOW_OFF });
+
+    expect(run?.risk).toMatchObject({ predicted: 'low', actual: 'medium', level: 'medium', score: 4 });
+    expect(body).toContain('Level: medium (predicted low, actual medium, score 4)\n- sensitive paths (+4): touches src/auth/session.ts');
+    expect(body).toContain('## Merge\nMerged by a person: medium risk is merged by a person');
+    expect(run?.merge).toMatchObject({ route: 'human', wouldAutoMerge: false });
+  });
+
+  it('counts the size of the change, the capabilities touched, the attempts used and advisory failures', async () => {
+    const world = await getWorld({ lines: 401, specs: { 'specs__export__spec.md': '# Spec Delta\n' } });
+    await world.tickets.addAttachment({ key: 'PAY-142', name: 'factory-notes.md', content: 'x' });
+    world.scripts['pnpm test'] = [FAILING];
+    world.scripts['pnpm lint'] = [{ exitCode: 0, output: 'ok', timedOut: false }, { exitCode: 1, output: 'warn', timedOut: false }];
+    await world.step();
+    await world.step(BUILT);
+    await world.step(BUILT);
+    await world.step({ verdicts: { 'openspec-verify': PASS } });
+
+    await world.step({ verdicts: { reviewer: PASS } });
+
+    expect((await world.record()).runs[0]?.risk).toEqual({
+      predicted: 'low',
+      actual: 'medium',
+      level: 'medium',
+      score: 5,
+      signals: [
+        { name: 'size', points: 2, reason: '401 lines, more than 400' },
+        { name: 'size', points: 1, reason: '2 capabilities touched' },
+        { name: 'confidence', points: 1, reason: '2 attempts used' },
+        { name: 'confidence', points: 1, reason: '1 advisory check failed' },
+      ],
+    });
+  });
+
+  it('turns on auto-merge for a low-risk change once shadow mode is off', async () => {
+    const { run, pullRequest, body } = await deliverWith({ risk: SHADOW_OFF });
+
+    expect(pullRequest?.autoMerge).toBe(true);
+    expect(run?.merge).toEqual({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' });
+    expect(body).toContain('## Merge\nAuto-merge enabled: low risk merges automatically');
+  });
+
+  it('does not turn on auto-merge for a ticket that carries the no-automerge label', async () => {
+    const { run, pullRequest, body } = await deliverWith({ risk: SHADOW_OFF, labels: ['factory:no-automerge'] });
+
+    expect(pullRequest?.autoMerge).toBe(false);
+    expect(run?.merge).toEqual({ route: 'human', wouldAutoMerge: false, reason: 'the ticket carries the no-automerge label' });
+    expect(body).toContain('Merged by a person: the ticket carries the no-automerge label');
+  });
+
+  it('does not turn on auto-merge when the approver asked for a human merge', async () => {
+    const { run, pullRequest } = await deliverWith({ risk: SHADOW_OFF, ceiling: 'human' });
+
+    expect(pullRequest?.autoMerge).toBe(false);
+    expect(run?.merge?.reason).toBe('a human merge was required at approval');
+  });
+
+  it('leaves the pull request open for a person when source control refuses the merge', async () => {
+    const { world, run, body } = await deliverWith({ risk: SHADOW_OFF, refuseAutoMerge: new Error('a build has not passed') });
+
+    expect(run?.merge).toEqual({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically', refused: 'a build has not passed' });
+    expect(body).toContain('## Merge\nAuto-merge refused: a build has not passed. A person merges this pull request.');
+    expect(body).not.toContain('Auto-merge enabled');
+    expect(await world.status()).toBe('In review');
+  });
+
+  it('records the refusal even when source control gives no proper error', async () => {
+    const { run } = await deliverWith({ risk: SHADOW_OFF, refuseAutoMerge: 'not allowed' });
+
+    expect(run?.merge?.refused).toBe('not allowed');
+  });
+
+  it('lets the reviewer raise the level with a written reason', async () => {
+    const verdict = JSON.stringify({ verdict: 'pass', findings: [], evidence: [], risk: 'high', riskReason: 'Changes how invoices are rounded' });
+
+    const { run, body, pullRequest } = await deliverWith({ risk: SHADOW_OFF }, verdict);
+
+    expect(run?.risk).toMatchObject({ actual: 'low', level: 'high', raised: 'Changes how invoices are rounded' });
+    expect(body).toContain('Level: high (predicted low, actual low, score 0)\nNo risk signal\nRaised by the reviewer: Changes how invoices are rounded\n');
+    expect(pullRequest?.autoMerge).toBe(false);
+  });
+
+  it('ignores a reviewer who tries to lower the level, or who gives no reason', async () => {
+    const lower = JSON.stringify({ verdict: 'pass', findings: [], evidence: [], risk: 'low', riskReason: 'It is small' });
+    const silent = JSON.stringify({ verdict: 'pass', findings: [], evidence: [], risk: 'high', riskReason: '' });
+    const files = { changedFiles: ['src/auth/session.ts'] };
+
+    const lowered = await deliverWith(files, lower);
+    const unexplained = await deliverWith(files, silent);
+
+    expect(lowered.run?.risk).toMatchObject({ level: 'medium' });
+    expect(lowered.run?.risk).not.toHaveProperty('raised');
+    expect(lowered.body).not.toContain('Raised by the reviewer');
+    expect(unexplained.run?.risk).toMatchObject({ level: 'medium' });
+    expect(unexplained.run?.risk).not.toHaveProperty('raised');
+  });
+
+  it('adds the signals of the project risk script, which may also lower the score', async () => {
+    const world = await getWorld({ changedFiles: ['src/auth/session.ts'], risk: `${SHADOW_OFF.slice(0, -2)}, script: ./risk.sh }` });
+    world.scripts['./risk.sh'] = [{ exitCode: 0, timedOut: false, output: 'scoring\n{"signals":[{"name":"feature flag","points":-2,"reason":"behind invoices.bulk"},{"name":"coverage","points":0,"reason":"all changed lines covered"}]}' }];
+    await reachReview(world);
+
+    await world.step({ verdicts: { reviewer: PASS } });
+
+    const body = (await world.sourceControl.getPullRequest(401))?.body ?? '';
+    expect((await world.record()).runs[0]?.risk).toMatchObject({ actual: 'low', level: 'low', score: 2 });
+    expect(body).toContain('- sensitive paths (+4): touches src/auth/session.ts\n- feature flag (-2): behind invoices.bulk\n- coverage (+0): all changed lines covered');
+    expect(world.commands.at(-1)).toBe('./risk.sh');
+  });
+
+  it('never scores below zero', async () => {
+    const world = await getWorld({ risk: `${SHADOW_OFF.slice(0, -2)}, script: ./risk.sh }` });
+    world.scripts['./risk.sh'] = [{ exitCode: 0, timedOut: false, output: '{"signals":[{"name":"feature flag","points":-2,"reason":"behind a flag"}]}' }];
+    await reachReview(world);
+
+    await world.step({ verdicts: { reviewer: PASS } });
+
+    expect((await world.record()).runs[0]?.risk).toMatchObject({ score: 0, level: 'low' });
+  });
+
+  it.each([
+    ['fails', { exitCode: 1, timedOut: false, output: '{"signals":[]}' }],
+    ['times out', { exitCode: 0, timedOut: true, output: '{"signals":[]}' }],
+    ['prints something else', { exitCode: 0, timedOut: false, output: 'done' }],
+    ['prints signals without a name', { exitCode: 0, timedOut: false, output: '{"signals":[{"name":"","points":1,"reason":"x"}]}' }],
+  ])('treats the change as high risk when the risk script %s', async (_case, scriptRun) => {
+    const world = await getWorld({ risk: `${SHADOW_OFF.slice(0, -2)}, script: ./risk.sh }` });
+    world.scripts['./risk.sh'] = [scriptRun];
+    await reachReview(world);
+
+    await world.step({ verdicts: { reviewer: PASS } });
+
+    expect((await world.record()).runs[0]?.risk).toMatchObject({
+      level: 'high',
+      score: 6,
+      signals: [{ name: 'risk script', points: 6, reason: 'the risk script failed, so the change is treated as high risk' }],
+    });
+  });
+
+  it('goes back to shadow mode for a level after an auto-merged change of that level was reverted', async () => {
+    const { run, pullRequest, body } = await deliverWith({ risk: SHADOW_OFF, others: [getRevertedTicket()] });
+
+    expect(pullRequest?.autoMerge).toBe(false);
+    expect(run?.merge).toEqual({ route: 'human', wouldAutoMerge: true, reason: 'auto-merge for low risk is back in shadow mode after a revert' });
+    expect(body).toContain('Would have auto-merged: auto-merge for low risk is back in shadow mode after a revert. A person merges this pull request.');
+  });
+
+  const unrelated: readonly (readonly [string, (run: Run) => Run])[] = [
+    ['a person merged it', (run) => ({ ...run, merge: { route: 'human', wouldAutoMerge: true, reason: 'low risk is in shadow mode' } })],
+    ['auto-merge had been refused', (run) => ({ ...run, merge: { route: 'auto', wouldAutoMerge: true, reason: 'x', refused: 'a build has not passed' } })],
+    ['it was of another level', (run) => ({ ...run, risk: { predicted: 'low', actual: 'medium', level: 'medium', score: 4, signals: [] } })],
+    ['it was not reverted', ({ revert: _revert, ...run }) => run],
+    ['it has no risk on record', ({ risk: _risk, ...run }) => run],
+    ['it has no merge on record', ({ merge: _merge, ...run }) => run],
+  ];
+
+  it.each(unrelated)('keeps auto-merge on when the earlier change does not count: %s', async (_case, change) => {
+    const { pullRequest } = await deliverWith({ risk: SHADOW_OFF, others: [getRevertedTicket(change)] });
+
+    expect(pullRequest?.autoMerge).toBe(true);
+  });
+
+  it('finds the revert on any run of a ticket, even when its comment was edited by hand', async () => {
+    const reverted = getRevertedTicket();
+    const earlier: Run = { claimant: 'sam', machine: 'sam-mbp', worktreeId: 'wt-8', startedAt: '2026-11-09T08:00:00Z', status: 'blocked', attempt: 5, attemptLimit: 5, steps: [], attempts: [] };
+    const parsed = parseComment(reverted.factoryComment ?? '', { trustEdited: false });
+    if (parsed.status !== 'ok') throw new Error('invalid test record');
+    const twoRuns = renderComment({ record: { ...parsed.record, runs: [earlier, ...parsed.record.runs] }, summary: 'Reverted' });
+
+    const { pullRequest } = await deliverWith({ risk: SHADOW_OFF, others: [{ ...reverted, factoryComment: twoRuns.replace('Reverted', 'Edited').replace('"sam-mbp"', '"sams-mbp"') }] });
+
+    expect(pullRequest?.autoMerge).toBe(false);
+  });
+
+  it('turns auto-merge back on once the level is re-enabled after the revert', async () => {
+    const since = (date: string) => `risk: { low: { merge: auto, auto_since: "${date}" }, medium: { merge: human }, high: { merge: human }, sensitive_paths: [], shadow: false }`;
+    const reverted = { ...getRevertedTicket(), updatedAt: '2026-11-20T10:00:00Z' };
+
+    const reenabled = await deliverWith({ risk: since('2026-11-13'), others: [reverted] });
+    const sameDay = await deliverWith({ risk: since('2026-11-12'), others: [reverted] });
+
+    expect(reenabled.pullRequest?.autoMerge).toBe(true);
+    expect(sameDay.pullRequest?.autoMerge).toBe(false);
+  });
+
+  it('ignores tickets whose record cannot be read when looking for reverts', async () => {
+    const others = [getMockTicket({ key: 'PAY-7', status: 'Done' }), getMockTicket({ key: 'PAY-8', status: 'Done', factoryComment: 'Hello\n\n```factory-record sha256=00\n{"schema":9}\n```\n' })];
+
+    const { pullRequest } = await deliverWith({ risk: SHADOW_OFF, others });
+
+    expect(pullRequest?.autoMerge).toBe(true);
   });
 });
 

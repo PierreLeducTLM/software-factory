@@ -10,6 +10,7 @@ import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
 import type { LoopDeps } from '../factory/build-loop.js';
+import { assessSpec } from '../factory/risk.js';
 import { createDemoViewSource } from '../view/demo.js';
 import { createViewSource, type ViewSource } from '../view/source.js';
 import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
@@ -103,13 +104,14 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     now,
     recordBudget: RECORD_BUDGET,
     validateSpec: createSpecValidator({ run: createCommandRunner('openspec') }),
-    predictRisk: async () => 'high',
+    predictRisk: async (files) => assessSpec(config.risk, files).level,
     mainCommit: git.mainCommit,
     changedFilesSince: git.changedFilesSince,
     sourceControl,
     runScript: createScriptRunner({ cwd }),
     sleep,
     changedFilesOnBranch: git.changedFilesOnBranch,
+    linesChangedOnBranch: git.linesChangedOnBranch,
     pushBranch: git.pushBranch,
   };
 };

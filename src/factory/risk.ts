@@ -33,7 +33,9 @@ const some = (items: readonly string[]): string => (items.length <= LISTED ? ite
 
 export const higherRisk = (one: RiskLevel, other: RiskLevel): RiskLevel => (LEVELS.indexOf(one) >= LEVELS.indexOf(other) ? one : other);
 
-const assess = (risk: RiskConfig, facts: RiskFacts, touches: (pattern: string, path: string) => boolean): RiskReport => {
+type Touches = (pattern: string, path: string) => boolean;
+
+const assess = (risk: RiskConfig, facts: RiskFacts, touches: Touches, extra: readonly RiskSignal[] = []): RiskReport => {
   const touching = (patterns: readonly string[]): readonly string[] => facts.paths.filter((path) => patterns.some((pattern) => touches(pattern, path)));
   const sensitive = touching(risk.sensitive_paths);
   const signals: readonly RiskSignal[] = [
@@ -48,13 +50,16 @@ const assess = (risk: RiskConfig, facts: RiskFacts, touches: (pattern: string, p
     ...(facts.attempts >= 3 ? [{ name: 'confidence', points: 2, reason: `${facts.attempts} attempts used` }] : []),
     ...(facts.attempts === 2 ? [{ name: 'confidence', points: 1, reason: '2 attempts used' }] : []),
     ...(facts.warnings > 0 ? [{ name: 'confidence', points: 1, reason: `${facts.warnings} advisory ${facts.warnings === 1 ? 'check' : 'checks'} failed` }] : []),
+    ...extra,
   ];
-  const score = signals.reduce((total, signal) => total + signal.points, 0);
+  const score = Math.max(0, signals.reduce((total, signal) => total + signal.points, 0));
   const level = score >= risk.thresholds.high ? 'high' : score >= risk.thresholds.medium ? 'medium' : 'low';
   return { level, score, signals };
 };
 
-export const assessDiff = (risk: RiskConfig, facts: RiskFacts): RiskReport => assess(risk, facts, matchesPath);
+export const assessDiff = (risk: RiskConfig, facts: RiskFacts, extra: readonly RiskSignal[] = []): RiskReport => assess(risk, facts, matchesPath, extra);
+
+export const capabilitiesIn = (names: readonly string[]): number => names.filter((name) => DELTA_SPEC.test(name)).length;
 
 type SpecFile = { readonly name: string; readonly content: string };
 
@@ -69,7 +74,7 @@ const affectedPathsOf = (files: readonly SpecFile[]): readonly string[] =>
   });
 
 export const assessSpec = (risk: RiskConfig, files: readonly SpecFile[]): RiskReport =>
-  assess(risk, { paths: affectedPathsOf(files), lines: 0, capabilities: files.filter((file) => DELTA_SPEC.test(file.name)).length, attempts: 1, warnings: 0 }, patternsOverlap);
+  assess(risk, { paths: affectedPathsOf(files), lines: 0, capabilities: capabilitiesIn(files.map((file) => file.name)), attempts: 1, warnings: 0 }, patternsOverlap);
 
 export const raisedRisk = (level: RiskLevel, raise: RiskRaise | undefined): RiskLevel =>
   raise === undefined || raise.reason.trim() === '' ? level : higherRisk(level, raise.to);

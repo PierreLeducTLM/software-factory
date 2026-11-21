@@ -23,6 +23,11 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
       (await fetched(['diff', '--name-only', commit, remoteMain])).split('\n').filter((line) => line !== ''),
     changedFilesOnBranch: async (): Promise<readonly string[]> =>
       (await fetched(['diff', '--name-only', `${remoteMain}...HEAD`])).split('\n').filter((line) => line !== ''),
+    linesChangedOnBranch: async (): Promise<number> =>
+      (await fetched(['diff', '--numstat', `${remoteMain}...HEAD`]))
+        .split('\n')
+        .flatMap((line) => line.split('\t').slice(0, 2))
+        .reduce((total, count) => total + (Number(count) || 0), 0),
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
     },

@@ -49,6 +49,8 @@ const VerdictSchema = z.object({
   evidence: z.array(z.string()),
 });
 
+const RaiseSchema = z.object({ risk: z.enum(['low', 'medium', 'high']), riskReason: z.string() });
+
 const TimeoutSchema = z.tuple([z.string(), z.enum(['s', 'm', 'h'])]);
 
 export const timeoutSecondsOf = (check: Pick<Check, 'timeout'>): number => {
@@ -97,15 +99,24 @@ export const runScriptChecks = async (deps: CheckDeps, request: ChecksRequest): 
     .filter((check) => check.kind === 'script' && check.station === request.station)
     .reduce<Promise<readonly CheckOutcome[]>>(async (previous, check) => [...(await previous), await runOne(deps, check, request)], Promise.resolve([]));
 
-const parseVerdict = (raw: string | undefined): z.infer<typeof VerdictSchema> | undefined => {
+export const jsonIn = (raw: string | undefined): unknown => {
   const json = raw === undefined ? undefined : /\{[\s\S]*\}/.exec(raw)?.[0];
   if (json === undefined) return undefined;
   try {
-    const parsed = VerdictSchema.safeParse(JSON.parse(json));
-    return parsed.success ? parsed.data : undefined;
+    return JSON.parse(json);
   } catch {
     return undefined;
   }
+};
+
+const parseVerdict = (raw: string | undefined): z.infer<typeof VerdictSchema> | undefined => {
+  const parsed = VerdictSchema.safeParse(jsonIn(raw));
+  return parsed.success ? parsed.data : undefined;
+};
+
+export const riskRaiseOf = (raw: string | undefined): { readonly to: 'low' | 'medium' | 'high'; readonly reason: string } | undefined => {
+  const parsed = RaiseSchema.safeParse(jsonIn(raw));
+  return parsed.success ? { to: parsed.data.risk, reason: parsed.data.riskReason } : undefined;
 };
 
 export const judgeAgentCheck = (check: AgentCheck, raw: string | undefined): CheckOutcome => {

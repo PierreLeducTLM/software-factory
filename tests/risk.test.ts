@@ -55,6 +55,8 @@ describe('paths', () => {
     ['**/package.json', 'src', false],
     ['src/auth', 'src/auth/login.ts', true],
     ['src/auth/login.ts', 'src/auth', true],
+    ['src/auth', 'src/auth/**', true],
+    ['s*/x', 's/**', true],
   ])('%s and %s overlap: %s', (one, other, expected) => {
     expect(patternsOverlap(one, other)).toBe(expected);
   });
@@ -69,6 +71,12 @@ describe('risk of a diff', () => {
     const report = assessDiff(getRisk(), getFacts({ paths: ['src/export/csv.ts', 'src/billing/rounding.ts', 'src/auth/login.ts'] }));
 
     expect(report).toEqual({ level: 'medium', score: 4, signals: [{ name: 'sensitive paths', points: 4, reason: 'touches src/billing/rounding.ts, src/auth/login.ts' }] });
+  });
+
+  it('names all three files when exactly three are touched', () => {
+    const paths = ['src/auth/a.ts', 'src/auth/b.ts', 'src/auth/c.ts'];
+
+    expect(assessDiff(getRisk(), getFacts({ paths })).signals[0]?.reason).toBe('touches src/auth/a.ts, src/auth/b.ts, src/auth/c.ts');
   });
 
   it('names only the first three files of a long list', () => {
@@ -142,6 +150,32 @@ describe('risk predicted from a spec', () => {
     const report = assessSpec(getRisk(), [{ name: 'proposal.md', content: '# Proposal\n\nNo section here.\n' }]);
 
     expect(report).toEqual({ level: 'low', score: 0, signals: [] });
+  });
+
+  it('counts only delta spec files as capabilities', () => {
+    const names = ['specs__billing__spec.md', 'specs__export__spec.md', 'old-specs__auth__spec.md', 'specs__auth__spec.md.bak', 'design.md'];
+
+    const report = assessSpec(getRisk(), names.map((name) => ({ name, content: '# Spec Delta' })));
+
+    expect(report.signals).toEqual([{ name: 'size', points: 1, reason: '2 capabilities touched' }]);
+  });
+
+  it.each([
+    ['a list outside any affected paths section', '# Design\n\n- `src/auth/login.ts`\n'],
+    ['a sentence that only mentions the section', '# Design\n\nSee the ## Affected paths section\n- `src/auth/login.ts`\n'],
+    ['a sentence with a dash in it', '## Affected paths\nNothing sensitive - src/auth/login.ts stays as is\n'],
+    ['a path listed in the next section', '## Affected paths\n- `src/export/**`\n# Notes\n- `src/auth/login.ts`\n'],
+  ])('does not read a path from %s', (_case, content) => {
+    expect(assessSpec(getRisk(), [{ name: 'design.md', content }]).level).toBe('low');
+  });
+
+  it.each([
+    ['right under the title', '# Design\n## Affected paths\n- `src/auth/login.ts`\n'],
+    ['indented', '## Affected paths\n  - `src/auth/login.ts`\n'],
+    ['after two spaces', '## Affected paths\n-  src/auth/login.ts\n'],
+    ['followed by a note that mentions C# code', '## Affected paths\n- `src/export/**`\n- `src/auth/login.ts` (the C# service)\n'],
+  ])('reads a path listed %s', (_case, content) => {
+    expect(assessSpec(getRisk(), [{ name: 'design.md', content }]).level).toBe('medium');
   });
 
   it('reads paths up to the end of the file when the section is the last one', () => {

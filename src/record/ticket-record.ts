@@ -33,6 +33,34 @@ const AttemptSchema = z.object({
   outcomes: z.array(OutcomeSchema),
 });
 
+const RiskLevelSchema = z.enum(['low', 'medium', 'high']);
+
+const RunRiskSchema = z.object({
+  predicted: RiskLevelSchema,
+  actual: RiskLevelSchema,
+  level: RiskLevelSchema,
+  score: z.number(),
+  signals: z.array(z.object({ name: z.string(), points: z.number(), reason: z.string() })),
+  raised: z.string().optional(),
+});
+
+const RunMergeSchema = z.object({
+  route: z.enum(['auto', 'human']),
+  wouldAutoMerge: z.boolean(),
+  reason: z.string(),
+  refused: z.string().optional(),
+  at: z.string().optional(),
+  by: z.string().optional(),
+  asIs: z.boolean().optional(),
+});
+
+const RunRevertSchema = z.object({
+  at: z.string(),
+  by: z.string(),
+  pullRequest: z.string().optional(),
+  needed: z.boolean().optional(),
+});
+
 const RunSchema = z.object({
   claimant: z.string(),
   machine: z.string(),
@@ -45,7 +73,11 @@ const RunSchema = z.object({
   attempts: z.array(AttemptSchema),
   diagnosis: z.enum(['code', 'spec', 'environment']).optional(),
   report: z.string().optional(),
-  pullRequest: z.object({ number: z.number(), url: z.string() }).optional(),
+  pullRequest: z.object({ number: z.number(), url: z.string(), headCommit: z.string().optional() }).optional(),
+  risk: RunRiskSchema.optional(),
+  merge: RunMergeSchema.optional(),
+  revert: RunRevertSchema.optional(),
+  watch: z.object({ at: z.string(), passed: z.boolean(), detail: z.string().optional() }).optional(),
   compacted: z.boolean().optional(),
 });
 
@@ -56,7 +88,7 @@ const ApprovalSchema = z.object({
   at: z.string(),
   mainCommit: z.string(),
   fingerprint: z.string(),
-  predictedRisk: z.enum(['low', 'medium', 'high']),
+  predictedRisk: RiskLevelSchema,
   mergeCeiling: z.literal('human').optional(),
 });
 

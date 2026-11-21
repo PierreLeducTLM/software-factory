@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { Worktree } from '../adapters/agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { Ticket } from '../adapters/ticket-provider.js';
@@ -17,8 +18,10 @@ import {
   type SendBackQuestion,
   type TicketRecord,
 } from '../record/ticket-record.js';
-import { gatePassed, inScope, judgeAgentCheck, runScriptChecks, timeoutSecondsOf, type CheckOutcome, type ScriptRun } from './checks.js';
+import { gatePassed, inScope, jsonIn, judgeAgentCheck, riskRaiseOf, runScriptChecks, timeoutSecondsOf, type CheckOutcome, type ScriptRun } from './checks.js';
+import { autoMergeSuspended } from './merge.js';
 import { revalidate, type RefinementDeps } from './refinement.js';
+import { assessDiff, capabilitiesIn, decideMerge, higherRisk, raisedRisk, type MergeDecision, type RiskRaise, type RiskSignal } from './risk.js';
 import { summaryOf } from './run-lifecycle.js';
 
 export type LoopDeps = RefinementDeps & {
@@ -26,6 +29,7 @@ export type LoopDeps = RefinementDeps & {
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly sleep: (milliseconds: number) => Promise<void>;
   readonly changedFilesOnBranch: () => Promise<readonly string[]>;
+  readonly linesChangedOnBranch: () => Promise<number>;
   readonly pushBranch: (branch: string) => Promise<void>;
 };
 
@@ -68,6 +72,8 @@ const VERIFY = 'openspec-verify';
 const REVIEWER = 'reviewer';
 const REVIEW_STATION = 'review';
 const QUALITY_STATION = 'quality';
+const RISK_SCRIPT_TIMEOUT_SECONDS = 120;
+const PERSON_MERGES = 'A person merges this pull request.';
 const STEP_TIMEOUT_SECONDS = { revalidate: 120, build: 1800, verify: 600, review: 900, diagnose: 600 } as const;
 
 const refuse = (reason: Refusal, message: string): AdvanceResult => ({ ok: false, reason, message });
@@ -127,7 +133,51 @@ const failAttempt = async (context: Context, record: TicketRecord): Promise<Adva
 const resultLine = (outcome: RecordedOutcome): string =>
   `- ${outcome.id} (${outcome.station}): ${outcome.status}${outcome.reason === undefined ? '' : ` (${outcome.reason})`}`;
 
-const pullRequestBody = ({ key, approval }: Context, record: TicketRecord): string => {
+const ScriptSignalsSchema = z.object({ signals: z.array(z.object({ name: z.string().min(1), points: z.number().int(), reason: z.string() })) });
+
+type RunRisk = NonNullable<Run['risk']>;
+
+const scriptSignals = async ({ config, runScript }: LoopDeps): Promise<readonly RiskSignal[]> => {
+  const { script, thresholds } = config.risk;
+  if (script === undefined) return [];
+  const run = await runScript(script, { timeoutSeconds: RISK_SCRIPT_TIMEOUT_SECONDS });
+  const parsed = ScriptSignalsSchema.safeParse(run.exitCode === 0 && !run.timedOut ? jsonIn(run.output) : undefined);
+  return parsed.success ? parsed.data.signals : [{ name: 'risk script', points: thresholds.high, reason: 'the risk script failed, so the change is treated as high risk' }];
+};
+
+const assessRun = async ({ deps, key, approval }: Context, record: TicketRecord, raise: RiskRaise | undefined): Promise<RunRisk> => {
+  const actual = assessDiff(
+    deps.config.risk,
+    {
+      paths: await deps.changedFilesOnBranch(),
+      lines: await deps.linesChangedOnBranch(),
+      capabilities: capabilitiesIn((await deps.tickets.listAttachments(key)).map(({ name }) => name)),
+      attempts: latestRun(record).attempt,
+      warnings: currentAttempt(record).outcomes.filter((outcome) => outcome.status === 'warning').length,
+    },
+    await scriptSignals(deps),
+  );
+  const scored = higherRisk(approval.predictedRisk, actual.level);
+  const level = raisedRisk(scored, raise);
+  return {
+    predicted: approval.predictedRisk,
+    actual: actual.level,
+    level,
+    score: actual.score,
+    signals: actual.signals.map((signal) => ({ ...signal })),
+    ...(raise !== undefined && level !== scored ? { raised: raise.reason } : {}),
+  };
+};
+
+const signed = (points: number): string => (points < 0 ? String(points) : `+${points}`);
+
+const mergeLine = (decision: MergeDecision, refused?: string): string => {
+  if (refused !== undefined) return `Auto-merge refused: ${refused}. ${PERSON_MERGES}`;
+  if (decision.route === 'auto') return `Auto-merge enabled: ${decision.reason}`;
+  return decision.wouldAutoMerge ? `Would have auto-merged: ${decision.reason}. ${PERSON_MERGES}` : `Merged by a person: ${decision.reason}`;
+};
+
+const pullRequestBody = ({ key, approval }: Context, record: TicketRecord, risk: RunRisk, merge: string): string => {
   const run = latestRun(record);
   const decisions = [...new Set(run.attempts.flatMap((attempt) => attempt.decisions))];
   return [
@@ -141,20 +191,44 @@ const pullRequestBody = ({ key, approval }: Context, record: TicketRecord): stri
     ...currentAttempt(record).outcomes.map(resultLine),
     '',
     `Attempts: ${run.attempt}`,
-    `Risk: predicted ${approval.predictedRisk}`,
+    '',
+    '## Risk',
+    `Level: ${risk.level} (predicted ${risk.predicted}, actual ${risk.actual}, score ${risk.score})`,
+    ...(risk.signals.length === 0 ? ['No risk signal'] : risk.signals.map((signal) => `- ${signal.name} (${signed(signal.points)}): ${signal.reason}`)),
+    ...(risk.raised === undefined ? [] : [`Raised by the reviewer: ${risk.raised}`]),
+    '',
+    '## Merge',
+    merge,
   ].join('\n');
 };
 
-const deliver = async (context: Context, record: TicketRecord): Promise<AdvanceResult> => {
-  const { deps, key, ticket, worktree } = context;
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const deliver = async (context: Context, record: TicketRecord, raise: RiskRaise | undefined): Promise<AdvanceResult> => {
+  const { deps, key, ticket, worktree, approval } = context;
+  const risk = await assessRun(context, record, raise);
+  const decision = decideMerge(deps.config.risk, risk.level, {
+    ...(approval.mergeCeiling === undefined ? {} : { ceiling: approval.mergeCeiling }),
+    noAutomergeLabel: ticket.labels.includes(deps.config.labels.no_automerge),
+    suspended: deps.config.risk[risk.level].merge === 'auto' && (await autoMergeSuspended(deps, risk.level)),
+  });
   await deps.pushBranch(worktree.branch);
   const pullRequest = await deps.sourceControl.openPullRequest({
     branch: worktree.branch,
     base: deps.config.main_branch,
     title: `${key} ${ticket.title}`,
-    body: pullRequestBody(context, record),
+    body: pullRequestBody(context, record, risk, mergeLine(decision)),
   });
-  const linked = changeLatestRun(record, (run) => ({ ...run, pullRequest: { number: pullRequest.number, url: pullRequest.url } }));
+  const refused = decision.route === 'auto' ? await deps.sourceControl.enableAutoMerge(pullRequest.number).then(() => undefined, messageOf) : undefined;
+  if (refused !== undefined) {
+    await deps.sourceControl.updatePullRequestBody({ number: pullRequest.number, body: pullRequestBody(context, record, risk, mergeLine(decision, refused)) });
+  }
+  const linked = changeLatestRun(record, (run) => ({
+    ...run,
+    pullRequest: { number: pullRequest.number, url: pullRequest.url, headCommit: pullRequest.headCommit },
+    risk,
+    merge: { ...decision, ...(refused === undefined ? {} : { refused }) },
+  }));
   await leave(context, linked, 'in_review', 'in_review', 'pull request opened');
   return { ok: true, next: 'done', exit: 'pull_request', url: pullRequest.url };
 };
@@ -238,7 +312,7 @@ const afterReview = async (context: Context, record: TicketRecord, input: Advanc
     )),
   ];
   const reviewed = withOutcomes(record, outcomes);
-  return gatePassed(outcomes) ? deliver(context, reviewed) : failAttempt(context, reviewed);
+  return gatePassed(outcomes) ? deliver(context, reviewed, riskRaiseOf(verdicts[REVIEWER])) : failAttempt(context, reviewed);
 };
 
 const afterDiagnosis = async (context: Context, record: TicketRecord, input: AdvanceInput): Promise<AdvanceResult> => {

@@ -70,6 +70,19 @@ describe('git inputs', () => {
     expect(await inputsFor(clone).changedFilesOnBranch()).toEqual(['export.ts']);
   });
 
+  it('counts the lines added and removed on the current branch, leaving binary files out', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'checkout', '-q', '-b', 'factory/pay-142');
+    const none = await inputsFor(clone).linesChangedOnBranch();
+    commit(clone, 'export.ts', 'one\ntwo\nthree\n');
+    commit(clone, 'export.ts', 'one\n2\nthree\nfour\n');
+    commit(clone, 'logo.bin', '\u0000\u0001\u0000');
+    commit(origin, 'main-only.txt', 'y\ny\n');
+
+    expect(none).toBe(0);
+    expect(await inputsFor(clone).linesChangedOnBranch()).toBe(4);
+  });
+
   it('pushes the branch to origin', async () => {
     const { origin, clone } = getClone();
     git(clone, 'checkout', '-q', '-b', 'factory/pay-142');

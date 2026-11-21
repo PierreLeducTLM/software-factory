@@ -88,6 +88,7 @@ const FactoryConfigSchema = z.object({
     thresholds: z.object({ medium: z.number().int().min(1).default(3), high: z.number().int().min(1).default(6) }).prefault({}),
     size: z.object({ files: z.number().int().min(1).default(15), lines: z.number().int().min(1).default(400) }).prefault({}),
     kinds: z.array(z.object({ name: z.string().min(1), paths: z.array(z.string().min(1)).min(1), points: z.number().int().min(1) })).default(DEFAULT_CHANGE_KINDS),
+    script: z.string().min(1).optional(),
     shadow: z.boolean().default(true),
     shadow_threshold: z.number().int().min(1).default(DEFAULT_SHADOW_THRESHOLD),
   }),
