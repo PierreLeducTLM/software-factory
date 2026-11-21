@@ -36,7 +36,7 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 ## 3. Phase 2: Reliable loop
 
 - [ ] 3.1 Implement the check contract runner (script exit code, `applies_when`, blocking or advisory, timeout, `source: ci`) and the fixed gate order, and verify each "Uniform check contract" scenario plus the "Non-zero exit" and "Quality gate fails" scenarios
-- [ ] 3.2 Implement agent-check verdict validation (structured verdict, required evidence), and verify the "Free-text answer" and "Missing evidence" scenarios
+- [x] 3.2 Implement agent-check verdict validation (structured verdict, required evidence), and verify the "Free-text answer" and "Missing evidence" scenarios
 - [ ] 3.3 Implement the attempt loop with a per-run limit (default 5) and the failure output fed forward, and verify the "Alternating failures" and "Gate failure feeds the next attempt" scenarios
 - [ ] 3.4 Implement the Decisions → delta → canonical lookup and the send-back on an unanswered observable question, and verify both "No questions during development" scenarios
 - [ ] 3.5 Implement the review station (OpenSpec verify, then an independent reviewer agent), and verify the "Verify finds an uncovered scenario" scenario

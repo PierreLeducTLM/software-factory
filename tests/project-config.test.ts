@@ -177,6 +177,24 @@ describe('factory.yaml', () => {
     expect(issuesOf(result).map((issue) => issue.path)).toEqual(['risk.shadow_threshold']);
   });
 
+  it.each(['6 minutes', 'soon', '6x', 'm'])('rejects a timeout written as "%s"', (timeout) => {
+    const result = parseFactoryConfig(sampleFactoryYaml().replace('timeout: 6m', `timeout: ${timeout}`));
+
+    expect(issuesOf(result)).toEqual([{ path: 'checks.0.timeout', message: 'Use a number followed by s, m or h, such as 90s or 6m' }]);
+  });
+
+  it.each(['90s', '6m', '1h'])('accepts a timeout written as %s', (timeout) => {
+    expect(parseFactoryConfig(sampleFactoryYaml().replace('timeout: 6m', `timeout: ${timeout}`)).ok).toBe(true);
+  });
+
+  it('rejects a local script check with no command, but accepts one read from CI under another job name', () => {
+    const noCommand = parseFactoryConfig(sampleFactoryYaml().replace('    run: pnpm test\n', ''));
+    const fromCi = parseFactoryConfig(sampleFactoryYaml().replace('source: local', 'source: ci').replace('    run: pnpm test\n', '    job: test-suite\n'));
+
+    expect(issuesOf(noCommand)).toEqual([{ path: 'checks.0.run', message: 'A script check run locally needs a command' }]);
+    expect(fromCi.ok && fromCi.value.checks[0]?.job).toBe('test-suite');
+  });
+
   it('rejects an unsupported schema version', () => {
     const result = parseFactoryConfig(sampleFactoryYaml().replace('schema: 1', 'schema: 2'));
 

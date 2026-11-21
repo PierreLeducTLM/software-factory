@@ -17,7 +17,8 @@ const checkBase = {
   source: z.enum(['local', 'ci']).default('local'),
   blocking: z.boolean(),
   applies_when: z.string().optional(),
-  timeout: z.string().min(1),
+  timeout: z.string().regex(/^\d+(s|m|h)$/, 'Use a number followed by s, m or h, such as 90s or 6m'),
+  job: z.string().min(1).optional(),
 };
 
 const CheckSchema = z.discriminatedUnion('kind', [
@@ -54,6 +55,9 @@ const FactoryConfigSchema = z.object({
     .prefault({}),
   checks: z.array(CheckSchema).superRefine((checks, context) => {
     checks.forEach((check, index) => {
+      if (check.kind === 'script' && check.source === 'local' && check.run === undefined) {
+        context.addIssue({ code: 'custom', path: [index, 'run'], message: 'A script check run locally needs a command' });
+      }
       if (checks.findIndex((other) => other.id === check.id) < index) {
         context.addIssue({ code: 'custom', path: [index, 'id'], message: `Duplicate check id "${check.id}"` });
       }
@@ -87,6 +91,7 @@ const AdaptersConfigSchema = z.object({
 });
 
 export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
+export type Check = z.infer<typeof CheckSchema>;
 export type AdaptersConfig = z.infer<typeof AdaptersConfigSchema>;
 
 const SECRET_FIELD_NAME = /(token|secret|password|api[_-]?key)$/i;

@@ -12,6 +12,7 @@ import {
   type SendBackQuestion,
   type TicketRecord,
 } from '../record/ticket-record.js';
+import { matchesPath } from './paths.js';
 import type { FactoryDeps } from './run-lifecycle.js';
 
 export type SpecFile = { readonly name: string; readonly content: string };
@@ -220,12 +221,6 @@ export const approve = async (deps: RefinementDeps, key: string, options: { read
   await deps.tickets.transition({ key, from, to });
   await save(deps, key, setState(stamped, { state: 'ready_for_dev', at, by: deps.user }), `Approved by ${deps.user} · ${route}`);
   return { ok: true, risk, route };
-};
-
-const matchesPath = (pattern: string, file: string): boolean => {
-  if (!pattern.includes('*')) return file === pattern || file.startsWith(`${pattern}/`);
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('**', '\u0000').replaceAll('*', '[^/]*').replaceAll('\u0000', '.*');
-  return new RegExp(`^${escaped}$`).test(file);
 };
 
 const EDITED_AFTER_APPROVAL: SendBackQuestion = {
