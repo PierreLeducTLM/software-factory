@@ -51,13 +51,15 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 ## 4. Phase 3: Visibility (ticket provider only)
 
 - [x] 4.1 Build the view's in-memory model from adapter search results, and verify the "Branch exists without a record", "PR link shown" and "Board card rendered from the record" scenarios with a test that the view issues no source-control or agent-runtime calls and writes no files (filesystem spy)
-- [ ] 4.2 Implement polling with incremental search, the "updated <time> ago" indicator and the stale state, and verify the "Provider unreachable" and "Reopen after closing" scenarios
-- [ ] 4.3 Implement the Board (7 columns, claimant, last two attempt rows, risk badge, time, optional cost, delivered mark) and the Ready eligibility wording, and verify the "Run with three attempts" and "Auto-labelled ticket" scenarios
-- [ ] 4.4 Implement the run detail timeline from the record, with "Open in Orca" only for runs on this machine, and verify the "Failed gate selected" and "Teammate's run" scenarios
+- [x] 4.2 Implement polling with incremental search, the "updated <time> ago" indicator and the stale state, and verify the "Provider unreachable" and "Reopen after closing" scenarios
+- [x] 4.3 Implement the Board (7 columns, claimant, last two attempt rows, risk badge, time, optional cost, delivered mark) and the Ready eligibility wording, and verify the "Run with three attempts" and "Auto-labelled ticket" scenarios
+- [x] 4.4 Implement the run detail timeline from the record, with "Open in Orca" only for runs on this machine, and verify the "Failed gate selected" and "Teammate's run" scenarios
 - [x] 4.5 Implement interrupted detection (step started longer ago than its timeout plus grace, with no end time), and verify the "Laptop closed mid-build" and "Step still within its timeout" scenarios
-- [ ] 4.6 Implement Needs you with every category and urgency ordering, and verify the "Unlabelled ticket waiting" and "Ticket at its run limit" scenarios and the read-only "Blocked ticket action" and "Add the auto label" scenarios
+- [x] 4.6 Implement Needs you with every category and urgency ordering, and verify the "Unlabelled ticket waiting" and "Ticket at its run limit" scenarios and the read-only "Blocked ticket action" and "Add the auto label" scenarios
 - [x] 4.7 Implement repository scoping and per-developer credentials, and verify the "Shared Jira project" scenario
 - [x] 4.8 Write the human progress summary in the factory comment and the PR description mirror, and verify the "PR and record agree" scenario
+- [x] 4.10 Add `factory view`, which starts the dashboard for the current project on this computer only, and a `--sample` mode that shows sample tickets with no project config or credentials
+- [ ] 4.11 Give the run detail a way to open the run's Orca session when it is on this machine; today it only says where the run is
 - [ ] 4.9 Pilot gate: the pilot is followed in the view with no manual status updates, and with source-control access disabled for the view
 
 ## 5. Phase 4: Portability

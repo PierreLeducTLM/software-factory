@@ -107,6 +107,16 @@ const AdaptersConfigSchema = z.object({
 });
 
 export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
+
+export const sampleFactoryConfig = (): FactoryConfig =>
+  FactoryConfigSchema.parse({
+    schema: 1,
+    engine: 'sample',
+    states: { to_refine: 'To refine', spec_review: 'Spec review', ready_for_dev: 'Ready for Dev', in_development: 'In development', in_review: 'In review', blocked: 'Blocked', done: 'Done' },
+    labels: { auto: 'factory-auto', no_automerge: 'factory:no-automerge' },
+    checks: [],
+    risk: { low: { merge: 'auto' }, medium: { merge: 'human' }, high: { merge: 'human' }, sensitive_paths: [] },
+  });
 export type Check = z.infer<typeof CheckSchema>;
 export type AdaptersConfig = z.infer<typeof AdaptersConfigSchema>;
 

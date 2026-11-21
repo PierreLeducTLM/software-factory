@@ -41,6 +41,7 @@ const USAGE = [
   '                [--verdict <id>=<file>] [--diagnosis code|spec|environment] [--next-step <text>]',
   '  revalidate <KEY>                check the spec and main for drift',
   '  next                            claim the next eligible ticket',
+  '  view [--sample] [--port <n>]    open the read-only dashboard',
   'Add --json to any command for one line of JSON.',
 ];
 

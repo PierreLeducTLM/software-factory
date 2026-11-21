@@ -145,6 +145,18 @@ The agent in the session where `/factory-run` was typed is the builder. The skil
 - **The factory's own attachments start with `factory-`:** the failure report and the record archive. They are never read as spec files. Without the prefix, a failure report changed the spec's fingerprint and the retry was sent back.
 - **The pull request is opened without a risk level beyond the predicted one.** Risk assessment before the PR belongs to phase 5.
 
+### D17. The dashboard is a TanStack Start app
+`factory view` starts a TanStack Start (React) app from `view/`, built for Node and bound to 127.0.0.1. Server functions read the tickets; the browser never talks to the ticket provider and holds no credentials.
+
+- **Three layers, each tested on its own.** The model turns tickets and their records into columns, cards, the run detail and the Needs you list. The store keeps tickets in memory and asks the provider only for what changed. The components render that data and are tested in a real browser.
+- **Refresh.** The page reloads its data every `view.poll_seconds` (60 by default). The server asks the provider at most once per interval, however many pages are open.
+- **Sample mode.** `factory view --sample` shows sample tickets through the same model and screens, with no project config and no credentials.
+- **Runs record the real machine name.** Orca's host id is "local" on every computer, so it could not tell two machines apart. Runs now record the hostname, which the one-run-per-worktree check and the "on your machine" note use.
+- **No link into Orca yet.** The run detail says whether a run is on this machine or in a teammate's Orca. It does not open the session: the record holds the worktree, and a web page cannot run the Orca command.
+- **Health is not built.** It belongs to phase 5, with the merge outcomes it depends on.
+- *Alternative considered:* a server-rendered page with no framework. Rejected in favour of TanStack Start.
+- *Alternative considered:* a terminal view. Rejected: it drops the mockup's layout.
+
 ### D15. Adapter choices found while building
 - **Repository scoping is the adapter's configuration, not a search criterion.** A ticket-provider adapter is created for one repository with one filter, and every ticket it returns names that repository.
 - **The refine skill is written from scratch, and there is no revalidate skill.** The first design doc assumed drafts of `openspec-refine` and `openspec-revalidate` existed. They do not, and OpenSpec ships neither. The factory gets one skill, `factory-refine`, named for the factory so it is not mistaken for an OpenSpec skill. Revalidation is a step `factory run` performs through the CLI, not a skill.

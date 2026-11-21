@@ -10,7 +10,7 @@ import type { Ticket } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
-import { createProjectViewSource, createRealDeps } from '../src/cli/real-deps.js';
+import { createProjectViewSource, createRealDeps, createSampleViewSource } from '../src/cli/real-deps.js';
 import type { LoopDeps } from '../src/factory/build-loop.js';
 import type { ScriptRun } from '../src/factory/checks.js';
 import { getMockTicket } from './contracts/ticket-provider-contract.js';
@@ -423,7 +423,7 @@ describe('factory command line', () => {
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(13);
+      expect(errors).toHaveLength(14);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -486,6 +486,14 @@ describe('setting the command line up in a project', () => {
     expect(typeof source.load).toBe('function');
     await expect(createProjectViewSource({ cwd, env: {} })).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(createProjectViewSource({ cwd: getProjectFolder({ 'adapters.yaml': ADAPTERS_YAML }), env: ENV })).rejects.toThrow('.factory/factory.yaml is missing');
+  });
+
+  it('offers a dashboard on sample data that needs no project config and no credentials', async () => {
+    const data = await createSampleViewSource().load();
+
+    expect(data.providers).toEqual(['Sample data']);
+    expect(data.columns.flatMap((column) => column.cards).length).toBe(12);
+    expect(data.loadedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
   it('lists every problem in a config file on its own line', async () => {

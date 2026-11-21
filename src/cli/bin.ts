@@ -1,10 +1,28 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { runCli } from './cli.js';
 import { createSpecFolder } from './inputs.js';
 import { createRealDeps } from './real-deps.js';
+import { viewCommand } from './view-command.js';
 
-process.exitCode = await runCli({
+const [command, ...rest] = process.argv.slice(2);
+
+process.exitCode =
+  command === 'view'
+    ? await viewCommand({
+        argv: rest,
+        cwd: process.cwd(),
+        env: process.env,
+        serverEntry: fileURLToPath(new URL('../../view/.output/server/index.mjs', import.meta.url)),
+        exists: existsSync,
+        spawn,
+        write: (line) => console.log(line),
+        writeError: (line) => console.error(line),
+      })
+    : await runCli({
   argv: process.argv.slice(2),
   deps: () => createRealDeps({ cwd: process.cwd(), env: process.env }),
   folder: createSpecFolder(),

@@ -8,8 +8,9 @@ import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
 import { createCommandRunner, createOrcaAgentRuntime } from '../adapters/orca-agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
-import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
+import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
 import type { LoopDeps } from '../factory/build-loop.js';
+import { createDemoViewSource } from '../view/demo.js';
 import { createViewSource, type ViewSource } from '../view/source.js';
 import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
 
@@ -68,6 +69,8 @@ const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], htt
     now,
   });
 };
+
+export const createSampleViewSource = (): ViewSource => createDemoViewSource({ config: sampleFactoryConfig(), now });
 
 export const createProjectViewSource = async ({ cwd, env }: Options): Promise<ViewSource> => {
   const config = await loadConfig(cwd, 'factory.yaml', parseFactoryConfig);
