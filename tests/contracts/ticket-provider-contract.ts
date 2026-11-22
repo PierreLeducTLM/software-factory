@@ -4,6 +4,7 @@ import type { Ticket, TicketProvider } from '../../src/adapters/ticket-provider.
 export type ContractSetup = {
   readonly provider: TicketProvider;
   readonly advanceClock: (iso: string) => void;
+  readonly rival?: TicketProvider;
 };
 
 export const getMockTicket = (overrides?: Partial<Ticket>): Ticket => ({
@@ -69,10 +70,10 @@ export const describeTicketProviderContract = (
     });
 
     it('lets exactly one of two racing claims succeed', async () => {
-      const { provider } = setup([getMockTicket()]);
+      const { provider, rival } = setup([getMockTicket()]);
       const claim = { key: 'PAY-142', from: 'Ready for Dev', to: 'In development' };
 
-      const results = await Promise.all([provider.transition(claim), provider.transition(claim)]);
+      const results = await Promise.all([provider.transition(claim), (rival ?? provider).transition(claim)]);
 
       expect(results.filter((result) => result.ok)).toHaveLength(1);
     });
