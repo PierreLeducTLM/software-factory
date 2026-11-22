@@ -1,0 +1,47 @@
+schema: 1
+engine: 0.2.3
+main_branch: main
+states:
+  to_refine: Backlog
+  spec_review: Spec Review
+  ready_for_dev: Todo
+  in_development: In Progress
+  in_review: In Review
+  blocked: Blocked
+  done: Done
+labels:
+  auto: factory-auto
+  no_automerge: factory:no-automerge
+checks:
+  - id: test
+    station: quality
+    kind: script
+    source: local
+    blocking: true
+    timeout: 10m
+    run: pnpm run test
+  - id: typecheck
+    station: quality
+    kind: script
+    source: local
+    blocking: true
+    timeout: 5m
+    run: pnpm run typecheck
+  - id: build
+    station: quality
+    kind: script
+    source: local
+    blocking: true
+    timeout: 10m
+    run: pnpm run build
+risk:
+  low:
+    merge: auto
+  medium:
+    merge: human
+    reviewers: 1
+  high:
+    merge: human
+    reviewers: 2
+  sensitive_paths: []
+  shadow: true

@@ -1,0 +1,11 @@
+repository: PierreLeducTLM/software-factory
+ticket_providers:
+  - kind: linear
+    team: PIE
+    token_env: LINEAR_API_KEY
+source_control:
+  kind: github
+  repo: PierreLeducTLM/software-factory
+  token_env: GH_TOKEN
+agent_runtime:
+  kind: orca
