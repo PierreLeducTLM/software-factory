@@ -139,3 +139,7 @@ pnpm test:view       # dashboard tests
 ```
 
 The design, the specs and the task list are in `openspec/changes/define-software-factory-v1/`. A release is a tag `vX.Y.Z` on `main`. The plugin, the package and `src/version.ts` carry the same version, and a project pins it in `.factory/package.json`.
+
+## License
+
+[MIT](LICENSE).
