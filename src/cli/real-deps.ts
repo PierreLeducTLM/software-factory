@@ -131,7 +131,7 @@ export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
     runScript: createScriptRunner({ cwd }),
     now,
     checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
-    publishFile: createFilePublisher({ run: (args) => runGit(args, { cwd }) }),
+    publishFiles: createFilePublisher({ run: (args) => runGit(args, { cwd }) }),
     openPullRequest: async (request) => createSourceControl(await adapters(), env, http).openPullRequest(request),
   };
 };

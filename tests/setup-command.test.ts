@@ -3,7 +3,7 @@ import type { Access } from '../src/adapters/ticket-provider.js';
 import { setupCommand } from '../src/cli/setup-command.js';
 import type { ScriptRun } from '../src/factory/checks.js';
 import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
-import type { PublishedFile } from '../src/setup/upgrade.js';
+import type { PublishedChange } from '../src/setup/project-files.js';
 import { ENGINE_VERSION } from '../src/version.js';
 
 const FACTORY = `
@@ -50,7 +50,7 @@ type World = { readonly runs?: readonly ScriptRun[]; readonly access?: Access; r
 const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) => {
   const runs = [...(world.runs ?? [])];
   const accessed: string[] = [];
-  const published: PublishedFile[] = [];
+  const published: PublishedChange[] = [];
   const opened: string[] = [];
   const run = async (...argv: readonly string[]) => {
     const out: string[] = [];
@@ -67,7 +67,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
             accessed.push(key);
             return world.access ?? { comment: true, transition: true };
           },
-          publishFile: async (file) => void published.push(file),
+          publishFiles: async (change) => void published.push(change),
           openPullRequest: async ({ branch }) => {
             opened.push(branch);
             return { url: 'https://github.com/acme/billing-service/pull/77' };

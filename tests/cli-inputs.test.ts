@@ -117,11 +117,12 @@ describe('git inputs', () => {
     git(clone, 'config', 'user.email', 'pierre@example.test');
     const latest = commit(origin, 'b.txt', 'two');
     writeFileSync(join(clone, 'a.txt'), 'unsaved work');
-    const change = { branch: 'factory/upgrade-engine-0.2.0', base: 'main', path: '.factory/factory.yaml', content: 'schema: 1\nengine: 0.2.0\n', message: 'chore: upgrade the factory engine to 0.2.0' };
+    const change = { branch: 'factory/upgrade-engine-0.2.0', base: 'main', files: { '.factory/factory.yaml': 'schema: 1\nengine: 0.2.0\n', '.factory/checks/README.md': '# Rubrics\n' }, message: 'chore: upgrade the factory engine to 0.2.0' };
 
     await publisherFor(clone)(change);
 
     expect(git(origin, 'show', `${change.branch}:.factory/factory.yaml`)).toBe('schema: 1\nengine: 0.2.0');
+    expect(git(origin, 'show', `${change.branch}:.factory/checks/README.md`)).toBe('# Rubrics');
     expect(git(origin, 'log', '-1', '--format=%s %an', change.branch)).toBe('chore: upgrade the factory engine to 0.2.0 Pierre Dev');
     expect(git(origin, 'rev-parse', `${change.branch}~1`)).toBe(latest);
     expect(readFileSync(join(clone, 'a.txt'), 'utf8')).toBe('unsaved work');
@@ -134,7 +135,7 @@ describe('git inputs', () => {
     git(clone, 'config', 'user.email', 'pierre@example.test');
     git(clone, 'remote', 'set-url', '--push', 'origin', join(clone, 'nowhere'));
 
-    await expect(publisherFor(clone)({ branch: 'factory/x', base: 'main', path: '.factory/checks/x.md', content: 'x', message: 'x' })).rejects.toThrow(/nowhere/);
+    await expect(publisherFor(clone)({ branch: 'factory/x', base: 'main', files: { '.factory/checks/x.md': 'x' }, message: 'x' })).rejects.toThrow(/nowhere/);
 
     expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
   });

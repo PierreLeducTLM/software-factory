@@ -3,13 +3,11 @@ import { z } from 'zod';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import { ENGINE_VERSION, enginePinMatches } from '../version.js';
 import { migrateConfig, type Migration } from './migrate.js';
-import type { ProjectFiles } from './project-files.js';
-
-export type PublishedFile = { readonly branch: string; readonly base: string; readonly path: string; readonly content: string; readonly message: string };
+import type { ProjectFiles, PublishedChange } from './project-files.js';
 
 export type UpgradeDeps = {
   readonly files: ProjectFiles;
-  readonly publishFile: (file: PublishedFile) => Promise<void>;
+  readonly publishFiles: (change: PublishedChange) => Promise<void>;
   readonly openPullRequest: (request: OpenPullRequest) => Promise<{ readonly url: string }>;
 };
 
@@ -52,7 +50,7 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
 
   const branch = `factory/upgrade-engine-${engine}`;
   const title = `chore: upgrade the factory engine to ${engine}`;
-  await deps.publishFile({ branch, base: pin.main_branch, path: FACTORY_YAML, content: pinned(migrated.text, engine), message: title });
+  await deps.publishFiles({ branch, base: pin.main_branch, files: { [FACTORY_YAML]: pinned(migrated.text, engine) }, message: title });
   const { url } = await deps.openPullRequest({
     branch,
     base: pin.main_branch,

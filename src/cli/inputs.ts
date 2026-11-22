@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { ScriptRun } from '../factory/checks.js';
 import type { SpecFile } from '../factory/refinement.js';
-import type { PublishedFile } from '../setup/upgrade.js';
+import type { PublishedChange } from '../setup/project-files.js';
 
 type GitOptions = { readonly run: CommandRunner; readonly mainBranch: string };
 
@@ -38,15 +38,19 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
 
 export const createFilePublisher =
   ({ run }: { readonly run: CommandRunner }) =>
-  async ({ branch, base, path, content, message }: PublishedFile): Promise<void> => {
+  async ({ branch, base, files, message }: PublishedChange): Promise<void> => {
     const folder = await mkdtemp(join(tmpdir(), 'factory-publish-'));
     await run(['fetch', '--quiet', 'origin', base]);
     await run(['worktree', 'add', '--quiet', '-b', branch, folder, `origin/${base}`]);
     try {
-      const target = join(folder, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content);
-      await run(['-C', folder, 'add', path]);
+      await Promise.all(
+        Object.entries(files).map(async ([path, content]) => {
+          const target = join(folder, path);
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, content);
+        }),
+      );
+      await run(['-C', folder, 'add', '--', ...Object.keys(files)]);
       await run(['-C', folder, 'commit', '--quiet', '-m', message]);
       await run(['-C', folder, 'push', '--quiet', '--set-upstream', 'origin', branch]);
     } finally {

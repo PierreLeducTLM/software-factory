@@ -645,7 +645,7 @@ describe('setting the command line up in a project', () => {
     await expect(broken.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('.factory/adapters.yaml is missing');
     await expect(configured.checkAccess('PAY-142')).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(configured.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('Set the GH_TOKEN environment variable');
-    await expect(broken.publishFile({ branch: 'b', base: 'main', path: 'x', content: 'x', message: 'x' })).rejects.toThrow(/origin/);
+    await expect(broken.publishFiles({ branch: 'b', base: 'main', files: { x: 'x' }, message: 'x' })).rejects.toThrow(/origin/);
   });
 
   it('offers a dashboard on sample data that needs no project config and no credentials', async () => {

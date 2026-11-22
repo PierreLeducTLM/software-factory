@@ -1,8 +1,8 @@
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import type { Migration } from '../src/setup/migrate.js';
-import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
-import { upgradeProject, type PublishedFile } from '../src/setup/upgrade.js';
+import { createInMemoryProjectFiles, type PublishedChange } from '../src/setup/project-files.js';
+import { upgradeProject } from '../src/setup/upgrade.js';
 
 const FACTORY = `# Owned by the platform team. To move to another engine: run factory migrate
 schema: 1
@@ -22,12 +22,12 @@ const RENAME_RISK: Migration = {
 type Options = Parameters<typeof upgradeProject>[1];
 
 const upgrade = async (files: Readonly<Record<string, string>>, options: Options) => {
-  const published: PublishedFile[] = [];
+  const published: PublishedChange[] = [];
   const opened: { branch: string; base: string; title: string; body: string }[] = [];
   const result = await upgradeProject(
     {
       files: createInMemoryProjectFiles(files),
-      publishFile: async (file) => void published.push(file),
+      publishFiles: async (change) => void published.push(change),
       openPullRequest: async (request) => {
         opened.push(request);
         return { url: `https://github.com/acme/billing-service/pull/${opened.length + 40}` };
@@ -46,7 +46,7 @@ describe('upgrading a project to a newer engine', () => {
 
     expect(result).toEqual({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', from: { engine: '0.1.0', schema: 1 }, to: { engine: '0.2.0', schema: 1 }, applied: [] });
     expect(published).toEqual([
-      { branch: 'factory/upgrade-engine-0.2.0', base: 'main', path: '.factory/factory.yaml', content: FACTORY.replace('engine: 0.1.0', 'engine: 0.2.0'), message: 'chore: upgrade the factory engine to 0.2.0' },
+      { branch: 'factory/upgrade-engine-0.2.0', base: 'main', files: { '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.2.0') }, message: 'chore: upgrade the factory engine to 0.2.0' },
     ]);
     expect(opened).toEqual([
       {
@@ -70,8 +70,8 @@ describe('upgrading a project to a newer engine', () => {
 
     expect(result).toMatchObject({ ok: true, action: 'opened', from: { schema: 1 }, to: { schema: 2 }, applied: ['risk is now called routing'] });
     expect(published.map(({ branch, base }) => ({ branch, base }))).toEqual([{ branch: 'factory/upgrade-engine-0.2.0', base: 'develop' }]);
-    expect(parse(published[0]?.content ?? '')).toMatchObject({ schema: 2, engine: '0.2.0', main_branch: 'develop', routing: { low: { merge: 'auto' } } });
-    expect(parse(published[0]?.content ?? '')).not.toHaveProperty('risk');
+    expect(parse(published[0]?.files['.factory/factory.yaml'] ?? '')).toMatchObject({ schema: 2, engine: '0.2.0', main_branch: 'develop', routing: { low: { merge: 'auto' } } });
+    expect(parse(published[0]?.files['.factory/factory.yaml'] ?? '')).not.toHaveProperty('risk');
     expect(opened[0]?.base).toBe('develop');
     expect(opened[0]?.body.split('\n').slice(2, 5)).toEqual(['The configuration schema moves from version 1 to 2:', '- risk is now called routing', '']);
   });
