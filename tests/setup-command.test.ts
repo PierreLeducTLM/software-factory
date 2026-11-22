@@ -81,6 +81,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
             accessed.push(key);
             return world.access ?? { comment: true, transition: true };
           },
+          canReenter: async () => false,
           publishFiles: async (change) => void published.push(change),
           openPullRequest: async ({ branch }) => {
             opened.push(branch);
@@ -98,6 +99,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
               accessed.push(key);
               return world.access ?? { comment: true, transition: true };
             },
+            canReenter: async () => false,
           }),
           sourceControl: () => ({
             openPullRequest: async (request) => {

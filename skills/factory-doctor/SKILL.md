@@ -15,7 +15,7 @@ factory doctor --json
 
 Add `--run-checks` when the person wants to know whether the local checks still pass on the current code. It runs each one, twice when it fails, so it can take as long as the test suite.
 
-Add `--ticket <KEY>` to check what the ticket-provider account may do on that ticket. The command uses the token in the current environment, so to check the CI service account, run it with the service account's variables set, as the CI does.
+Add `--ticket <KEY>` to check what the ticket-provider account may do on that ticket, and that the workflow keeps a claim exclusive. The command uses the token in the current environment, so to check the CI service account, run it with the service account's variables set, as the CI does.
 
 The exit code is 0 when nothing drifted, 1 when it found drift, and 2 when the arguments are wrong. The JSON is `{ "ok": boolean, "findings": [{ "kind", "message" }] }`.
 
@@ -36,6 +36,7 @@ Group the findings by kind. Quote each message as it is: it names the file, fiel
 | `failing_check` | A local check fails on the current code | Main is red, or the check is wrong. Fix main, or make the check advisory with `/factory-workflow` |
 | `flaky_check` | A local check failed, then passed | Fix the flaky test, or make the check advisory with `/factory-workflow` until it is fixed |
 | `service_account` | The account cannot comment on or change the status of a ticket, or could not be checked | Ask the provider's admin for the missing permission, or renew the token if it expired |
+| `claim_lock` | The workflow lets a ticket already in development move there again, so two developers could claim the same ticket | Ask the provider's admin to remove that transition, often a global "any status" transition into the in-development status |
 
 Ask the person which fixes to make, then make them one pull request at a time.
 

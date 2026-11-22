@@ -69,6 +69,7 @@ factory init install --answers <file> --ticket <KEY> --json
 |---|---|
 | `ok: true` | Share the `url`. List the `secrets` to store in the CI secret store before merging, and the `manual` steps |
 | `reason: "service_account"` | Show the `message`: it names the missing permission. No pull request was opened. Run the command again once the permission is granted |
+| `reason: "claim_lock"` | The workflow lets a claimed ticket be claimed again. Ask the provider's admin to remove that transition, then run the command again. No pull request was opened |
 | an error | Show it. An `answers: <field>` error names the field to fix in the answers file |
 
 The install pull request holds `.factory/factory.yaml`, `.factory/adapters.yaml`, `.factory/checks/` and, on GitHub, the factory workflow. Every risk level starts in shadow mode.

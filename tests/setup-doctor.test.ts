@@ -63,7 +63,8 @@ const HEALTHY: Readonly<Record<string, string>> = {
 
 type Options = Parameters<typeof runDoctor>[1];
 
-const examine = async (files: Readonly<Record<string, string>>, options: Partial<Options> = {}, world: { readonly runs?: Readonly<Record<string, readonly ScriptRun[]>>; readonly access?: Access | Error } = {}) => {
+const examine = async (files: Readonly<Record<string, string>>, options: Partial<Options> = {}, world: { readonly runs?: Readonly<Record<string, readonly ScriptRun[]>>; readonly access?: Access | Error; readonly reenter?: boolean } = {}) => {
+  const reentered: { key: string; status: string }[] = [];
   const queues = Object.fromEntries(Object.entries(world.runs ?? {}).map(([command, runs]) => [command, [...runs]]));
   const commands: string[] = [];
   const report = await runDoctor(
@@ -79,10 +80,14 @@ const examine = async (files: Readonly<Record<string, string>>, options: Partial
         if (access instanceof Error) throw access;
         return access;
       },
+      canReenter: async (request) => {
+        reentered.push(request);
+        return world.reenter ?? false;
+      },
     },
     { runChecks: false, ...options },
   );
-  return { report, commands, messages: report.findings.map((finding) => `${finding.kind}: ${finding.message}`) };
+  return { report, commands, reentered, messages: report.findings.map((finding) => `${finding.kind}: ${finding.message}`) };
 };
 
 const without = (files: Readonly<Record<string, string>>, name: string): Readonly<Record<string, string>> => Object.fromEntries(Object.entries(files).filter(([path]) => path !== name));
@@ -209,9 +214,20 @@ describe('factory doctor', () => {
     expect((await examine(HEALTHY, { ticket: 'PAY-142' })).report.ok).toBe(true);
   });
 
+  it('checks that a claimed ticket cannot be claimed again, by the status the project calls in development', async () => {
+    const broken = await examine(HEALTHY, { ticket: 'PAY-142' }, { reenter: true });
+    const sound = await examine(HEALTHY, { ticket: 'PAY-142' });
+    const unconfigured = await examine({}, { ticket: 'PAY-142' }, { reenter: true });
+
+    expect(broken.messages).toEqual(['claim_lock: The workflow lets a ticket move from "In development" to "In development", so two developers could claim the same ticket. Remove that transition from the workflow']);
+    expect(sound.reentered).toEqual([{ key: 'PAY-142', status: 'In development' }]);
+    expect(unconfigured.reentered).toEqual([]);
+    expect((await examine(HEALTHY)).reentered).toEqual([]);
+  });
+
   it('reports a failure that is not an error object too', async () => {
     const report = await runDoctor(
-      { files: createInMemoryProjectFiles(HEALTHY), now: () => '2026-11-21T08:00:00Z', runScript: async () => ({ exitCode: 0, output: '', timedOut: false }), checkAccess: () => Promise.reject('offline') },
+      { files: createInMemoryProjectFiles(HEALTHY), now: () => '2026-11-21T08:00:00Z', runScript: async () => ({ exitCode: 0, output: '', timedOut: false }), checkAccess: () => Promise.reject('offline'), canReenter: async () => false },
       { runChecks: false, ticket: 'PAY-142' },
     );
 

@@ -7,7 +7,7 @@ import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles } from './project-files.js';
 import { verifyChecks } from './verify.js';
 
-export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' | 'unused_script' | 'ci_step' | 'ci_secret' | 'failing_check' | 'flaky_check' | 'service_account';
+export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' | 'unused_script' | 'ci_step' | 'ci_secret' | 'failing_check' | 'flaky_check' | 'service_account' | 'claim_lock';
 
 export type Finding = { readonly kind: FindingKind; readonly message: string };
 
@@ -18,6 +18,7 @@ export type DoctorDeps = {
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly now: () => string;
   readonly checkAccess: (key: string) => Promise<Access>;
+  readonly canReenter: (request: { readonly key: string; readonly status: string }) => Promise<boolean>;
 };
 
 type Upgrade = { readonly migrations: readonly Migration[]; readonly target: number };
@@ -48,12 +49,14 @@ const schemaFindings = (text: string | undefined, upgrade: Upgrade | undefined):
 const envNames = ({ ticket_providers: providers }: AdaptersConfig): readonly string[] =>
   providers.flatMap((provider) => [provider.token_env, provider.email_env]).flatMap((name) => (name === undefined ? [] : [name]));
 
-const accountFindings = async (deps: DoctorDeps, ticket: string): Promise<readonly Finding[]> => {
+const accountFindings = async (deps: DoctorDeps, ticket: string, claimed: string | undefined): Promise<readonly Finding[]> => {
   try {
     const access = await deps.checkAccess(ticket);
+    const reenters = claimed !== undefined && (await deps.canReenter({ key: ticket, status: claimed }));
     return [
       ...(access.comment ? [] : [finding('service_account', `The account cannot comment on ${ticket}`)]),
       ...(access.transition ? [] : [finding('service_account', `The account cannot change the status of ${ticket}`)]),
+      ...(reenters ? [finding('claim_lock', `The workflow lets a ticket move from "${claimed}" to "${claimed}", so two developers could claim the same ticket. Remove that transition from the workflow`)] : []),
     ];
   } catch (error) {
     return [finding('service_account', `The account could not be checked on ${ticket}: ${messageOf(error)}`)];
@@ -91,7 +94,7 @@ export const runDoctor = async (deps: DoctorDeps, options: DoctorOptions): Promi
   const factory: { readonly value?: FactoryConfig; readonly findings: readonly Finding[] } = schema.length > 0 ? { findings: schema } : configFindings(FACTORY_YAML, factoryText, parseFactoryConfig);
   const adapters = configFindings(ADAPTERS_YAML, await deps.files.read(ADAPTERS_YAML), parseAdaptersConfig);
   const drift = factory.value !== undefined ? await driftFindings(deps, factory.value, adapters.value, options) : [];
-  const account = options.ticket === undefined ? [] : await accountFindings(deps, options.ticket);
+  const account = options.ticket === undefined ? [] : await accountFindings(deps, options.ticket, factory.value?.states.in_development);
   const findings = [...factory.findings, ...adapters.findings, ...drift, ...account];
   return { ok: findings.length === 0, findings };
 };

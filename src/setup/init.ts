@@ -14,7 +14,7 @@ export type InitDeps = {
   readonly remoteUrl: () => Promise<string | undefined>;
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly now: () => string;
-  readonly tickets: (adapters: AdaptersConfig) => Pick<TicketProvider, 'listStatuses' | 'checkAccess'>;
+  readonly tickets: (adapters: AdaptersConfig) => Pick<TicketProvider, 'listStatuses' | 'checkAccess' | 'canReenter'>;
   readonly sourceControl: (adapters: AdaptersConfig) => { readonly openPullRequest: (request: OpenPullRequest) => Promise<{ readonly url: string }> };
   readonly publishFiles: (change: PublishedChange) => Promise<void>;
 };
@@ -23,7 +23,7 @@ export type InitDetection = { readonly engine: string; readonly detection: Detec
 
 export type InstallResult =
   | { readonly ok: true; readonly url: string; readonly secrets: readonly string[]; readonly manual: readonly string[] }
-  | { readonly ok: false; readonly reason: 'service_account'; readonly message: string };
+  | { readonly ok: false; readonly reason: 'service_account' | 'claim_lock'; readonly message: string };
 
 const INSTALL_BRANCH = 'factory/install';
 const INSTALL_TITLE = 'chore: install the software factory';
@@ -51,11 +51,20 @@ const installBody = (secrets: readonly string[], manual: readonly string[]): str
 
 export const installFactory = async (deps: InitDeps, answers: InstallAnswers, { ticket }: { readonly ticket: string }): Promise<InstallResult> => {
   const adapters = adaptersFor(answers);
-  const access = await deps.tickets(adapters).checkAccess(ticket);
+  const tickets = deps.tickets(adapters);
+  const provider = PROVIDER_NAMES[answers.ticketProvider.kind];
+  const access = await tickets.checkAccess(ticket);
   const missing = [...(access.comment ? [] : ['comment on']), ...(access.transition ? [] : ['change the status of'])];
   if (missing.length > 0) {
-    const provider = PROVIDER_NAMES[answers.ticketProvider.kind];
     return { ok: false, reason: 'service_account', message: `The service account cannot ${missing.join(' or ')} ${ticket}. Grant the missing permission in ${provider}, then run the install again. No pull request was opened.` };
+  }
+  const claimed = answers.states.in_development;
+  if (await tickets.canReenter({ key: ticket, status: claimed })) {
+    return {
+      ok: false,
+      reason: 'claim_lock',
+      message: `The ${provider} workflow lets a ticket move from "${claimed}" to "${claimed}", so two developers could claim the same ticket. Remove that transition, then run the install again. No pull request was opened.`,
+    };
   }
   const { files, secrets, manual } = buildInstall(answers);
   await deps.publishFiles({ branch: INSTALL_BRANCH, base: answers.mainBranch, files, message: INSTALL_TITLE });

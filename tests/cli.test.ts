@@ -642,6 +642,8 @@ describe('setting the command line up in a project', () => {
     expect((await broken.runScript('echo checked', { timeoutSeconds: 5 })).output).toBe('checked\n');
     expect(broken.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     await expect(broken.checkAccess('PAY-142')).rejects.toThrow('.factory/adapters.yaml is missing');
+    await expect(broken.canReenter({ key: 'PAY-142', status: 'In development' })).rejects.toThrow('.factory/adapters.yaml is missing');
+    await expect(configured.canReenter({ key: 'PAY-142', status: 'In development' })).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(broken.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('.factory/adapters.yaml is missing');
     await expect(configured.checkAccess('PAY-142')).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(configured.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('Set the GH_TOKEN environment variable');

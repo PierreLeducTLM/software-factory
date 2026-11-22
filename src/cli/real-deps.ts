@@ -134,6 +134,7 @@ export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
     runScript: createScriptRunner({ cwd }),
     now,
     checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
+    canReenter: async (request) => createTicketProvider(await adapters(), env, http).canReenter(request),
     publishFiles: createFilePublisher({ run: git }),
     readFile: (path) => readFile(join(cwd, path), 'utf8'),
     remoteUrl: repository.remoteUrl,

@@ -26,7 +26,7 @@ const PROJECT: Readonly<Record<string, string>> = {
   'pnpm-lock.yaml': '',
 };
 
-type World = { readonly statuses?: readonly ProviderStatus[]; readonly access?: Access; readonly runs?: Readonly<Record<string, ScriptRun>>; readonly remoteUrl?: string };
+type World = { readonly statuses?: readonly ProviderStatus[]; readonly access?: Access; readonly reenter?: boolean; readonly runs?: Readonly<Record<string, ScriptRun>>; readonly remoteUrl?: string };
 
 const getInit = (world: World = {}) => {
   const commands: string[] = [];
@@ -43,7 +43,11 @@ const getInit = (world: World = {}) => {
     },
     tickets: (adapters: AdaptersConfig) => {
       connections.push(adapters);
-      return { listStatuses: async () => world.statuses ?? [], checkAccess: async () => world.access ?? { comment: true, transition: true } };
+      return {
+        listStatuses: async () => world.statuses ?? [],
+        checkAccess: async () => world.access ?? { comment: true, transition: true },
+        canReenter: async ({ status }: { readonly status: string }) => (world.reenter ?? false) && status === 'In Progress',
+      };
     },
     sourceControl: (adapters: AdaptersConfig) => {
       connections.push(adapters);
@@ -159,6 +163,19 @@ describe('the install wizard', () => {
       ok: false,
       reason: 'service_account',
       message: `The service account cannot ${missing} PAY-1. Grant the missing permission in Jira, then run the install again. No pull request was opened.`,
+    });
+    expect([...published, ...opened]).toEqual([]);
+  });
+
+  it('opens no pull request while the workflow lets a claimed ticket be claimed again', async () => {
+    const { deps, published, opened } = getInit({ reenter: true });
+
+    const result = await installFactory(deps, getAnswers(), { ticket: 'PAY-1' });
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'claim_lock',
+      message: 'The Jira workflow lets a ticket move from "In Progress" to "In Progress", so two developers could claim the same ticket. Remove that transition, then run the install again. No pull request was opened.',
     });
     expect([...published, ...opened]).toEqual([]);
   });
