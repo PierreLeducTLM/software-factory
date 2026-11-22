@@ -13,6 +13,7 @@ import type { LoopDeps } from '../factory/build-loop.js';
 import { assessSpec } from '../factory/risk.js';
 import { createDemoViewSource } from '../view/demo.js';
 import { createViewSource, type ViewSource } from '../view/source.js';
+import { enginePinMatches, enginePinMessage } from '../version.js';
 import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
@@ -89,6 +90,7 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
 
 export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> => {
   const config = await loadConfig(cwd, 'factory.yaml', parseFactoryConfig);
+  if (!enginePinMatches(config.engine)) throw new Error(enginePinMessage(config.engine));
   const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
   const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
   const tickets = createTicketProvider(adapters, env, http);

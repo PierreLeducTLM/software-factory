@@ -681,6 +681,12 @@ describe('setting the command line up in a project', () => {
     expect(deps.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
+  it('runs a project pinned to another patch of the same engine release', async () => {
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML.replace('engine: 0.1.0', 'engine: 0.1.7'), 'adapters.yaml': ADAPTERS_YAML });
+
+    expect((await createRealDeps({ cwd, env: ENV })).config.engine).toBe('0.1.7');
+  });
+
   it('writes as factory-ci where git has no user name, as in CI', async () => {
     const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
     execFileSync('git', ['config', 'user.name', ''], { cwd });
@@ -693,6 +699,10 @@ describe('setting the command line up in a project', () => {
     [{ 'factory.yaml': FACTORY_YAML }, '.factory/adapters.yaml is missing. Run /factory-init'],
     [{ 'factory.yaml': FACTORY_YAML.replace('schema: 1', 'schema: 9'), 'adapters.yaml': ADAPTERS_YAML }, '.factory/factory.yaml: schema: Invalid input: expected 1'],
     [{ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML.replace('kind: orca', 'kind: other') }, '.factory/adapters.yaml: agent_runtime.kind: Invalid input: expected "orca"'],
+    [
+      { 'factory.yaml': FACTORY_YAML.replace('engine: 0.1.0', 'engine: 0.2.0'), 'adapters.yaml': ADAPTERS_YAML },
+      'This project pins factory engine 0.2.0 in .factory/factory.yaml, and this is engine 0.1.0. Install engine 0.2.0, or upgrade the project with /factory-doctor.',
+    ],
   ])('explains what is wrong with the project config (%#)', async (files, message) => {
     await expect(createRealDeps({ cwd: getProjectFolder(files), env: ENV })).rejects.toThrow(message);
   });
