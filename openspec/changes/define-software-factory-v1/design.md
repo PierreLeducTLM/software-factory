@@ -152,7 +152,7 @@ The agent in the session where `/factory-run` was typed is the builder. The skil
 - **Refresh.** The page reloads its data every `view.poll_seconds` (60 by default). The server asks the provider at most once per interval, however many pages are open.
 - **Sample mode.** `factory view --sample` shows sample tickets through the same model and screens, with no project config and no credentials.
 - **Runs record the real machine name.** Orca's host id is "local" on every computer, so it could not tell two machines apart. Runs now record the hostname, which the one-run-per-worktree check and the "on your machine" note use.
-- **No link into Orca yet.** The run detail says whether a run is on this machine or in a teammate's Orca. It does not open the session: the record holds the worktree, and a web page cannot run the Orca command.
+- **"Open in Orca" runs on the view's own server.** A web page cannot run the Orca command, but the view's server runs on the developer's machine. For a run recorded on this machine, the run detail offers "Open in Orca", and the server runs `orca worktree activate` on the worktree the record names. The page sends only the ticket key, and a record edited by hand opens nothing. It changes no ticket, so the view stays read-only.
 - **Health** is the third page. See D19.
 - *Alternative considered:* a server-rendered page with no framework. Rejected in favour of TanStack Start.
 - *Alternative considered:* a terminal view. Rejected: it drops the mockup's layout.
