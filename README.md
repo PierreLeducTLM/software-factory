@@ -75,11 +75,13 @@ To update the factory later, run `git pull && pnpm install && pnpm build:view` i
 In Claude Code:
 
 ```
-/plugin marketplace add /path/to/software-factory
+/plugin marketplace add PierreLeducTLM/software-factory
 /plugin install software-factory@software-factory
 ```
 
-The five `/factory-…` skills are now available in every project. If they do not show up, restart Claude Code.
+The repository is private, so this works for an account that can read it on GitHub. Otherwise, give the path of your checkout instead: `/plugin marketplace add /path/to/software-factory`. From a terminal, the same two steps are `claude plugin marketplace add …` and `claude plugin install software-factory@software-factory`.
+
+The five `/factory-…` skills are now available in every project. If they do not show up, restart Claude Code. To update them later, run `/plugin marketplace update software-factory`.
 
 ### 3. Prepare the tracker
 
@@ -196,19 +198,24 @@ On GitHub Actions they are in the workflow file. On Bitbucket Pipelines, the pul
 
 **Make `factory` installable in CI.** Each CI step first runs the install command you gave the wizard. The wizard suggests `npm install --global software-factory@<version>`. That works only once the package is published to an npm registry, and it is not published yet. Until it is, install it from this repository's git URL into a folder, and put that folder on the `PATH`.
 
+This repository is private, so CI needs a token that can read it:
+
+1. On GitHub, create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) limited to the repository `PierreLeducTLM/software-factory`, with the permission **Contents: Read-only**.
+2. Store it in the project's CI secret store as `FACTORY_REPO_TOKEN`. On Bitbucket, store it as a secured repository variable.
+
 On GitHub Actions, give the wizard this install command:
 
 ```bash
-npm install --prefix "$HOME/.factory" git+https://github.com/PierreLeducTLM/software-factory.git#v0.1.0 && echo "$HOME/.factory/node_modules/.bin" >> "$GITHUB_PATH"
+npm install --prefix "$HOME/.factory" "git+https://x-access-token:${{ secrets.FACTORY_REPO_TOKEN }}@github.com/PierreLeducTLM/software-factory.git#v0.1.0" && echo "$HOME/.factory/node_modules/.bin" >> "$GITHUB_PATH"
 ```
 
 On Bitbucket Pipelines, use this one:
 
 ```bash
-npm install --prefix "$HOME/.factory" git+https://bitbucket.org/<workspace>/software-factory.git#v0.1.0 && export PATH="$HOME/.factory/node_modules/.bin:$PATH"
+npm install --prefix "$HOME/.factory" "git+https://x-access-token:$FACTORY_REPO_TOKEN@github.com/PierreLeducTLM/software-factory.git#v0.1.0" && export PATH="$HOME/.factory/node_modules/.bin:$PATH"
 ```
 
-Replace `v0.1.0` with the tag or commit of the engine the project pins. If this repository is private, CI also needs read access to it, for example a token in the URL. Do not drop `--prefix` to install globally: npm builds a package installed globally from git without its build tools, and the install fails.
+Replace `v0.1.0` with the tag of the engine the project pins. If the repository becomes public, drop the `x-access-token:…@` part and the token. Do not drop `--prefix` to install globally: npm builds a package installed globally from git without its build tools, and the install fails.
 
 Then **merge the install pull request**. Until it is merged, nothing changes in the project.
 
