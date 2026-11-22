@@ -3,6 +3,7 @@ import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type Conf
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION, enginePinMatches } from '../version.js';
 import { detectProject } from './detect.js';
+import { ENGINE_PACKAGE_PATH, enginePackage, LAUNCHER_PATH } from './engine-files.js';
 import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles } from './project-files.js';
 import { verifyChecks } from './verify.js';
@@ -30,6 +31,12 @@ const ADAPTERS_YAML = '.factory/adapters.yaml';
 const SECRET_MESSAGE = 'Secrets must not be stored in adapters.yaml';
 
 const finding = (kind: FindingKind, message: string): Finding => ({ kind, message });
+
+const installFindings = async (deps: DoctorDeps, pinned: string): Promise<readonly Finding[]> => {
+  const [pin, launcher] = await Promise.all([deps.files.read(ENGINE_PACKAGE_PATH), deps.files.read(LAUNCHER_PATH)]);
+  if (pin === undefined || launcher === undefined) return [finding('engine', 'The factory is not installed in the project. Run "factory migrate" and merge the pull request it opens')];
+  return pin === enginePackage(pinned) ? [] : [finding('engine', `${ENGINE_PACKAGE_PATH} installs another engine than the ${pinned} pinned in ${FACTORY_YAML}. Run "factory migrate"`)];
+};
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -73,6 +80,7 @@ const driftFindings = async (deps: DoctorDeps, config: FactoryConfig, adapters: 
   const verified = runChecks ? await verifyChecks(deps, local) : [];
 
   return [
+    ...(await installFindings(deps, config.engine)),
     ...(enginePinMatches(config.engine, engine) ? [] : [finding('engine', `${FACTORY_YAML} pins engine ${config.engine}, and this is engine ${engine}`)]),
     ...config.checks.flatMap((check) => {
       const job = check.job ?? check.id;

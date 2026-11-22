@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import { engineFiles, enginePackage } from '../src/setup/engine-files.js';
 import type { Migration } from '../src/setup/migrate.js';
 import { createInMemoryProjectFiles, type PublishedChange } from '../src/setup/project-files.js';
 import { upgradeProject } from '../src/setup/upgrade.js';
@@ -18,6 +19,8 @@ const RENAME_RISK: Migration = {
   summary: 'risk is now called routing',
   apply: ({ risk, ...rest }) => ({ ...rest, routing: risk }),
 };
+
+const PROJECT = { '.factory/factory.yaml': FACTORY, ...engineFiles('0.1.0') };
 
 type Options = Parameters<typeof upgradeProject>[1];
 
@@ -40,13 +43,19 @@ const upgrade = async (files: Readonly<Record<string, string>>, options: Options
 
 describe('upgrading a project to a newer engine', () => {
   it('opens a pull request that pins the new engine, keeps the comments, and leaves the project as it is until merged', async () => {
-    const files = { '.factory/factory.yaml': FACTORY };
+    const files = PROJECT;
 
     const { result, published, opened } = await upgrade(files, { engine: '0.2.0' });
 
     expect(result).toEqual({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', from: { engine: '0.1.0', schema: 1 }, to: { engine: '0.2.0', schema: 1 }, applied: [] });
     expect(published).toEqual([
-      { branch: 'factory/upgrade-engine-0.2.0', base: 'main', files: { '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.2.0') }, message: 'chore: upgrade the factory engine to 0.2.0' },
+      {
+        branch: 'factory/upgrade-engine-0.2.0',
+        base: 'main',
+        files: { '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.2.0'), '.factory/package.json': enginePackage('0.2.0') },
+        executable: [],
+        message: 'chore: upgrade the factory engine to 0.2.0',
+      },
     ]);
     expect(opened).toEqual([
       {
@@ -58,6 +67,8 @@ describe('upgrading a project to a newer engine', () => {
           '',
           'The configuration schema stays at version 1.',
           '',
+          'Updates .factory/package.json, which install and run the engine inside the project.',
+          '',
           'Nothing changes until this pull request is merged: the project keeps running engine 0.1.0 until then.',
         ].join('\n'),
       },
@@ -66,7 +77,7 @@ describe('upgrading a project to a newer engine', () => {
   });
 
   it('migrates the schema in the same pull request, and lists each migration', async () => {
-    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('schema: 1\n', 'schema: 1\nmain_branch: develop\n') }, { engine: '0.2.0', upgrade: { target: 2, migrations: [RENAME_RISK] } });
+    const { result, published, opened } = await upgrade({ ...PROJECT, '.factory/factory.yaml': FACTORY.replace('schema: 1\n', 'schema: 1\nmain_branch: develop\n') }, { engine: '0.2.0', upgrade: { target: 2, migrations: [RENAME_RISK] } });
 
     expect(result).toMatchObject({ ok: true, action: 'opened', from: { schema: 1 }, to: { schema: 2 }, applied: ['risk is now called routing'] });
     expect(published.map(({ branch, base }) => ({ branch, base }))).toEqual([{ branch: 'factory/upgrade-engine-0.2.0', base: 'develop' }]);
@@ -74,16 +85,17 @@ describe('upgrading a project to a newer engine', () => {
     expect(parse(published[0]?.files['.factory/factory.yaml'] ?? '')).not.toHaveProperty('risk');
     expect(opened[0]?.base).toBe('develop');
     expect(opened[0]?.body.split('\n').slice(2, 5)).toEqual(['The configuration schema moves from version 1 to 2:', '- risk is now called routing', '']);
+    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/factory.yaml', '.factory/package.json']);
   });
 
   it('opens a pull request for a schema change alone', async () => {
-    const { result } = await upgrade({ '.factory/factory.yaml': FACTORY }, { engine: '0.1.4', upgrade: { target: 2, migrations: [RENAME_RISK] } });
+    const { result } = await upgrade(PROJECT, { engine: '0.1.4', upgrade: { target: 2, migrations: [RENAME_RISK] } });
 
     expect(result).toMatchObject({ ok: true, action: 'opened', from: { engine: '0.1.0', schema: 1 }, to: { engine: '0.1.4', schema: 2 } });
   });
 
   it('does nothing for a project already on this engine release and schema', async () => {
-    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.1.2') }, { engine: '0.1.7' });
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.1.2'), ...engineFiles('0.1.2') }, { engine: '0.1.7' });
 
     expect(result).toEqual({ ok: true, action: 'none', message: 'Nothing to upgrade: the project is on engine 0.1.2 and schema 1, which this engine (0.1.7) runs as they are.' });
     expect(published).toEqual([]);
@@ -108,6 +120,43 @@ describe('upgrading a project to a newer engine', () => {
     const { result } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', `engine: ${pinned}`) }, { engine: running });
 
     expect(result).toMatchObject({ ok: true, action: 'opened' });
+  });
+
+  it('installs the engine in a project that ran it from elsewhere, leaving its configuration alone', async () => {
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY }, { engine: '0.1.5' });
+
+    expect(result).toMatchObject({ ok: true, action: 'opened', from: { engine: '0.1.0' }, to: { engine: '0.1.0' } });
+    expect(published[0]?.files).toEqual(engineFiles('0.1.0'));
+    expect(published[0]?.executable).toEqual(['.factory/bin/factory']);
+    expect(opened[0]?.title).toBe('chore: install the factory engine in the project');
+    expect(opened[0]?.body).toBe(
+      [
+        'Updates .factory/package.json, .factory/bin/factory, .factory/.gitignore, which install and run the engine 0.1.0 inside the project.',
+        '',
+        'The project keeps its configuration and its engine pin. Nothing changes until this pull request is merged.',
+      ].join('\n'),
+    );
+  });
+
+  it('moves the pin alone when the project already installs the new engine, and says nothing about engine files', async () => {
+    const { opened } = await upgrade({ '.factory/factory.yaml': FACTORY, ...engineFiles('0.2.0') }, { engine: '0.2.0' });
+
+    expect(opened[0]?.body).toBe(
+      [
+        'Moves this project from factory engine 0.1.0 to 0.2.0.',
+        '',
+        'The configuration schema stays at version 1.',
+        '',
+        'Nothing changes until this pull request is merged: the project keeps running engine 0.1.0 until then.',
+      ].join('\n'),
+    );
+  });
+
+  it('brings an outdated launcher up to date and marks it executable, without touching the pin', async () => {
+    const { published } = await upgrade({ ...PROJECT, '.factory/bin/factory': '#!/bin/sh\necho old\n' }, { engine: '0.1.5' });
+
+    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/bin/factory']);
+    expect(published[0]?.executable).toEqual(['.factory/bin/factory']);
   });
 
   it('refuses a project with no configuration, or one on a schema this engine does not know', async () => {

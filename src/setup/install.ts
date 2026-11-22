@@ -2,6 +2,7 @@ import { stringify } from 'yaml';
 import { z } from 'zod';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig } from '../config/project-config.js';
 import { CATEGORIES, type Category } from './detect.js';
+import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
 
 const DURATION = z.string().regex(/^\d+(s|m|h)$/, 'Use a number followed by s, m or h, such as 90s or 6m');
 const NAME = z.string().min(1);
@@ -29,7 +30,7 @@ const InstallAnswersSchema = z.object({
     z.object({ kind: z.literal('linear'), team: NAME, project: NAME.optional(), tokenEnv: NAME }),
   ]),
   sourceControl: z.object({ kind: z.enum(['github', 'bitbucket']), tokenEnv: NAME, usernameEnv: NAME.optional() }),
-  ci: z.object({ system: z.enum(['github-actions', 'bitbucket-pipelines', 'none']), workflow: NAME.optional(), install: NAME }),
+  ci: z.object({ system: z.enum(['github-actions', 'bitbucket-pipelines', 'none']), workflow: NAME.optional() }),
   watch: z.object({ checks: z.array(NAME).min(1), duration: DURATION, interval: DURATION, environment: NAME }).optional(),
 });
 
@@ -39,7 +40,7 @@ export type ChosenCheck = z.infer<typeof ChosenCheckSchema>;
 export type InstallAnswers = z.infer<typeof InstallAnswersSchema>;
 export type Connection = z.infer<typeof ConnectionSchema>;
 
-export type Install = { readonly files: Readonly<Record<string, string>>; readonly manual: readonly string[]; readonly secrets: readonly string[] };
+export type Install = { readonly files: Readonly<Record<string, string>>; readonly executable: readonly string[]; readonly manual: readonly string[]; readonly secrets: readonly string[] };
 
 const STATIONS: Readonly<Record<Category, string>> = { tests: 'quality', lint: 'quality', types: 'quality', format: 'quality', build: 'quality', security: 'review', e2e: 'review' };
 const DEFAULT_LABELS = { auto: 'factory-auto', no_automerge: 'factory:no-automerge' };
@@ -55,6 +56,9 @@ A rubric says, in plain language, what the reviewing agent must check and what p
 
 Add a check with \`/factory-workflow\`. It writes the rubric, validates the configuration and opens a pull request.
 `;
+
+const REPO_TOKEN = 'FACTORY_REPO_TOKEN';
+const FACTORY = '.factory/bin/factory';
 
 const secretName = (env: string): string => `FACTORY_${env}`;
 
@@ -106,7 +110,7 @@ const adaptersYaml = ({ repository, ticketProvider, sourceControl }: Connection)
 const providerEnvs = ({ ticketProvider }: InstallAnswers): readonly string[] =>
   ticketProvider.kind === 'jira' ? [ticketProvider.tokenEnv, ticketProvider.emailEnv] : [ticketProvider.tokenEnv];
 
-const githubJob = (condition: string, install: string, command: string): readonly string[] => [
+const githubJob = (condition: string, command: string): readonly string[] => [
   `    if: ${condition}`,
   '    runs-on: ubuntu-latest',
   '    steps:',
@@ -116,8 +120,7 @@ const githubJob = (condition: string, install: string, command: string): readonl
   '      - uses: actions/setup-node@v4',
   '        with:',
   '          node-version: 22',
-  `      - run: ${install}`,
-  `      - run: ${command}`,
+  `      - run: ${FACTORY} ${command}`,
 ];
 
 const githubWorkflow = (answers: InstallAnswers): string => {
@@ -133,32 +136,32 @@ const githubWorkflow = (answers: InstallAnswers): string => {
     '  contents: write',
     '  pull-requests: write',
     'env:',
+    `  ${REPO_TOKEN}: \${{ secrets.${REPO_TOKEN} }}`,
     ...providerEnvs(answers).map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
     `  ${sourceControl.tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`,
     'jobs:',
     '  record-merge:',
-    ...githubJob("github.event_name == 'push'", ci.install, 'factory record-merge --commit ${{ github.sha }}'),
+    ...githubJob("github.event_name == 'push'", 'record-merge --commit ${{ github.sha }}'),
     ...(ci.workflow === undefined
       ? []
-      : ['  revert:', ...githubJob("github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'", ci.install, 'factory revert --commit ${{ github.event.workflow_run.head_sha }}')]),
+      : ['  revert:', ...githubJob("github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'", 'revert --commit ${{ github.event.workflow_run.head_sha }}')]),
     ...(watch === undefined
       ? []
       : [
           '  watch:',
           ...githubJob(
             `github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == '${watch.environment}'`,
-            ci.install,
-            'factory watch --commit ${{ github.event.deployment.sha }}',
+            'watch --commit ${{ github.event.deployment.sha }}',
           ),
         ]),
     '',
   ].join('\n');
 };
 
-const bitbucketSteps = ({ mainBranch, ci, watch }: InstallAnswers): readonly string[] => [
-  `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${ci.install}\n      - factory record-merge --commit $BITBUCKET_COMMIT`,
-  `Add this after-script to the step that builds ${mainBranch}:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then ${ci.install} && factory revert --commit $BITBUCKET_COMMIT; fi`,
-  ...(watch === undefined ? [] : [`Add this step after the deployment to ${watch.environment}:\n- step:\n    name: Factory watch\n    script:\n      - ${ci.install}\n      - factory watch --commit $BITBUCKET_COMMIT`]),
+const bitbucketSteps = ({ mainBranch, watch }: InstallAnswers): readonly string[] => [
+  `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
+  `Add this after-script to the step that builds ${mainBranch}:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then ${FACTORY} revert --commit $BITBUCKET_COMMIT; fi`,
+  ...(watch === undefined ? [] : [`Add this step after the deployment to ${watch.environment}:\n- step:\n    name: Factory watch\n    script:\n      - ${FACTORY} watch --commit $BITBUCKET_COMMIT`]),
 ];
 
 const checked = (path: string, text: string, issues: readonly { readonly path: string; readonly message: string }[] | undefined): string => {
@@ -178,14 +181,16 @@ export const buildInstall = (answers: InstallAnswers): Install => {
       [FACTORY_YAML]: checked(FACTORY_YAML, factory, parsedFactory.ok ? undefined : parsedFactory.issues),
       [ADAPTERS_YAML]: checked(ADAPTERS_YAML, adapters, parsedAdapters.ok ? undefined : parsedAdapters.issues),
       '.factory/checks/README.md': RUBRICS_README,
+      ...engineFiles(answers.engine),
       ...(github ? { [WORKFLOW_FILE]: githubWorkflow(answers) } : {}),
     },
+    executable: [LAUNCHER_PATH],
     manual: [
       ...(system === 'bitbucket-pipelines' ? bitbucketSteps(answers) : []),
       ...(system === 'none' ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
       ...(github && workflow === undefined ? ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] : []),
     ],
-    secrets: system === 'none' ? [] : github ? providerEnvs(answers).map(secretName) : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])],
+    secrets: system === 'none' ? [] : [REPO_TOKEN, ...(github ? providerEnvs(answers).map(secretName) : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])])],
   };
 };
 

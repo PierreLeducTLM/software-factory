@@ -17,7 +17,7 @@ const getAnswers = (overrides?: Partial<InstallAnswers>): InstallAnswers => ({
   sensitivePaths: [],
   ticketProvider: { kind: 'jira', baseUrl: 'https://acme.atlassian.net', filter: 'project = PAY', tokenEnv: 'JIRA_TOKEN', emailEnv: 'JIRA_EMAIL' },
   sourceControl: { kind: 'github', tokenEnv: 'GH_TOKEN' },
-  ci: { system: 'github-actions', workflow: 'CI', install: `npm install --global software-factory@${ENGINE_VERSION}` },
+  ci: { system: 'github-actions', workflow: 'CI' },
   ...overrides,
 });
 
@@ -113,9 +113,10 @@ describe('the install wizard', () => {
 
     const result = await installFactory(deps, getAnswers({ mainBranch: 'develop' }), { ticket: 'PAY-1' });
 
-    expect(result).toEqual({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'], manual: [] });
+    expect(result).toEqual({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_REPO_TOKEN', 'FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'], manual: [] });
     expect(published.map(({ branch, base, message }) => ({ branch, base, message }))).toEqual([{ branch: 'factory/install', base: 'develop', message: 'chore: install the software factory' }]);
-    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/factory.yaml', '.factory/adapters.yaml', '.factory/checks/README.md', '.github/workflows/factory.yml']);
+    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/factory.yaml', '.factory/adapters.yaml', '.factory/checks/README.md', '.factory/package.json', '.factory/bin/factory', '.factory/.gitignore', '.github/workflows/factory.yml']);
+    expect(published[0]?.executable).toEqual(['.factory/bin/factory']);
     expect(opened).toEqual([
       {
         branch: 'factory/install',
@@ -125,6 +126,7 @@ describe('the install wizard', () => {
           'Installs the software factory in this project.',
           '',
           'Before merging, store these secrets in the CI secret store:',
+          '- FACTORY_REPO_TOKEN',
           '- FACTORY_JIRA_TOKEN',
           '- FACTORY_JIRA_EMAIL',
           '',
@@ -137,7 +139,7 @@ describe('the install wizard', () => {
   it('lists the steps to make by hand in the pull request, and leaves out an empty secrets list', async () => {
     const { deps, opened } = getInit();
 
-    const result = await installFactory(deps, getAnswers({ ci: { system: 'none', install: 'npm install --global software-factory' } }), { ticket: 'PAY-1' });
+    const result = await installFactory(deps, getAnswers({ ci: { system: 'none' } }), { ticket: 'PAY-1' });
 
     expect(result).toMatchObject({ ok: true, secrets: [] });
     expect(opened[0]?.body.split('\n')).toEqual([

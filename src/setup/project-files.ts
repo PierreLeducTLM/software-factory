@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export type PublishedChange = { readonly branch: string; readonly base: string; readonly files: Readonly<Record<string, string>>; readonly message: string };
+export type PublishedChange = { readonly branch: string; readonly base: string; readonly files: Readonly<Record<string, string>>; readonly message: string; readonly executable?: readonly string[] };
 
 export interface ProjectFiles {
   read(path: string): Promise<string | undefined>;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseAdaptersConfig, parseFactoryConfig } from '../src/config/project-config.js';
 import { detectProject } from '../src/setup/detect.js';
 import { buildInstall, parseConnection, parseInstallAnswers, type InstallAnswers } from '../src/setup/install.js';
+import { engineFiles } from '../src/setup/engine-files.js';
 import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
 
 const getAnswers = (overrides?: Partial<InstallAnswers>): InstallAnswers => ({
@@ -18,7 +19,7 @@ const getAnswers = (overrides?: Partial<InstallAnswers>): InstallAnswers => ({
   sensitivePaths: ['src/auth/**', 'src/billing/**'],
   ticketProvider: { kind: 'jira', baseUrl: 'https://acme.atlassian.net', filter: 'project = PAY', tokenEnv: 'JIRA_TOKEN', emailEnv: 'JIRA_EMAIL' },
   sourceControl: { kind: 'github', tokenEnv: 'GH_TOKEN' },
-  ci: { system: 'github-actions', workflow: 'CI', install: 'npm install --global software-factory@0.1.0' },
+  ci: { system: 'github-actions', workflow: 'CI' },
   ...overrides,
 });
 
@@ -81,15 +82,23 @@ describe('the files of an install', () => {
 
     expect(parsed.ok && parsed.value.ticket_providers).toEqual([{ kind: 'linear', team: 'PAY', project: 'Billing service', token_env: 'LINEAR_API_KEY' }]);
     expect(teamOnly.files['.factory/adapters.yaml']).not.toContain('project');
-    expect(secrets).toEqual(['FACTORY_LINEAR_API_KEY']);
+    expect(secrets).toEqual(['FACTORY_REPO_TOKEN', 'FACTORY_LINEAR_API_KEY']);
     expect(files['.github/workflows/factory.yml']).toContain('  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}');
-    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines', install: 'npm i -g software-factory' } })).secrets).toEqual(['LINEAR_API_KEY', 'GH_TOKEN']);
+    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' } })).secrets).toEqual(['FACTORY_REPO_TOKEN', 'LINEAR_API_KEY', 'GH_TOKEN']);
   });
 
   it('refuses a Linear connection without a team', () => {
     const { repository, mainBranch, sourceControl } = getAnswers();
 
     expect(() => parseConnection(JSON.stringify({ repository, mainBranch, sourceControl, ticketProvider: { kind: 'linear', tokenEnv: 'LINEAR_API_KEY' } }))).toThrow(/answers: ticketProvider\.team: /);
+  });
+
+  it('installs the engine in the project: its pin, a launcher that runs it, and a gitignore for its install', () => {
+    const install = buildInstall(getAnswers({ engine: '0.3.1' }));
+
+    expect(install.files).toMatchObject(engineFiles('0.3.1'));
+    expect(JSON.parse(install.files['.factory/package.json'] ?? '').dependencies['software-factory']).toMatch(/#v0\.3\.1$/);
+    expect(install.executable).toEqual(['.factory/bin/factory']);
   });
 
   it('adds the folder for agent check rubrics', () => {
@@ -113,15 +122,15 @@ describe('the CI steps of an install on GitHub', () => {
 
     expect(detection.ci.factorySteps).toEqual(['record-merge', 'revert']);
     expect(detection.ci.jobs.map((job) => [job.name, job.commands])).toEqual([
-      ['record-merge', ['npm install --global software-factory@0.1.0', 'factory record-merge --commit ${{ github.sha }}']],
-      ['revert', ['npm install --global software-factory@0.1.0', 'factory revert --commit ${{ github.event.workflow_run.head_sha }}']],
+      ['record-merge', ['.factory/bin/factory record-merge --commit ${{ github.sha }}']],
+      ['revert', ['.factory/bin/factory revert --commit ${{ github.event.workflow_run.head_sha }}']],
     ]);
     expect(workflow).toContain('  push:\n    branches: [main]\n  workflow_run:\n    workflows: ["CI"]\n    types: [completed]\n    branches: [main]\npermissions:');
     expect(workflow).toContain("    if: github.event_name == 'push'\n");
     expect(workflow).toContain("    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'\n");
-    expect(workflow).toContain('env:\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
+    expect(workflow).toContain('env:\n  FACTORY_REPO_TOKEN: ${{ secrets.FACTORY_REPO_TOKEN }}\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
     expect(workflow).toContain('          fetch-depth: 0\n');
-    expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(install.secrets).toEqual(['FACTORY_REPO_TOKEN', 'FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
     expect(install.manual).toEqual([]);
   });
 
@@ -133,13 +142,13 @@ describe('the CI steps of an install on GitHub', () => {
     expect(detection.ci.factorySteps).toEqual(['record-merge', 'revert', 'watch']);
     expect(workflow).toContain('    branches: [trunk]\n  deployment_status:\npermissions:');
     expect(workflow).toContain("    if: github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'staging'\n");
-    expect(workflow).toContain('factory watch --commit ${{ github.event.deployment.sha }}');
+    expect(workflow).toContain('.factory/bin/factory watch --commit ${{ github.event.deployment.sha }}');
     expect(factoryOf(getAnswers({ watch })).watch).toEqual({ enabled: true, checks: ['./smoke.sh'], duration: '10m', interval: '1m' });
     expect(buildInstall(getAnswers()).files['.github/workflows/factory.yml']).not.toContain('watch');
   });
 
   it('leaves the revert step out, and says so, when the main build workflow is not named', () => {
-    const install = buildInstall(getAnswers({ ci: { system: 'github-actions', install: 'npm install --global software-factory@0.1.0' } }));
+    const install = buildInstall(getAnswers({ ci: { system: 'github-actions' } }));
 
     expect(install.files['.github/workflows/factory.yml']).not.toContain('revert');
     expect(install.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
@@ -149,22 +158,22 @@ describe('the CI steps of an install on GitHub', () => {
 
 describe('the CI steps of an install elsewhere', () => {
   it('gives the steps to add to the Bitbucket pipeline by hand, and the variables to create', () => {
-    const answers = getAnswers({ ci: { system: 'bitbucket-pipelines', install: 'npm i -g software-factory@0.1.0' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } });
+    const answers = getAnswers({ ci: { system: 'bitbucket-pipelines' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } });
     const install = buildInstall(answers);
     const watched = buildInstall({ ...answers, watch: { checks: ['./smoke.sh'], duration: '10m', interval: '1m', environment: 'staging' } });
 
-    expect(Object.keys(install.files)).toEqual(['.factory/factory.yaml', '.factory/adapters.yaml', '.factory/checks/README.md']);
+    expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
     expect(install.manual).toEqual([
-      'Add this step to bitbucket-pipelines.yml, under pipelines > branches > main:\n- step:\n    name: Factory record-merge\n    script:\n      - npm i -g software-factory@0.1.0\n      - factory record-merge --commit $BITBUCKET_COMMIT',
-      'Add this after-script to the step that builds main:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then npm i -g software-factory@0.1.0 && factory revert --commit $BITBUCKET_COMMIT; fi',
+      'Add this step to bitbucket-pipelines.yml, under pipelines > branches > main:\n- step:\n    name: Factory record-merge\n    script:\n      - .factory/bin/factory record-merge --commit $BITBUCKET_COMMIT',
+      'Add this after-script to the step that builds main:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then .factory/bin/factory revert --commit $BITBUCKET_COMMIT; fi',
     ]);
-    expect(watched.manual[2]).toBe('Add this step after the deployment to staging:\n- step:\n    name: Factory watch\n    script:\n      - npm i -g software-factory@0.1.0\n      - factory watch --commit $BITBUCKET_COMMIT');
-    expect(install.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN', 'BB_USER']);
-    expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
+    expect(watched.manual[2]).toBe('Add this step after the deployment to staging:\n- step:\n    name: Factory watch\n    script:\n      - .factory/bin/factory watch --commit $BITBUCKET_COMMIT');
+    expect(install.secrets).toEqual(['FACTORY_REPO_TOKEN', 'JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN', 'BB_USER']);
+    expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['FACTORY_REPO_TOKEN', 'JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
   });
 
   it('says what to run when the project has no CI', () => {
-    const install = buildInstall(getAnswers({ ci: { system: 'none', install: 'x' } }));
+    const install = buildInstall(getAnswers({ ci: { system: 'none' } }));
 
     expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
     expect(install.manual).toEqual(['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.']);

@@ -3,6 +3,7 @@ import type { OpenPullRequest } from '../src/adapters/source-control.js';
 import type { Access, ProviderStatus } from '../src/adapters/ticket-provider.js';
 import { setupCommand } from '../src/cli/setup-command.js';
 import type { ScriptRun } from '../src/factory/checks.js';
+import { engineFiles } from '../src/setup/engine-files.js';
 import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
 import type { PublishedChange } from '../src/setup/project-files.js';
 import { ENGINE_VERSION } from '../src/version.js';
@@ -51,6 +52,7 @@ const USAGE = [
 ];
 
 const HEALTHY: Readonly<Record<string, string>> = {
+  ...engineFiles(ENGINE_VERSION),
   '.factory/factory.yaml': FACTORY,
   '.factory/adapters.yaml': ADAPTERS,
   '.github/workflows/factory.yml': FACTORY_CI,
@@ -144,7 +146,7 @@ describe('factory doctor', () => {
   });
 
   it('answers with the report as JSON', async () => {
-    const { run } = getSetup({ ...HEALTHY, '.factory/factory.yaml': FACTORY.replace(`engine: ${ENGINE_VERSION}`, 'engine: 9.0.0') });
+    const { run } = getSetup({ ...HEALTHY, ...engineFiles('9.0.0'), '.factory/factory.yaml': FACTORY.replace(`engine: ${ENGINE_VERSION}`, 'engine: 9.0.0') });
 
     const { code, out } = await run('doctor', '--json');
 
@@ -199,7 +201,7 @@ const ANSWERS = JSON.stringify({
   sensitivePaths: [],
   ticketProvider: { kind: 'jira', baseUrl: 'https://acme.atlassian.net', filter: 'project = PAY', tokenEnv: 'JIRA_TOKEN', emailEnv: 'JIRA_EMAIL' },
   sourceControl: { kind: 'github', tokenEnv: 'GH_TOKEN' },
-  ci: { system: 'github-actions', workflow: 'CI', install: 'npm install --global software-factory' },
+  ci: { system: 'github-actions', workflow: 'CI' },
 });
 
 const NEW_PROJECT: Readonly<Record<string, string>> = {
@@ -265,7 +267,7 @@ describe('factory init', () => {
     const { out, code } = await setup.run('init', 'install', '--answers', 'answers.json', '--ticket', 'PAY-1');
 
     expect(code).toBe(0);
-    expect(out).toEqual(['Opened https://github.com/acme/billing-service/pull/78', 'Store these CI secrets: FACTORY_JIRA_TOKEN, FACTORY_JIRA_EMAIL']);
+    expect(out).toEqual(['Opened https://github.com/acme/billing-service/pull/78', 'Store these CI secrets: FACTORY_REPO_TOKEN, FACTORY_JIRA_TOKEN, FACTORY_JIRA_EMAIL']);
     expect(setup.accessed).toEqual(['PAY-1']);
     expect(setup.opened).toEqual(['factory/install']);
   });

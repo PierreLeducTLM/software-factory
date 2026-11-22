@@ -2,6 +2,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import { ENGINE_VERSION, enginePinMatches } from '../version.js';
+import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
 import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
 
@@ -37,6 +38,13 @@ const pinned = (text: string, engine: string): string => text.replace(/^engine:.
 const schemaLines = (from: number, to: number, applied: readonly string[]): readonly string[] =>
   from === to ? [`The configuration schema stays at version ${from}.`] : [`The configuration schema moves from version ${from} to ${to}:`, ...applied.map((summary) => `- ${summary}`)];
 
+const staleEngineFiles = async (files: ProjectFiles, engine: string): Promise<Readonly<Record<string, string>>> => {
+  const found = await Promise.all(Object.entries(engineFiles(engine)).map(async ([path, content]) => ({ path, content, stale: (await files.read(path)) !== content })));
+  return Object.fromEntries(found.filter(({ stale }) => stale).map(({ path, content }) => [path, content]));
+};
+
+const body = (lines: readonly string[]): string => lines.join('\n');
+
 export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSION, upgrade }: UpgradeOptions): Promise<UpgradeResult> => {
   const text = await deps.files.read(FACTORY_YAML);
   if (text === undefined) return { ok: false, reason: 'missing', message: `${FACTORY_YAML} is missing. Run /factory-init` };
@@ -44,24 +52,38 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
   if (!migrated.ok) return { ok: false, reason: 'schema', message: migrated.message };
   const pin = PinSchema.parse(parse(text));
   if (isNewer(pin.engine, engine)) return { ok: false, reason: 'newer_engine', message: `This project pins factory engine ${pin.engine}, newer than this engine (${engine}). Install engine ${pin.engine} instead.` };
-  if (migrated.from === migrated.to && enginePinMatches(pin.engine, engine)) {
+  const moving = !(migrated.from === migrated.to && enginePinMatches(pin.engine, engine));
+  const target = moving ? engine : pin.engine;
+  const installed = await staleEngineFiles(deps.files, target);
+  const paths = Object.keys(installed);
+  if (!moving && paths.length === 0) {
     return { ok: true, action: 'none', message: `Nothing to upgrade: the project is on engine ${pin.engine} and schema ${migrated.from}, which this engine (${engine}) runs as they are.` };
   }
 
   const branch = `factory/upgrade-engine-${engine}`;
-  const title = `chore: upgrade the factory engine to ${engine}`;
-  await deps.publishFiles({ branch, base: pin.main_branch, files: { [FACTORY_YAML]: pinned(migrated.text, engine) }, message: title });
+  const title = moving ? `chore: upgrade the factory engine to ${engine}` : 'chore: install the factory engine in the project';
+  const installLine = `Updates ${paths.join(', ')}, which install and run the engine${moving ? '' : ` ${target}`} inside the project.`;
+  await deps.publishFiles({
+    branch,
+    base: pin.main_branch,
+    files: { ...(moving ? { [FACTORY_YAML]: pinned(migrated.text, engine) } : {}), ...installed },
+    executable: paths.filter((path) => path === LAUNCHER_PATH),
+    message: title,
+  });
   const { url } = await deps.openPullRequest({
     branch,
     base: pin.main_branch,
     title,
-    body: [
-      `Moves this project from factory engine ${pin.engine} to ${engine}.`,
-      '',
-      ...schemaLines(migrated.from, migrated.to, migrated.applied),
-      '',
-      `Nothing changes until this pull request is merged: the project keeps running engine ${pin.engine} until then.`,
-    ].join('\n'),
+    body: moving
+      ? body([
+          `Moves this project from factory engine ${pin.engine} to ${engine}.`,
+          '',
+          ...schemaLines(migrated.from, migrated.to, migrated.applied),
+          '',
+          ...(paths.length === 0 ? [] : [installLine, '']),
+          `Nothing changes until this pull request is merged: the project keeps running engine ${pin.engine} until then.`,
+        ])
+      : body([installLine, '', 'The project keeps its configuration and its engine pin. Nothing changes until this pull request is merged.']),
   });
-  return { ok: true, action: 'opened', url, from: { engine: pin.engine, schema: migrated.from }, to: { engine, schema: migrated.to }, applied: migrated.applied };
+  return { ok: true, action: 'opened', url, from: { engine: pin.engine, schema: migrated.from }, to: { engine: target, schema: migrated.to }, applied: migrated.applied };
 };

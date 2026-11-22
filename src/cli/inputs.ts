@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
@@ -38,7 +38,7 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
 
 export const createFilePublisher =
   ({ run }: { readonly run: CommandRunner }) =>
-  async ({ branch, base, files, message }: PublishedChange): Promise<void> => {
+  async ({ branch, base, files, message, executable }: PublishedChange): Promise<void> => {
     const folder = await mkdtemp(join(tmpdir(), 'factory-publish-'));
     await run(['fetch', '--quiet', 'origin', base]);
     await run(['worktree', 'add', '--quiet', '-b', branch, folder, `origin/${base}`]);
@@ -48,6 +48,7 @@ export const createFilePublisher =
           const target = join(folder, path);
           await mkdir(dirname(target), { recursive: true });
           await writeFile(target, content);
+          if (executable?.includes(path) === true) await chmod(target, 0o755);
         }),
       );
       await run(['-C', folder, 'add', '--', ...Object.keys(files)]);

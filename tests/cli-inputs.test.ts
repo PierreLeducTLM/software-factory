@@ -130,6 +130,16 @@ describe('git inputs', () => {
     expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
   });
 
+  it('records the files it is told are executable as executable, and the others as plain files', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'config', 'user.email', 'pierre@example.test');
+
+    await publisherFor(clone)({ branch: 'factory/install', base: 'main', files: { '.factory/bin/factory': '#!/bin/sh\n', '.factory/package.json': '{}' }, executable: ['.factory/bin/factory'], message: 'install' });
+
+    const modes = git(origin, 'ls-tree', 'factory/install', '.factory/bin/factory', '.factory/package.json').split('\n').map((line) => line.split(' ')[0]);
+    expect(modes).toEqual(['100755', '100644']);
+  });
+
   it('removes its temporary worktree when the push fails', async () => {
     const { clone } = getClone();
     git(clone, 'config', 'user.email', 'pierre@example.test');

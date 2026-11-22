@@ -65,8 +65,8 @@ export const installFactory = async (deps: InitDeps, answers: InstallAnswers, { 
       message: `The ${provider} workflow lets a ticket move from "${claimed}" to "${claimed}", so two developers could claim the same ticket. Remove that transition, then run the install again. No pull request was opened.`,
     };
   }
-  const { files, secrets, manual } = buildInstall(answers);
-  await deps.publishFiles({ branch: INSTALL_BRANCH, base: answers.mainBranch, files, message: INSTALL_TITLE });
+  const { files, executable, secrets, manual } = buildInstall(answers);
+  await deps.publishFiles({ branch: INSTALL_BRANCH, base: answers.mainBranch, files, executable, message: INSTALL_TITLE });
   const { url } = await deps.sourceControl(adapters).openPullRequest({ branch: INSTALL_BRANCH, base: answers.mainBranch, title: INSTALL_TITLE, body: installBody(secrets, manual) });
   return { ok: true, url, secrets, manual };
 };
