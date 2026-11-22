@@ -46,6 +46,8 @@ const USAGE = [
   'Setting the project up:',
   '  doctor [--run-checks] [--ticket <KEY>]   check the setup for drift',
   '  migrate                         open a pull request that moves the project to this engine',
+  '  init detect|statuses|install|pull-request   the install wizard steps (see factory init)',
+  '  workflow --title <text> [--preview]          propose a change to the factory workflow',
   'In CI, with the service account:',
   '  record-merge [--commit <sha>] [--pull-request <n>]   on every merge to main',
   '  revert [--commit <sha>] [--pull-request <n>]         when main fails after an auto-merge',

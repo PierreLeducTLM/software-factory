@@ -5,7 +5,7 @@ import { createBitbucketSourceControl } from '../adapters/bitbucket-source-contr
 import { createGitHubSourceControl } from '../adapters/github-source-control.js';
 import { createFetchHttp, sleep, withRateLimitRetry, type Http } from '../adapters/http.js';
 import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
-import { createCommandRunner, createOrcaAgentRuntime } from '../adapters/orca-agent-runtime.js';
+import { createCommandRunner, createOrcaAgentRuntime, type CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
@@ -16,7 +16,7 @@ import { createViewSource, type ViewSource } from '../view/source.js';
 import { createProjectFiles } from '../setup/project-files.js';
 import { enginePinMatches, enginePinMessage } from '../version.js';
 import type { SetupDeps } from './setup-command.js';
-import { createFilePublisher, createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
+import { createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
 
@@ -125,13 +125,20 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
 export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
   const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
   const runGit = createCommandRunner('git');
+  const git: CommandRunner = (args) => runGit(args, { cwd });
   const adapters = (): Promise<AdaptersConfig> => loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
+  const repository = createRepositoryReader({ run: git });
   return {
     files: createProjectFiles(cwd),
     runScript: createScriptRunner({ cwd }),
     now,
     checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
-    publishFiles: createFilePublisher({ run: (args) => runGit(args, { cwd }) }),
+    publishFiles: createFilePublisher({ run: git }),
+    readFile: (path) => readFile(join(cwd, path), 'utf8'),
+    remoteUrl: repository.remoteUrl,
+    mainFile: repository.mainFile,
+    tickets: (connection) => createTicketProvider(connection, env, http),
+    sourceControl: (connection) => createSourceControl(connection, env, http),
     openPullRequest: async (request) => createSourceControl(await adapters(), env, http).openPullRequest(request),
   };
 };

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCommandRunner, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
-import { createFilePublisher, createGitInputs, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
+import { createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
 
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Test Dev', '-c', 'user.email=test@example.test', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -138,6 +138,27 @@ describe('git inputs', () => {
     await expect(publisherFor(clone)({ branch: 'factory/x', base: 'main', files: { '.factory/checks/x.md': 'x' }, message: 'x' })).rejects.toThrow(/nowhere/);
 
     expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
+  it('reads the remote and a file as it is on the latest main, without checking it out', async () => {
+    const { origin, clone } = getClone();
+    commit(origin, 'b.txt', 'line one\nline two\n');
+    const run = createCommandRunner('git');
+    const reader = createRepositoryReader({ run: (args) => run(args, { cwd: clone }) });
+
+    expect(await reader.remoteUrl()).toBe(origin);
+    expect(await reader.mainFile('b.txt', 'main')).toBe('line one\nline two\n');
+    expect(await reader.mainFile('missing.txt', 'main')).toBeUndefined();
+    expect(await reader.mainFile('b.txt', 'no-such-branch')).toBeUndefined();
+    expect(existsSync(join(clone, 'b.txt'))).toBe(false);
+  });
+
+  it('has no remote in a repository that was never pushed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-local-'));
+    execFileSync('git', ['init', '-q', root]);
+    const run = createCommandRunner('git');
+
+    expect(await createRepositoryReader({ run: (args) => run(args, { cwd: root }) }).remoteUrl()).toBeUndefined();
   });
 
   it('follows the main branch the project names', async () => {

@@ -6,7 +6,7 @@ import type { ProjectFiles, PublishedChange } from './project-files.js';
 
 export type WorkflowDeps = {
   readonly files: ProjectFiles;
-  readonly mainFile: (path: string) => Promise<string | undefined>;
+  readonly mainFile: (path: string, branch: string) => Promise<string | undefined>;
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly publishFiles: (change: PublishedChange) => Promise<void>;
   readonly openPullRequest: (request: OpenPullRequest) => Promise<{ readonly url: string }>;
@@ -14,7 +14,7 @@ export type WorkflowDeps = {
 
 type Diff = { readonly added: readonly string[]; readonly changed: readonly string[]; readonly removed: readonly string[] };
 
-type Proposal = { readonly pipeline: readonly string[]; readonly diff: Diff; readonly rubrics: readonly string[]; readonly trials: readonly Trial[] };
+export type Proposal = { readonly pipeline: readonly string[]; readonly diff: Diff; readonly rubrics: readonly string[]; readonly trials: readonly Trial[] };
 
 export type WorkflowResult =
   | ({ readonly ok: true; readonly action: 'preview' } & Proposal)
@@ -37,19 +37,23 @@ const slug = (title: string): string =>
 
 const listed = (label: string, items: readonly string[]): readonly string[] => (items.length === 0 ? [] : [`${label}: ${items.join(', ')}`]);
 
-const body = (title: string, { pipeline, diff, rubrics, trials }: Proposal): string =>
+export const changeLines = ({ diff, rubrics }: Pick<Proposal, 'diff' | 'rubrics'>): readonly string[] => [
+  ...listed('Added', diff.added),
+  ...listed('Changed', diff.changed),
+  ...listed('Removed', diff.removed),
+  ...listed('Rubrics', rubrics),
+];
+
+const body = (title: string, proposal: Proposal): string =>
   [
     `Changes the factory workflow: ${title}.`,
     '',
-    ...listed('Added', diff.added),
-    ...listed('Changed', diff.changed),
-    ...listed('Removed', diff.removed),
-    ...listed('Rubrics', rubrics),
+    ...changeLines(proposal),
     '',
-    ...(trials.length === 0 ? [] : ['Tried on main:', ...trials.map((trial) => `- ${trial.id}: ${trial.status}`), '']),
+    ...(proposal.trials.length === 0 ? [] : ['Tried on main:', ...proposal.trials.map((trial) => `- ${trial.id}: ${trial.status}`), '']),
     'The new pipeline:',
     '```',
-    ...pipeline,
+    ...proposal.pipeline,
     '```',
   ].join('\n');
 
@@ -61,12 +65,12 @@ export const proposeWorkflowChange = async (deps: WorkflowDeps, { title, preview
   const after = proposed.value;
 
   const agentChecks = after.checks.flatMap((check) => (check.kind === 'agent' ? [check] : []));
-  const rubricTexts = await Promise.all(agentChecks.map(async (check) => ({ check, text: await deps.files.read(check.criteria), main: await deps.mainFile(check.criteria) })));
+  const rubricTexts = await Promise.all(agentChecks.map(async (check) => ({ check, text: await deps.files.read(check.criteria), main: await deps.mainFile(check.criteria, after.main_branch) })));
   const missing = rubricTexts.find((rubric) => rubric.text === undefined);
   if (missing !== undefined) return { ok: false, reason: 'missing_rubric', message: `Write the rubric of check ${missing.check.id} in ${missing.check.criteria}, then try again.` };
   const rubrics = rubricTexts.flatMap(({ check, text: rubric, main }) => (rubric !== undefined && rubric !== main ? [[check.criteria, rubric] as const] : []));
 
-  const mainText = await deps.mainFile(FACTORY_YAML);
+  const mainText = await deps.mainFile(FACTORY_YAML, after.main_branch);
   const configChanged = text !== mainText;
   if (!configChanged && rubrics.length === 0) return { ok: false, reason: 'no_change', message: `${FACTORY_YAML} is the same as on main: there is nothing to propose.` };
 

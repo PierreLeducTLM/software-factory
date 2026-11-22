@@ -27,7 +27,7 @@ const propose = async (world: World, options: Partial<Parameters<typeof proposeW
   const result = await proposeWorkflowChange(
     {
       files: createInMemoryProjectFiles(world.working ?? {}),
-      mainFile: async (path) => ({ ...world.mainRubrics, '.factory/factory.yaml': world.main })[path],
+      mainFile: async (path, branch) => (branch === 'develop' ? { ...world.mainRubrics, '.factory/factory.yaml': world.main }[path] : undefined),
       runScript: async (command) => {
         commands.push(command);
         return world.runs?.[command] ?? { exitCode: 0, output: 'ok', timedOut: false };

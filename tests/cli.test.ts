@@ -7,7 +7,7 @@ import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runt
 import { createInMemorySourceControl } from '../src/adapters/in-memory-source-control.js';
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
 import type { Ticket } from '../src/adapters/ticket-provider.js';
-import { parseFactoryConfig } from '../src/config/project-config.js';
+import { parseAdaptersConfig, parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
 import { createProjectViewSource, createRealDeps, createSampleViewSource, createSetupDeps } from '../src/cli/real-deps.js';
@@ -437,11 +437,11 @@ describe('factory command line', () => {
       expect(code).toBe(2);
       expect(errors[0]).toBe('Usage: factory <command> <KEY> [options]');
       expect(
-        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', '--json'].filter(
+        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', 'init detect|statuses|install|pull-request', 'workflow --title', '--json'].filter(
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(21);
+      expect(errors).toHaveLength(23);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -646,6 +646,16 @@ describe('setting the command line up in a project', () => {
     await expect(configured.checkAccess('PAY-142')).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(configured.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('Set the GH_TOKEN environment variable');
     await expect(broken.publishFiles({ branch: 'b', base: 'main', files: { x: 'x' }, message: 'x' })).rejects.toThrow(/origin/);
+    await expect(broken.readFile('.factory/factory.yaml')).resolves.toBe('schema: [');
+    await expect(broken.readFile('answers.json')).rejects.toThrow('answers.json');
+    expect(await broken.remoteUrl()).toBeUndefined();
+    expect(await broken.mainFile('.factory/factory.yaml', 'main')).toBeUndefined();
+    const adapters = parseAdaptersConfig(ADAPTERS_YAML);
+    if (!adapters.ok) throw new Error('invalid test adapters');
+    expect(typeof broken.tickets(adapters.value).listStatuses).toBe('function');
+    expect(typeof broken.sourceControl(adapters.value).openPullRequest).toBe('function');
+    expect(() => configured.tickets(adapters.value)).toThrow('Set the JIRA_EMAIL environment variable');
+    expect(() => configured.sourceControl(adapters.value)).toThrow('Set the GH_TOKEN environment variable');
   });
 
   it('offers a dashboard on sample data that needs no project config and no credentials', async () => {

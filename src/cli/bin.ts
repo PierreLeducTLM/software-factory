@@ -10,7 +10,7 @@ import { setupCommand } from './setup-command.js';
 import { viewCommand } from './view-command.js';
 
 const [command, ...rest] = process.argv.slice(2);
-const SETUP_COMMANDS = ['doctor', 'migrate'];
+const SETUP_COMMANDS = ['doctor', 'migrate', 'init', 'workflow'];
 
 process.exitCode =
   SETUP_COMMANDS.includes(command ?? '')

@@ -58,6 +58,17 @@ export const createFilePublisher =
     }
   };
 
+const orUndefined = (read: () => Promise<string>): Promise<string | undefined> => read().catch(() => undefined);
+
+export const createRepositoryReader = ({ run }: { readonly run: CommandRunner }) => ({
+  remoteUrl: (): Promise<string | undefined> => orUndefined(async () => (await run(['remote', 'get-url', 'origin'])).stdout.trim()),
+  mainFile: (path: string, branch: string): Promise<string | undefined> =>
+    orUndefined(async () => {
+      await run(['fetch', '--quiet', 'origin', branch]);
+      return (await run(['show', `origin/${branch}:${path}`])).stdout;
+    }),
+});
+
 const OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 
 const ExitSchema = z.object({ code: z.number() });
