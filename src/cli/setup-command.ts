@@ -1,7 +1,6 @@
 import { runDoctor, type DoctorDeps, type DoctorReport } from '../setup/doctor.js';
-import { detectForInit, installFactory, matchProjectStatuses, openCheckPullRequest, type InitDeps, type InitDetection, type InstallResult } from '../setup/init.js';
-import { parseConnection, parseInstallAnswers } from '../setup/install.js';
-import type { StatusMatch } from '../setup/match-statuses.js';
+import { detectForInit, initProject, type InitDeps, type InitDetection, type InitInput, type InitResult } from '../setup/init.js';
+import type { FactoryState } from '../record/ticket-record.js';
 import { upgradeProject, type UpgradeDeps, type UpgradeResult } from '../setup/upgrade.js';
 import { changeLines, proposeWorkflowChange, type Proposal, type WorkflowDeps, type WorkflowResult } from '../setup/workflow.js';
 
@@ -29,10 +28,11 @@ const USAGE = [
   'Usage:',
   '  factory doctor [--run-checks] [--ticket <KEY>]',
   '  factory migrate',
+  '  factory init --ticket <KEY> --team <key> | --base-url <url> --filter <jql> [options]',
   '  factory init detect [--verify]',
-  '  factory init statuses --answers <file>',
-  '  factory init install --answers <file> --ticket <KEY>',
-  '  factory init pull-request --answers <file> --branch <name> --title <text> [--body <text>]',
+  '  options: --project <name> --token-env <name> --email-env <name> --repository <owner/name> --main-branch <name>',
+  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name>',
+  '           --statuses "state=Status;state=Status" --sensitive-paths <a,b> --verify',
   '  factory workflow --title <text> [--preview]',
   'Add --json to any command for one line of JSON.',
 ];
@@ -60,19 +60,53 @@ const detectReply = (found: InitDetection): Reply => {
   ]);
 };
 
-const statusesReply = (match: StatusMatch): Reply =>
-  reply({ ok: true, ...match }, [
-    ...Object.entries(match.matched).map(([state, status]) => `- ${state}: ${status}`),
-    ...(match.unmatched.length === 0 ? [] : [`Not matched: ${match.unmatched.join(', ')}`]),
-  ]);
-
-const installReply = (result: InstallResult): Reply => {
+const initReply = (result: InitResult): Reply => {
   if (!result.ok) return reply(result, [], [result.message]);
   return reply(result, [
     `Opened ${result.url}`,
+    ...result.summary,
     ...(result.secrets.length === 0 ? [] : [`Store these CI secrets: ${result.secrets.join(', ')}`]),
     ...(result.manual.length === 0 ? [] : ['By hand:', ...result.manual.map((step) => `- ${step}`)]),
   ]);
+};
+
+const STATES: readonly FactoryState[] = ['to_refine', 'spec_review', 'ready_for_dev', 'in_development', 'in_review', 'blocked', 'done'];
+
+const statesOf = (text: string): Readonly<Partial<Record<FactoryState, string>>> | string => {
+  const entries = text.split(';').map((pair) => pair.split('='));
+  const wrong = entries.find(([state, status]) => !STATES.some((known) => known === state) || status === undefined || status === '');
+  if (wrong !== undefined) return `Unknown state "${wrong[0]}" in --statuses. Use: ${STATES.join(', ')}`;
+  return Object.fromEntries(entries.map(([state, status]) => [state, status]));
+};
+
+const initInput = (flags: Flags): InitInput | string => {
+  const statuses = optional(flags, '--statuses');
+  const chosen = statuses === undefined ? {} : statesOf(statuses);
+  if (typeof chosen === 'string') return chosen;
+  const control = optional(flags, '--source-control');
+  if (control !== undefined && control !== 'github' && control !== 'bitbucket') return `Unknown source control "${control}". Use github or bitbucket`;
+  const text = (flag: string, key: keyof InitInput): Partial<InitInput> => {
+    const given = optional(flags, flag);
+    return given === undefined ? {} : { [key]: given };
+  };
+  const paths = optional(flags, '--sensitive-paths');
+  return {
+    ticket: value(flags, '--ticket'),
+    verify: flags.switches.includes('--verify'),
+    ...text('--team', 'team'),
+    ...text('--project', 'project'),
+    ...text('--base-url', 'baseUrl'),
+    ...text('--filter', 'filter'),
+    ...text('--token-env', 'tokenEnv'),
+    ...text('--email-env', 'emailEnv'),
+    ...text('--repository', 'repository'),
+    ...text('--main-branch', 'mainBranch'),
+    ...text('--source-token-env', 'sourceTokenEnv'),
+    ...text('--source-username-env', 'sourceUsernameEnv'),
+    ...(control === undefined ? {} : { sourceControl: control }),
+    ...(statuses === undefined ? {} : { statuses: chosen }),
+    ...(paths === undefined ? {} : { sensitivePaths: paths.split(',') }),
+  };
 };
 
 const proposalLines = (proposal: Proposal): readonly string[] => [
@@ -104,27 +138,13 @@ const COMMANDS: Readonly<Record<string, Spec & { readonly run: Run }>> = {
   },
   migrate: { valued: NONE, required: NONE, switches: NONE, run: async (_flags, deps) => upgradeReply(await upgradeProject(deps, {})) },
   'init detect': { valued: NONE, required: NONE, switches: ['--verify'], run: async (flags, deps) => detectReply(await detectForInit(deps, { verify: flags.switches.includes('--verify') })) },
-  'init statuses': {
-    valued: NONE,
-    required: ['--answers'],
-    switches: NONE,
-    run: async (flags, deps) => statusesReply(await matchProjectStatuses(deps, parseConnection(await deps.readFile(value(flags, '--answers'))))),
-  },
-  'init install': {
-    valued: NONE,
-    required: ['--answers', '--ticket'],
-    switches: NONE,
-    run: async (flags, deps) => installReply(await installFactory(deps, parseInstallAnswers(await deps.readFile(value(flags, '--answers'))), { ticket: value(flags, '--ticket') })),
-  },
-  'init pull-request': {
-    required: ['--answers', '--branch', '--title'],
-    valued: ['--body'],
-    switches: NONE,
+  init: {
+    valued: ['--team', '--project', '--base-url', '--filter', '--token-env', '--email-env', '--repository', '--main-branch', '--source-control', '--source-token-env', '--source-username-env', '--statuses', '--sensitive-paths'],
+    required: ['--ticket'],
+    switches: ['--verify'],
     run: async (flags, deps) => {
-      const connection = parseConnection(await deps.readFile(value(flags, '--answers')));
-      const url = await openCheckPullRequest(deps, connection, { branch: value(flags, '--branch'), title: value(flags, '--title'), body: optional(flags, '--body') ?? '' });
-      const opened = { ok: true, url };
-      return reply(opened, [`Opened ${url}`]);
+      const input = initInput(flags);
+      return typeof input === 'string' ? reply({ ok: false }, [], [input]) : initReply(await initProject(deps, input));
     },
   },
   workflow: {
@@ -145,7 +165,7 @@ const parseFlags = (args: readonly string[], spec: Spec, flags: Flags = { values
 };
 
 const parse = (argv: readonly string[]): ((deps: SetupDeps) => Promise<Reply>) | undefined => {
-  const words = argv[0] === 'init' ? 2 : 1;
+  const words = argv[0] === 'init' && argv[1] === 'detect' ? 2 : 1;
   const command = COMMANDS[argv.slice(0, words).join(' ')];
   const flags = command === undefined ? undefined : parseFlags(argv.slice(words).filter((argument) => argument !== '--json'), command);
   if (command === undefined || flags === undefined) return undefined;

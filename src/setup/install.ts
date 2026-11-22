@@ -194,18 +194,6 @@ export const buildInstall = (answers: InstallAnswers): Install => {
   };
 };
 
-export const parseInstallAnswers = (text: string): InstallAnswers => {
-  const parsed = InstallAnswersSchema.safeParse(JSON.parse(text));
-  if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => `answers: ${issue.path.join('.')}: ${issue.message}`).join('\n'));
-  return parsed.data;
-};
-
-export const parseConnection = (text: string): Connection => {
-  const parsed = ConnectionSchema.safeParse(JSON.parse(text));
-  if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => `answers: ${issue.path.join('.')}: ${issue.message}`).join('\n'));
-  return parsed.data;
-};
-
 export const adaptersFor = (connection: Connection): AdaptersConfig => {
   const parsed = parseAdaptersConfig(adaptersYaml(connection));
   if (!parsed.ok) throw new Error(parsed.issues.map((issue) => `${ADAPTERS_YAML}: ${issue.path}: ${issue.message}`).join('\n'));

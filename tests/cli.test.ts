@@ -437,7 +437,7 @@ describe('factory command line', () => {
       expect(code).toBe(2);
       expect(errors[0]).toBe('Usage: factory <command> <KEY> [options]');
       expect(
-        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', 'init detect|statuses|install|pull-request', 'workflow --title', '--json'].filter(
+        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', 'init --ticket', 'workflow --title', '--json'].filter(
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);

@@ -43,10 +43,11 @@ const USAGE = [
   'Usage:',
   '  factory doctor [--run-checks] [--ticket <KEY>]',
   '  factory migrate',
+  '  factory init --ticket <KEY> --team <key> | --base-url <url> --filter <jql> [options]',
   '  factory init detect [--verify]',
-  '  factory init statuses --answers <file>',
-  '  factory init install --answers <file> --ticket <KEY>',
-  '  factory init pull-request --answers <file> --branch <name> --title <text> [--body <text>]',
+  '  options: --project <name> --token-env <name> --email-env <name> --repository <owner/name> --main-branch <name>',
+  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name>',
+  '           --statuses "state=Status;state=Status" --sensitive-paths <a,b> --verify',
   '  factory workflow --title <text> [--preview]',
   'Add --json to any command for one line of JSON.',
 ];
@@ -95,6 +96,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
             return text;
           },
           remoteUrl: async () => 'git@github.com:acme/billing-service.git',
+          currentBranch: async () => 'main',
           tickets: () => ({
             listStatuses: async () => world.statuses ?? [{ name: 'Done', category: 'done' as const }],
             checkAccess: async (key) => {
@@ -192,22 +194,9 @@ describe('factory migrate', () => {
   });
 });
 
-const ANSWERS = JSON.stringify({
-  engine: ENGINE_VERSION,
-  repository: 'acme/billing-service',
-  mainBranch: 'main',
-  states: { to_refine: 'To refine', spec_review: 'Spec review', ready_for_dev: 'Ready for Dev', in_development: 'In development', in_review: 'In review', blocked: 'Blocked', done: 'Done' },
-  checks: [{ id: 'unit-tests', category: 'tests', source: 'local', run: 'pnpm run test', blocking: true, timeout: '6m' }],
-  sensitivePaths: [],
-  ticketProvider: { kind: 'jira', baseUrl: 'https://acme.atlassian.net', filter: 'project = PAY', tokenEnv: 'JIRA_TOKEN', emailEnv: 'JIRA_EMAIL' },
-  sourceControl: { kind: 'github', tokenEnv: 'GH_TOKEN' },
-  ci: { system: 'github-actions', workflow: 'CI' },
-});
-
 const NEW_PROJECT: Readonly<Record<string, string>> = {
   'package.json': JSON.stringify({ scripts: { test: 'vitest run' }, dependencies: { react: '19' }, devDependencies: { typescript: '5' } }),
   'pnpm-lock.yaml': '',
-  'answers.json': ANSWERS,
 };
 
 describe('factory init', () => {
@@ -245,59 +234,76 @@ describe('factory init', () => {
     expect(out.slice(0, 4)).toEqual(['Stack: other', 'In-depth detection is not available for this stack. Checks come from the CI files only.', 'Coverage:', '- tests: test']);
   });
 
-  it('matches the statuses through the connection in the answers', async () => {
-    const { out, code } = await getSetup(NEW_PROJECT).run('init', 'statuses', '--answers', 'answers.json');
+  const ALL_STATUSES = ['To refine', 'Spec review', 'Ready for Dev', 'In development', 'In review', 'Blocked', 'Done'].map((name) => ({ name, category: 'todo' as const }));
+
+  it('sets the project up from the Linear team, and says what it settled on', async () => {
+    const setup = getSetup(NEW_PROJECT, { statuses: ALL_STATUSES });
+
+    const { out, code, errors } = await setup.run('init', '--ticket', 'PAY-1', '--team', 'PAY');
 
     expect(code).toBe(0);
-    expect(out).toEqual(['- done: Done', 'Not matched: to_refine, spec_review, ready_for_dev, in_development, in_review, blocked']);
-  });
-
-  it('asks nothing when every state found its status', async () => {
-    const names = ['To refine', 'Spec review', 'Ready for Dev', 'In development', 'In review', 'Blocked', 'Done'];
-    const statuses = names.map((name) => ({ name, category: 'todo' as const }));
-
-    const { out } = await getSetup(NEW_PROJECT, { statuses }).run('init', 'statuses', '--answers', 'answers.json');
-
-    expect(out).toEqual(['- to_refine: To refine', '- spec_review: Spec review', '- ready_for_dev: Ready for Dev', '- in_development: In development', '- in_review: In review', '- blocked: Blocked', '- done: Done']);
-  });
-
-  it('opens the install pull request, and says which secrets to store', async () => {
-    const setup = getSetup(NEW_PROJECT);
-
-    const { out, code } = await setup.run('init', 'install', '--answers', 'answers.json', '--ticket', 'PAY-1');
-
-    expect(code).toBe(0);
-    expect(out).toEqual(['Opened https://github.com/acme/billing-service/pull/78', 'Store these CI secrets: FACTORY_REPO_TOKEN, FACTORY_JIRA_TOKEN, FACTORY_JIRA_EMAIL']);
+    expect(errors).toEqual([]);
+    expect(out).toEqual([
+      'Opened https://github.com/acme/billing-service/pull/78',
+      'Tracker: Linear, team PAY, key in LINEAR_API_KEY',
+      'Repository: acme/billing-service on github, branch main, token in GH_TOKEN',
+      'Checks, all blocking: test',
+      'Statuses: to_refine=To refine, spec_review=Spec review, ready_for_dev=Ready for Dev, in_development=In development, in_review=In review, blocked=Blocked, done=Done',
+      'Every risk level starts in shadow mode, with no sensitive paths and no staging watch. Change them later with /factory-workflow.',
+      'By hand:',
+      expect.stringMatching(/^- No CI system was found\./),
+    ]);
     expect(setup.accessed).toEqual(['PAY-1']);
     expect(setup.opened).toEqual(['factory/install']);
   });
 
-  it('lists the steps to make by hand, and refuses when the service account lacks a permission', async () => {
-    const manual = { ...NEW_PROJECT, 'answers.json': ANSWERS.replace('"system":"github-actions","workflow":"CI"', '"system":"none"') };
+  it('lists the secrets to store when the project has CI, and passes every option on', async () => {
+    const ci = { ...NEW_PROJECT, 'bitbucket-pipelines.yml': 'pipelines:\n  default:\n    - step:\n        name: Test\n        script:\n          - pnpm test\n' };
+    const setup = getSetup(ci, { statuses: ALL_STATUSES, runs: [{ exitCode: 1, output: 'x', timedOut: false }, { exitCode: 1, output: 'x', timedOut: false }] });
 
-    const done = await getSetup(manual).run('init', 'install', '--answers', 'answers.json', '--ticket', 'PAY-1');
-    const refused = await getSetup(NEW_PROJECT, { access: { comment: true, transition: false } }).run('init', 'install', '--answers', 'answers.json', '--ticket', 'PAY-1');
+    const { out, errors } = await setup.run('init', '--ticket', 'PAY-1', '--base-url', 'https://acme.atlassian.net', '--filter', 'project = PAY', '--token-env', 'T', '--email-env', 'E', '--repository', 'acme/other', '--main-branch', 'develop', '--source-control', 'bitbucket', '--source-token-env', 'BT', '--source-username-env', 'BU', '--sensitive-paths', 'src/auth/**,db/**', '--statuses', 'blocked=Blocked', '--verify');
 
-    expect(done.out).toEqual(['Opened https://github.com/acme/billing-service/pull/78', 'By hand:', expect.stringMatching(/^- No CI system was found\./)]);
-    expect(refused).toEqual({ code: 1, out: [], errors: ['The service account cannot change the status of PAY-1. Grant the missing permission in Jira, then run the install again. No pull request was opened.'] });
+    expect(errors).toEqual([]);
+    expect(out[1]).toBe('Tracker: Jira, https://acme.atlassian.net, key in T');
+    expect(out[2]).toBe('Repository: acme/other on bitbucket, branch develop, token in BT');
+    expect(out[3]).toMatch(/^Checks, blocking: .* Advisory, because they fail or are flaky on this branch: test/);
+    expect(out).toContain('Store these CI secrets: FACTORY_REPO_TOKEN, T, E, BT, BU');
   });
 
-  it('opens the pull request of an added check', async () => {
+  it('answers with the result as JSON', async () => {
+    const { out } = await getSetup(NEW_PROJECT, { statuses: ALL_STATUSES }).run('init', '--ticket', 'PAY-1', '--team', 'PAY', '--json');
+
+    expect(JSON.parse(out.join(''))).toMatchObject({ ok: true, url: 'https://github.com/acme/billing-service/pull/78', summary: expect.any(Array) });
+  });
+
+  it('says what is missing, and what to choose from, and opens nothing', async () => {
     const setup = getSetup(NEW_PROJECT);
 
-    const plain = await setup.run('init', 'pull-request', '--answers', 'answers.json', '--branch', 'factory/add-typecheck', '--title', 'chore: add a type check');
-    const json = await setup.run('init', 'pull-request', '--answers', 'answers.json', '--branch', 'factory/add-lint', '--title', 'chore: add lint', '--body', 'Adds eslint.', '--json');
+    const tracker = await setup.run('init', '--ticket', 'PAY-1');
+    const statuses = await setup.run('init', '--ticket', 'PAY-1', '--team', 'PAY');
 
-    expect(plain).toEqual({ code: 0, out: ['Opened https://github.com/acme/billing-service/pull/78'], errors: [] });
-    expect(JSON.parse(json.out.join(''))).toEqual({ ok: true, url: 'https://github.com/acme/billing-service/pull/78' });
-    expect(setup.requests).toEqual([
-      { branch: 'factory/add-typecheck', base: 'main', title: 'chore: add a type check', body: '' },
-      { branch: 'factory/add-lint', base: 'main', title: 'chore: add lint', body: 'Adds eslint.' },
-    ]);
+    expect(tracker).toEqual({ code: 1, out: [], errors: ['Missing: --team (Linear), or --base-url and --filter (Jira)'] });
+    expect(statuses.code).toBe(1);
+    expect(statuses.errors).toEqual([expect.stringMatching(/^No status matches to_refine, spec_review, ready_for_dev, in_development, in_review, blocked\. Choose one for each with --statuses "to_refine=<status>;/)]);
+    expect(setup.opened).toEqual([]);
   });
 
-  it('says which answers file it could not read', async () => {
-    expect(await getSetup(NEW_PROJECT).run('init', 'statuses', '--answers', 'missing.json')).toEqual({ code: 1, out: [], errors: ['No such file: missing.json'] });
+  it('refuses when the service account lacks a permission', async () => {
+    const refused = await getSetup(NEW_PROJECT, { statuses: ALL_STATUSES, access: { comment: true, transition: false } }).run('init', '--ticket', 'PAY-1', '--team', 'PAY');
+
+    expect(refused).toEqual({ code: 1, out: [], errors: ['The service account cannot change the status of PAY-1. Grant the missing permission in Linear, then run the install again. No pull request was opened.'] });
+  });
+
+  it.each([
+    [['--statuses', 'sleeping=Done'], 'Unknown state "sleeping" in --statuses. Use: to_refine, spec_review, ready_for_dev, in_development, in_review, blocked, done'],
+    [['--statuses', 'done'], 'Unknown state "done" in --statuses. Use: to_refine, spec_review, ready_for_dev, in_development, in_review, blocked, done'],
+    [['--source-control', 'gitlab'], 'Unknown source control "gitlab". Use github or bitbucket'],
+  ])('refuses a wrong option (%j)', async (option, message) => {
+    expect(await getSetup(NEW_PROJECT, { statuses: ALL_STATUSES }).run('init', '--ticket', 'PAY-1', '--team', 'PAY', ...option)).toEqual({ code: 1, out: [], errors: [message] });
+  });
+
+  it('shows the usage when the ticket is missing', async () => {
+    expect((await getSetup(NEW_PROJECT).run('init', '--team', 'PAY')).code).toBe(2);
   });
 });
 

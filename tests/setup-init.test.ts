@@ -3,7 +3,7 @@ import type { OpenPullRequest } from '../src/adapters/source-control.js';
 import type { Access, ProviderStatus } from '../src/adapters/ticket-provider.js';
 import type { AdaptersConfig } from '../src/config/project-config.js';
 import type { ScriptRun } from '../src/factory/checks.js';
-import { detectForInit, installFactory, matchProjectStatuses, openCheckPullRequest } from '../src/setup/init.js';
+import { detectForInit, installFactory } from '../src/setup/init.js';
 import type { InstallAnswers } from '../src/setup/install.js';
 import { createInMemoryProjectFiles, type PublishedChange } from '../src/setup/project-files.js';
 import { ENGINE_VERSION } from '../src/version.js';
@@ -36,6 +36,7 @@ const getInit = (world: World = {}) => {
   const deps = {
     files: createInMemoryProjectFiles(PROJECT),
     remoteUrl: async () => world.remoteUrl,
+    currentBranch: async () => 'main',
     now: () => '2026-11-21T08:00:00Z',
     runScript: async (command: string) => {
       commands.push(command);
@@ -87,25 +88,6 @@ describe('the install wizard', () => {
       { id: 'lint', status: 'fail', timeout: '30s' },
     ]);
     expect(commands).toEqual(['pnpm run test', 'pnpm run lint', 'pnpm run lint']);
-  });
-
-  it('matches the provider statuses through the connection the person gave', async () => {
-    const { deps, connections } = getInit({ statuses: [{ name: 'Done', category: 'done' }] });
-
-    const match = await matchProjectStatuses(deps, getAnswers());
-
-    expect(match.statuses).toEqual([{ name: 'Done', category: 'done' }]);
-    expect(match.matched).toEqual({ done: 'Done' });
-    expect(match.unmatched).toContain('to_refine');
-    expect(connections[0]?.ticket_providers[0]).toMatchObject({ base_url: 'https://acme.atlassian.net', token_env: 'JIRA_TOKEN', email_env: 'JIRA_EMAIL' });
-  });
-
-  it('refuses a token pasted where the name of its environment variable belongs, before reaching the provider', async () => {
-    const { deps, connections } = getInit();
-    const pasted = getAnswers({ ticketProvider: { ...getAnswers().ticketProvider, tokenEnv: 'ATATT3xFfGF0abc' }, sourceControl: { kind: 'github', tokenEnv: 'ghp_abc123' } });
-
-    await expect(matchProjectStatuses(deps, pasted)).rejects.toThrow(/^\.factory\/adapters\.yaml: ticket_providers\.0\.token_env: Secrets must not be stored in adapters\.yaml\n\.factory\/adapters\.yaml: source_control\.token_env: /);
-    expect(connections).toEqual([]);
   });
 
   it('opens one install pull request with every file, and says which secrets to store', async () => {
@@ -188,14 +170,5 @@ describe('the install wizard', () => {
       message: 'The Jira workflow lets a ticket move from "In Progress" to "In Progress", so two developers could claim the same ticket. Remove that transition, then run the install again. No pull request was opened.',
     });
     expect([...published, ...opened]).toEqual([]);
-  });
-
-  it('opens the pull request of a check the person chose to add, on the branch they pushed', async () => {
-    const { deps, opened } = getInit();
-
-    const url = await openCheckPullRequest(deps, getAnswers({ mainBranch: 'develop' }), { branch: 'factory/add-typecheck', title: 'chore: add a type check', body: 'Adds tsc.' });
-
-    expect(url).toBe('https://github.com/acme/billing-service/pull/1');
-    expect(opened).toEqual([{ branch: 'factory/add-typecheck', base: 'develop', title: 'chore: add a type check', body: 'Adds tsc.' }]);
   });
 });

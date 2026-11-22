@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseAdaptersConfig, parseFactoryConfig } from '../src/config/project-config.js';
 import { detectProject } from '../src/setup/detect.js';
-import { buildInstall, parseConnection, parseInstallAnswers, type InstallAnswers } from '../src/setup/install.js';
+import { buildInstall, type InstallAnswers } from '../src/setup/install.js';
 import { engineFiles } from '../src/setup/engine-files.js';
 import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
 
@@ -85,12 +85,6 @@ describe('the files of an install', () => {
     expect(secrets).toEqual(['FACTORY_REPO_TOKEN', 'FACTORY_LINEAR_API_KEY']);
     expect(files['.github/workflows/factory.yml']).toContain('  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}');
     expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' } })).secrets).toEqual(['FACTORY_REPO_TOKEN', 'LINEAR_API_KEY', 'GH_TOKEN']);
-  });
-
-  it('refuses a Linear connection without a team', () => {
-    const { repository, mainBranch, sourceControl } = getAnswers();
-
-    expect(() => parseConnection(JSON.stringify({ repository, mainBranch, sourceControl, ticketProvider: { kind: 'linear', tokenEnv: 'LINEAR_API_KEY' } }))).toThrow(/answers: ticketProvider\.team: /);
   });
 
   it('installs the engine in the project: its pin, a launcher that runs it, and a gitignore for its install', () => {
@@ -178,26 +172,5 @@ describe('the CI steps of an install elsewhere', () => {
     expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
     expect(install.manual).toEqual(['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.']);
     expect(install.secrets).toEqual([]);
-  });
-});
-
-describe('the answers file', () => {
-  it('reads valid answers', () => {
-    expect(parseInstallAnswers(JSON.stringify(getAnswers()))).toEqual(getAnswers());
-  });
-
-  it('reads the connection alone from answers still being filled in', () => {
-    const { repository, mainBranch, ticketProvider, sourceControl } = getAnswers();
-
-    expect(parseConnection(JSON.stringify({ repository, mainBranch, ticketProvider, sourceControl, checks: 'not chosen yet' }))).toEqual({ repository, mainBranch, ticketProvider, sourceControl });
-    expect(() => parseConnection(JSON.stringify({ repository, mainBranch: '', ticketProvider: { ...ticketProvider, baseUrl: '' } }))).toThrow(
-      /^answers: mainBranch: .*\nanswers: ticketProvider\.baseUrl: .*\nanswers: sourceControl: /,
-    );
-  });
-
-  it('names every field that is wrong', () => {
-    const wrong = { ...getAnswers(), engine: '', checks: [{ id: 'test', category: 'speed', source: 'local', blocking: true, timeout: 'soon' }], watch: { checks: [], duration: '10m', interval: '1m', environment: 'staging' } };
-
-    expect(() => parseInstallAnswers(JSON.stringify(wrong))).toThrow(/^answers: engine: .*\nanswers: checks\.0\.category: .*\nanswers: checks\.0\.timeout: Use a number followed by s, m or h, such as 90s or 6m\nanswers: watch\.checks: /);
   });
 });
