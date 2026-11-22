@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { ScriptRun } from '../factory/checks.js';
 import type { SpecFile } from '../factory/refinement.js';
+import type { PublishedFile } from '../setup/upgrade.js';
 
 type GitOptions = { readonly run: CommandRunner; readonly mainBranch: string };
 
@@ -31,6 +32,21 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
     commitMessage: async (commit: string): Promise<string> => (await run(['log', '-1', '--format=%B', commit])).stdout.trim(),
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
+    },
+    publishFile: async ({ branch, base, path, content, message }: PublishedFile): Promise<void> => {
+      const folder = await mkdtemp(join(tmpdir(), 'factory-publish-'));
+      await run(['fetch', '--quiet', 'origin', base]);
+      await run(['worktree', 'add', '--quiet', '-b', branch, folder, `origin/${base}`]);
+      try {
+        const target = join(folder, path);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, content);
+        await run(['-C', folder, 'add', path]);
+        await run(['-C', folder, 'commit', '--quiet', '-m', message]);
+        await run(['-C', folder, 'push', '--quiet', '--set-upstream', 'origin', branch]);
+      } finally {
+        await run(['worktree', 'remove', '--force', folder]);
+      }
     },
   };
 };

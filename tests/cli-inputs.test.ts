@@ -107,6 +107,33 @@ describe('git inputs', () => {
     expect(git(origin, 'rev-parse', 'factory/pay-142')).toBe(pushed);
   });
 
+  it('publishes one file on a new branch from the latest main, and leaves the checkout as it was', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'config', 'user.email', 'pierre@example.test');
+    const latest = commit(origin, 'b.txt', 'two');
+    writeFileSync(join(clone, 'a.txt'), 'unsaved work');
+    const change = { branch: 'factory/upgrade-engine-0.2.0', base: 'main', path: '.factory/factory.yaml', content: 'schema: 1\nengine: 0.2.0\n', message: 'chore: upgrade the factory engine to 0.2.0' };
+
+    await inputsFor(clone).publishFile(change);
+
+    expect(git(origin, 'show', `${change.branch}:.factory/factory.yaml`)).toBe('schema: 1\nengine: 0.2.0');
+    expect(git(origin, 'log', '-1', '--format=%s %an', change.branch)).toBe('chore: upgrade the factory engine to 0.2.0 Pierre Dev');
+    expect(git(origin, 'rev-parse', `${change.branch}~1`)).toBe(latest);
+    expect(readFileSync(join(clone, 'a.txt'), 'utf8')).toBe('unsaved work');
+    expect(git(clone, 'branch', '--show-current')).toBe('main');
+    expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
+  it('removes its temporary worktree when the push fails', async () => {
+    const { clone } = getClone();
+    git(clone, 'config', 'user.email', 'pierre@example.test');
+    git(clone, 'remote', 'set-url', '--push', 'origin', join(clone, 'nowhere'));
+
+    await expect(inputsFor(clone).publishFile({ branch: 'factory/x', base: 'main', path: '.factory/checks/x.md', content: 'x', message: 'x' })).rejects.toThrow(/nowhere/);
+
+    expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
   it('follows the main branch the project names', async () => {
     const { origin, clone } = getClone();
     git(origin, 'checkout', '-q', '-b', 'develop');
