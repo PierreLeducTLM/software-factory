@@ -14,7 +14,7 @@ import { verifyChecks, type Verification } from './verify.js';
 export type InitDeps = {
   readonly files: ProjectFiles;
   readonly remoteUrl: () => Promise<string | undefined>;
-  readonly currentBranch: () => Promise<string | undefined>;
+  readonly defaultBranch: () => Promise<string | undefined>;
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly now: () => string;
   readonly tickets: (adapters: AdaptersConfig) => Pick<TicketProvider, 'listStatuses' | 'checkAccess' | 'canReenter'>;
@@ -33,7 +33,8 @@ const INSTALL_TITLE = 'chore: install the software factory';
 
 export const detectForInit = async (deps: InitDeps, { verify }: { readonly verify: boolean }): Promise<InitDetection> => {
   const remoteUrl = await deps.remoteUrl();
-  const detection = await detectProject({ files: deps.files, ...(remoteUrl === undefined ? {} : { remoteUrl }) });
+  const mainBranch = await deps.defaultBranch();
+  const detection = await detectProject({ files: deps.files, ...(remoteUrl === undefined ? {} : { remoteUrl }), ...(mainBranch === undefined ? {} : { mainBranch }) });
   return { engine: ENGINE_VERSION, detection, verification: verify ? await verifyChecks(deps, detection.candidates) : [] };
 };
 
@@ -162,14 +163,15 @@ export const initProject = async (deps: InitDeps, input: InitInput): Promise<Ini
   const ticketProvider = ticketProviderOf(input);
   const sourceControl = sourceControlOf(input, detection);
   const repository = input.repository ?? detection.remote?.repository;
+  const mainBranch = input.mainBranch ?? detection.mainBranch;
   const missing = [
     ...('kind' in ticketProvider ? [] : ticketProvider),
     ...(repository === undefined ? ['--repository'] : []),
     ...(sourceControl === undefined ? ['--source-control github|bitbucket'] : []),
+    ...(mainBranch === undefined ? ['--main-branch'] : []),
   ];
-  if (!('kind' in ticketProvider) || repository === undefined || sourceControl === undefined) return { ok: false, reason: 'missing', missing, message: `Missing: ${missing.join('; ')}` };
+  if (!('kind' in ticketProvider) || repository === undefined || sourceControl === undefined || mainBranch === undefined) return { ok: false, reason: 'missing', missing, message: `Missing: ${missing.join('; ')}` };
 
-  const mainBranch = input.mainBranch ?? (await deps.currentBranch()) ?? 'main';
   const connection: Connection = { repository, mainBranch, ticketProvider, sourceControl };
   const statuses = await deps.tickets(adaptersFor(connection)).listStatuses();
   const available = statuses.map((status) => status.name);

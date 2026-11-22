@@ -63,7 +63,12 @@ const orUndefined = (read: () => Promise<string>): Promise<string | undefined> =
 
 export const createRepositoryReader = ({ run }: { readonly run: CommandRunner }) => ({
   remoteUrl: (): Promise<string | undefined> => orUndefined(async () => (await run(['remote', 'get-url', 'origin'])).stdout.trim()),
-  currentBranch: (): Promise<string | undefined> => orUndefined(async () => (await run(['branch', '--show-current'])).stdout.trim()),
+  defaultBranch: async (): Promise<string | undefined> =>
+    (await orUndefined(async () => (await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).stdout.trim().replace(/^origin\//, ''))) ??
+    run(['ls-remote', '--symref', 'origin', 'HEAD']).then(
+      ({ stdout }) => /ref: refs\/heads\/(\S+)\tHEAD/.exec(stdout)?.[1],
+      () => undefined,
+    ),
   mainFile: (path: string, branch: string): Promise<string | undefined> =>
     orUndefined(async () => {
       await run(['fetch', '--quiet', 'origin', branch]);

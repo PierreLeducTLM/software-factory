@@ -171,6 +171,45 @@ describe('git inputs', () => {
     expect(await createRepositoryReader({ run: (args) => run(args, { cwd: root }) }).remoteUrl()).toBeUndefined();
   });
 
+  it('reads the remote default branch the clone recorded, not the branch checked out, without reaching the remote', async () => {
+    const { origin, clone } = getClone();
+    git(origin, 'checkout', '-q', '-b', 'trunk');
+    git(origin, 'branch', '-q', '-D', 'main');
+    git(clone, 'fetch', '-q', 'origin');
+    git(clone, 'remote', 'set-head', 'origin', '--auto');
+    git(clone, 'checkout', '-q', '-b', 'feature/x');
+    git(clone, 'remote', 'set-url', 'origin', join(origin, 'unreachable'));
+    const run = createCommandRunner('git');
+
+    expect(await createRepositoryReader({ run: (args) => run(args, { cwd: clone }) }).defaultBranch()).toBe('trunk');
+  });
+
+  it('asks the remote for its default branch when the clone does not record it', async () => {
+    const { clone } = getClone();
+    git(clone, 'remote', 'set-head', 'origin', '--delete');
+    git(clone, 'checkout', '-q', '-b', 'feature/x');
+    const run = createCommandRunner('git');
+
+    expect(await createRepositoryReader({ run: (args) => run(args, { cwd: clone }) }).defaultBranch()).toBe('main');
+  });
+
+  it('has no default branch when the remote is empty', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-empty-'));
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main', join(root, 'origin')]);
+    execFileSync('git', ['clone', '-q', join(root, 'origin'), join(root, 'clone')], { stdio: 'ignore' });
+    const run = createCommandRunner('git');
+
+    expect(await createRepositoryReader({ run: (args) => run(args, { cwd: join(root, 'clone') }) }).defaultBranch()).toBeUndefined();
+  });
+
+  it('has no default branch in a repository that was never pushed', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-local-'));
+    execFileSync('git', ['init', '-q', '-b', 'main', root]);
+    const run = createCommandRunner('git');
+
+    expect(await createRepositoryReader({ run: (args) => run(args, { cwd: root }) }).defaultBranch()).toBeUndefined();
+  });
+
   it('follows the main branch the project names', async () => {
     const { origin, clone } = getClone();
     git(origin, 'checkout', '-q', '-b', 'develop');

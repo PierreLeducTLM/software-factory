@@ -27,9 +27,10 @@ export type Detection = {
   readonly openspec: boolean;
   readonly designSystem?: string;
   readonly remote?: { readonly kind: 'github' | 'bitbucket'; readonly repository: string };
+  readonly mainBranch?: string;
 };
 
-type Options = { readonly files: ProjectFiles; readonly remoteUrl?: string };
+type Options = { readonly files: ProjectFiles; readonly remoteUrl?: string; readonly mainBranch?: string };
 
 const PackageSchema = z.object({
   scripts: z.record(z.string(), z.string()).default({}),
@@ -201,7 +202,7 @@ const stackOf = async (files: ProjectFiles): Promise<Stack> => {
   return { stack: { kind: 'other', inDepth: false, note: NOT_IN_DEPTH }, candidates: [], recommended: {} };
 };
 
-export const detectProject = async ({ files, remoteUrl }: Options): Promise<Detection> => {
+export const detectProject = async ({ files, remoteUrl, mainBranch }: Options): Promise<Detection> => {
   const github = await githubJobs(files);
   const bitbucket = await bitbucketJobs(files);
   const jobs = [...github, ...bitbucket];
@@ -226,5 +227,6 @@ export const detectProject = async ({ files, remoteUrl }: Options): Promise<Dete
     openspec: (await files.list('openspec')).length > 0,
     ...(designSystem === undefined ? {} : { designSystem }),
     ...(remote === null ? {} : { remote: { kind: remote[1] === 'github.com' ? ('github' as const) : ('bitbucket' as const), repository: String(remote[2]) } }),
+    ...(mainBranch === undefined ? {} : { mainBranch }),
   };
 };

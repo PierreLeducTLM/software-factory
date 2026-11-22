@@ -36,7 +36,7 @@ const getInit = (world: World = {}) => {
   const deps = {
     files: createInMemoryProjectFiles(PROJECT),
     remoteUrl: async () => world.remoteUrl,
-    currentBranch: async () => 'main',
+    defaultBranch: async () => 'main',
     now: () => '2026-11-21T08:00:00Z',
     runScript: async (command: string) => {
       commands.push(command);

@@ -4,7 +4,7 @@ import type { OpenPullRequest } from '../src/adapters/source-control.js';
 import type { Access, ProviderStatus } from '../src/adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig } from '../src/config/project-config.js';
 import type { ScriptRun } from '../src/factory/checks.js';
-import { initProject, type InitInput } from '../src/setup/init.js';
+import { detectForInit, initProject, type InitInput } from '../src/setup/init.js';
 import { createInMemoryProjectFiles, type PublishedChange } from '../src/setup/project-files.js';
 import { ENGINE_VERSION } from '../src/version.js';
 
@@ -26,7 +26,7 @@ type World = {
   readonly reenter?: boolean;
   readonly runs?: Readonly<Record<string, readonly ScriptRun[]>>;
   readonly remoteUrl?: string | undefined;
-  readonly branch?: string | undefined;
+  readonly defaultBranch?: string | undefined;
 };
 
 const PASS: ScriptRun = { exitCode: 0, output: 'ok', timedOut: false };
@@ -41,7 +41,7 @@ const getInit = (world: World = {}) => {
   const deps = {
     files: createInMemoryProjectFiles(world.files ?? PROJECT),
     remoteUrl: async () => ('remoteUrl' in world ? world.remoteUrl : 'git@github.com:acme/billing-service.git'),
-    currentBranch: async () => ('branch' in world ? world.branch : 'main'),
+    defaultBranch: async () => ('defaultBranch' in world ? world.defaultBranch : 'main'),
     now: () => '2026-11-21T08:00:00Z',
     runScript: async (command: string) => {
       reached.push(command);
@@ -87,7 +87,7 @@ const adaptersOf = (published: readonly PublishedChange[]) => {
 
 describe('setting a project up in one step', () => {
   it('opens the install pull request from the Linear team alone, taking everything else from the project', async () => {
-    const { deps, published, opened, reached } = getInit({ branch: 'trunk', files: WITH_CI });
+    const { deps, published, opened, reached } = getInit({ defaultBranch: 'trunk', files: WITH_CI });
 
     const result = await initProject(deps, LINEAR);
 
@@ -196,16 +196,26 @@ describe('setting a project up in one step', () => {
     expect(adaptersOf(published)).toMatchObject({ repository: 'acme/other', source_control: { kind: 'bitbucket', repo: 'acme/other' } });
   });
 
-  it('falls back to main when git reports no branch', async () => {
-    const { deps, published } = getInit({ branch: undefined });
+  it('stops and asks for the main branch when the remote default branch cannot be read', async () => {
+    const { deps, published, opened } = getInit({ defaultBranch: undefined });
 
-    await initProject(deps, LINEAR);
+    const result = await initProject(deps, LINEAR);
 
-    expect(published[0]?.base).toBe('main');
+    expect(result).toMatchObject({ ok: false, reason: 'missing', missing: ['--main-branch'] });
+    expect(published).toEqual([]);
+    expect(opened).toEqual([]);
   });
 
-  it('prefers the main branch it is given to the one it is on', async () => {
-    const { deps, published } = getInit({ branch: 'feature' });
+  it('takes the main branch it is given even when the remote default branch cannot be read', async () => {
+    const { deps, published } = getInit({ defaultBranch: undefined });
+
+    await initProject(deps, { ...LINEAR, mainBranch: 'develop' });
+
+    expect(published[0]?.base).toBe('develop');
+  });
+
+  it('prefers the main branch it is given to the remote default branch', async () => {
+    const { deps, published } = getInit({ defaultBranch: 'main' });
 
     await initProject(deps, { ...LINEAR, mainBranch: 'develop' });
 
@@ -349,7 +359,7 @@ describe('what setting up refuses', () => {
   });
 
   it('tells what it settled on, so the person can say if something is wrong', async () => {
-    const { deps } = getInit({ branch: 'trunk' });
+    const { deps } = getInit({ defaultBranch: 'trunk' });
 
     const result = await initProject(deps, LINEAR);
 
@@ -371,5 +381,23 @@ describe('what setting up refuses', () => {
     const result = await initProject(deps, { ...LINEAR, verify: true });
 
     expect(result).toMatchObject({ ok: true, summary: expect.arrayContaining(['Checks, blocking: test, typecheck, format-check, audit, test-e2e. Advisory, because they fail or are flaky on this branch: lint, build']) });
+  });
+});
+
+describe('showing what init would find', () => {
+  it('reports the remote default branch as the main branch init would use', async () => {
+    const { deps } = getInit({ defaultBranch: 'trunk' });
+
+    const found = await detectForInit(deps, { verify: false });
+
+    expect(found.detection.mainBranch).toBe('trunk');
+  });
+
+  it('reports no main branch when the remote default branch cannot be read', async () => {
+    const { deps } = getInit({ defaultBranch: undefined });
+
+    const found = await detectForInit(deps, { verify: false });
+
+    expect(found.detection).not.toHaveProperty('mainBranch');
   });
 });
