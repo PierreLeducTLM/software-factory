@@ -166,7 +166,7 @@ export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
     publishFiles: createFilePublisher({ run: git }),
     readFile: (path) => readFile(join(cwd, path), 'utf8'),
     remoteUrl: repository.remoteUrl,
-    currentBranch: repository.currentBranch,
+    defaultBranch: repository.defaultBranch,
     mainFile: repository.mainFile,
     tickets: (connection) => createTicketProvider(connection, env, http),
     sourceControl: (connection) => createSourceControl(connection, env, http),

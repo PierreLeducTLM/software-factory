@@ -96,7 +96,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
             return text;
           },
           remoteUrl: async () => 'git@github.com:acme/billing-service.git',
-          currentBranch: async () => 'main',
+          defaultBranch: async () => 'main',
           tickets: () => ({
             listStatuses: async () => world.statuses ?? [{ name: 'Done', category: 'done' as const }],
             checkAccess: async (key) => {
