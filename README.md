@@ -52,7 +52,7 @@ You need:
 Then install `factory` from a checkout of this repository:
 
 ```bash
-git clone <this repository's URL> software-factory
+git clone https://github.com/PierreLeducTLM/software-factory.git
 cd software-factory
 pnpm install         # also builds the factory command
 pnpm build:view      # builds the dashboard
@@ -199,7 +199,7 @@ On GitHub Actions they are in the workflow file. On Bitbucket Pipelines, the pul
 On GitHub Actions, give the wizard this install command:
 
 ```bash
-npm install --prefix "$HOME/.factory" git+https://github.com/<owner>/software-factory.git#v0.1.0 && echo "$HOME/.factory/node_modules/.bin" >> "$GITHUB_PATH"
+npm install --prefix "$HOME/.factory" git+https://github.com/PierreLeducTLM/software-factory.git#v0.1.0 && echo "$HOME/.factory/node_modules/.bin" >> "$GITHUB_PATH"
 ```
 
 On Bitbucket Pipelines, use this one:
