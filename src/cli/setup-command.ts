@@ -106,7 +106,7 @@ const initInput = (flags: Flags): InitInput | string => {
     verify: flags.switches.includes('--verify'),
     ...Object.fromEntries(Object.entries(TEXT_FLAGS).flatMap(([flag, key]) => (flag in flags.values ? [[key, value(flags, flag)]] : []))),
     ...(control === undefined ? {} : { sourceControl: control }),
-    ...(statuses === undefined ? {} : { statuses: chosen }),
+    statuses: chosen,
     ...(paths === undefined ? {} : { sensitivePaths: paths.split(',') }),
   };
 };

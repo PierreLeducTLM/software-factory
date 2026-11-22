@@ -280,6 +280,7 @@ describe('factory init', () => {
 
     expect(errors).toEqual([]);
     expect(out).not.toContain('By hand:');
+    expect(out.at(-1)).toMatch(/^Store these CI secrets: FACTORY_REPO_TOKEN/);
     expect(out).toContain('Statuses: to_refine=To refine, spec_review=Backlog, ready_for_dev=Ready for Dev, in_development=Doing, in_review=Doing, blocked=Doing, done=Done');
   });
 

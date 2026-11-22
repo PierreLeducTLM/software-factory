@@ -2,21 +2,92 @@
 
 The software factory turns an approved ticket into a merged pull request. A person refines the ticket's spec until it can be built with no further questions and approves it. The factory then builds it in an Orca worktree, runs the project's own checks, has a fresh reviewer check the change against the spec, and opens the pull request. Every step is recorded on the ticket, so the tracker stays the source of truth.
 
-It works with:
+It works with Jira Cloud or Linear for tickets, GitHub or Bitbucket for source control, and Claude Code in Orca worktrees as the builder.
 
-- **Ticket trackers:** Jira Cloud and Linear.
-- **Source control:** GitHub and Bitbucket.
-- **Agent runtime:** Claude Code, in Orca worktrees.
+## Install it in your project
 
-You drive it from Claude Code with five skills. A command line, `factory`, does the bookkeeping underneath.
+> [!IMPORTANT]
+> Open Claude Code in your project, and paste this:
+>
+> ```
+> Install the software-factory from this repo: https://github.com/PierreLeducTLM/software-factory
+> ```
+
+Claude installs the plugin, asks you three things (your tracker, a ticket to test with, and where your API key is), and opens one install pull request. Nothing else is asked: it finds the checks, the CI, the repository and the statuses by itself.
+
+**Before you paste it, have these ready:**
+
+1. **Your GitHub login can read this repository.** It is private. If `gh auth status` says you are logged in with access, you are set.
+2. **Your tracker's API key is exported in the shell Claude Code runs in.** Never paste the key into the chat.
+   - Linear: `export LINEAR_API_KEY=…`, a personal API key from Linear's settings, under API keys.
+   - Jira: `export JIRA_TOKEN=…` and `export JIRA_EMAIL=…`, from [an Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
+   - Use a dedicated service account, not your own. The factory's CI steps write to tickets as that account.
+3. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
+
+   | Factory state | Typical name |
+   |---|---|
+   | to refine | To refine |
+   | spec review | Spec review |
+   | ready for dev | Ready for Dev |
+   | in development | In development |
+   | in review | In review |
+   | blocked | Blocked |
+   | done | Done |
+
+   On **Jira**, a ticket must not be able to move from In development to In development, since that is what stops two people claiming one ticket. Remove any global transition into In development. The install checks it. On **Linear**, add the statuses to the team's workflow. Linear accepts any status change, so the factory checks each claim itself.
+4. **The tools are installed:** Node.js 22 or later, git, Claude Code, Orca (its `orca` command) and OpenSpec (`npm install --global @fission-ai/openspec`). Claude checks and tells you what is missing.
+
+**After the pull request is open,** you have two things to do:
+
+1. **Store the secrets it lists in your CI secret store.** `FACTORY_REPO_TOKEN` is a read-only token for this repository, so that CI can install the factory. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) limited to `PierreLeducTLM/software-factory`, with the permission **Contents: Read-only**. The other secrets are your tracker's credentials. On Bitbucket, store them as secured repository variables.
+2. **Merge the install pull request.** Until it is merged, nothing changes in the project.
+
+Then check it with `factory doctor --ticket PAY-142`, using a real ticket key. That command is available once the plugin is installed and Claude Code is restarted. Claude can run it for you right away.
+
+### Instructions for Claude
+
+If you are Claude and the user asked you to install the software factory from this repository, follow these steps. Do not ask the user anything beyond what step 3 says.
+
+1. **Check the tools.** Run `node --version` (22 or later), `git --version`, `claude --version`, `orca --version` and `openspec --version`. If one is missing, tell the user what to install and stop. Check that the user is on an up-to-date checkout of the main branch with no local changes.
+2. **Install the plugin.**
+
+   ```bash
+   claude plugin marketplace add PierreLeducTLM/software-factory
+   claude plugin install software-factory@software-factory
+   ```
+
+   If the marketplace is already added, run `claude plugin marketplace update software-factory` instead. A failure with a permission or "not found" error means the user's GitHub login cannot read the repository: tell them so and stop.
+3. **Set the project up.** Run `claude plugin list --json`, and read the `installPath` of `software-factory@software-factory`. Read `<installPath>/skills/factory-init/SKILL.md` and follow it. It tells you what to ask, and the `factory` command it uses is `<installPath>/bin/factory`, since the plugin is not on the PATH until Claude Code restarts.
+4. **Finish** as that skill says: share the pull request and what it settled on, the secrets to store, and the steps to do by hand.
+
+## What the install adds to your project
+
+The install pull request adds a `.factory/` folder, and on GitHub a workflow. Nothing is installed globally.
+
+| File | What it is |
+|---|---|
+| `.factory/factory.yaml` | The checks, the risk policy, the statuses and the engine pin |
+| `.factory/adapters.yaml` | The tracker and the source control, by the **names** of the environment variables that hold their keys. Never a secret |
+| `.factory/package.json` | Pins the factory engine to a release of this repository |
+| `.factory/bin/factory` | Installs the pinned engine on first use, then runs it. Git ignores the install |
+| `.factory/checks/` | Rubrics for agent checks |
+| `.github/workflows/factory.yml` | The CI steps that record each merge and revert a bad one, on GitHub. On Bitbucket, the pull request lists the steps to add by hand |
+
+Each project runs the engine it pins. To move a project to a newer engine, run `factory migrate`: it opens one pull request.
+
+## The skills
+
+The plugin gives Claude Code five skills.
 
 | Skill | What it does |
 |---|---|
-| `/factory-init` | Sets a project up: one install pull request, plus one pull request per check you add |
-| `/factory-refine <KEY>` | Refines a ticket's spec, then gets it approved to Ready for Dev |
-| `/factory-run <KEY>`, `/factory-next` | Builds an approved ticket into a pull request |
-| `/factory-doctor` | Checks the project's setup for drift and fixes it through pull requests |
-| `/factory-workflow` | Changes the project's factory workflow (checks, risk policy, staging watch) through a pull request |
+| `/factory-init` | Sets the project up, with one pull request |
+| `/factory-refine [KEY]` | Refines a ticket's draft spec, then gets it approved to Ready for Dev |
+| `/factory-run [KEY]`, `/factory-next` | Builds an approved ticket into a pull request |
+| `/factory-doctor` | Checks the setup for drift and fixes it through pull requests |
+| `/factory-workflow` | Changes the checks, the risk policy or the staging watch through a pull request |
+
+In a terminal, `.factory/bin/factory` from the project runs the same `factory` command. Run it with no arguments for the list of commands, and add `--json` to any command for one line of JSON.
 
 ## The ticket journey
 
@@ -26,238 +97,37 @@ To refine → Spec review → Ready for Dev → In development → In review →
                                             Blocked
 ```
 
-A developer claims an approved ticket with `/factory-run`. The ticket moves to In development and the factory builds it. When every gate passes, the factory opens a pull request and the ticket moves to In review. Once the pull request is merged, a CI step moves the ticket to Done.
-
-Every risk level starts in **shadow mode**: a person merges each factory pull request. Auto-merge is enabled per risk level later, once the factory has earned it.
-
----
-
-## Setting up a project
-
-Do steps 1 to 3 once per machine or per tracker, then steps 4 to 7 once per project.
-
-### 1. Install the tools on your machine
-
-You need:
-
-| Tool | Why | How to get it |
-|---|---|---|
-| Node.js 22 or later | runs `factory` | [nodejs.org](https://nodejs.org) or `nvm install 22` |
-| pnpm | builds the factory from this repository | `npm install --global pnpm` |
-| git | worktrees and branches | |
-| Claude Code | runs the skills | [claude.com/claude-code](https://claude.com/claude-code) |
-| Orca | builds each ticket in its own worktree, through the `orca` command | the Orca app, which puts `orca` on your `PATH` |
-| OpenSpec | validates the spec files | `npm install --global @fission-ai/openspec` |
-
-Then install `factory` from a checkout of this repository:
-
-```bash
-git clone https://github.com/PierreLeducTLM/software-factory.git
-cd software-factory
-pnpm install         # also builds the factory command
-pnpm build:view      # builds the dashboard
-npm link             # puts `factory` on your PATH, pointing at this checkout
-```
-
-Check it:
-
-```bash
-factory              # prints the list of commands
-factory view --sample
-```
-
-`factory view --sample` opens the dashboard on sample data at http://127.0.0.1:4790. Press Ctrl+C to stop it.
-
-To update the factory later, run `git pull && pnpm install && pnpm build:view` in the checkout.
-
-### 2. Add the plugin to Claude Code
-
-In Claude Code:
-
-```
-/plugin marketplace add PierreLeducTLM/software-factory
-/plugin install software-factory@software-factory
-```
-
-The repository is private, so this works for an account that can read it on GitHub. Otherwise, give the path of your checkout instead: `/plugin marketplace add /path/to/software-factory`. From a terminal, the same two steps are `claude plugin marketplace add …` and `claude plugin install software-factory@software-factory`.
-
-The five `/factory-…` skills are now available in every project. If they do not show up, restart Claude Code. To update them later, run `/plugin marketplace update software-factory`.
-
-### 3. Prepare the tracker
-
-**Statuses.** The factory needs seven statuses. Your names can differ: the install wizard matches them by name and category, and asks only about the ones it cannot match.
-
-| Factory state | Typical name | Category |
-|---|---|---|
-| to refine | To refine | to do (Linear: Backlog) |
-| spec review | Spec review | to do |
-| ready for dev | Ready for Dev | to do |
-| in development | In development | in progress (Linear: Started) |
-| in review | In review | in progress |
-| blocked | Blocked | in progress |
-| done | Done | done (Linear: Completed) |
-
-On **Jira**, the claim of a ticket relies on the workflow. A ticket must not be able to move from In development to In development, so remove any global transition into In development. The wizard and `factory doctor --ticket` check this.
-
-On **Linear**, add the statuses to the team's workflow. Ticket keys start with the team key, such as `PAY-142`. Linear accepts any status change, so the factory checks each claim itself.
-
-**Labels.** Two labels are optional:
-
-- `factory-auto` marks a ticket that `/factory-next` may pick up.
-- `factory:no-automerge` keeps a ticket's pull request away from auto-merge.
-
-**A service account.** The CI steps write to the tickets as a dedicated account, never as a person. Create it now:
-
-- **Jira:** an account that can comment on and transition the project's issues, with an [API token](https://id.atlassian.com/manage-profile/security/api-tokens).
-- **Linear:** a member of the team, with a personal API key created in Linear's settings, under API keys.
-
-### 4. Export the credentials
-
-The project's `.factory/adapters.yaml` holds only the **names** of environment variables, never a secret. Export the values in the shell you start Claude Code from. The names below are examples: you choose them, and give them to the wizard.
-
-For Jira:
-
-```bash
-export JIRA_TOKEN=…        # API token
-export JIRA_EMAIL=…        # the account's email
-```
-
-For Linear:
-
-```bash
-export LINEAR_API_KEY=…    # personal API key
-```
-
-And for source control:
-
-```bash
-export GH_TOKEN=…          # GitHub: a token that can open pull requests
-# or, for Bitbucket:
-export BB_TOKEN=…          # Bitbucket app password or access token
-export BB_USER=…           # Bitbucket username, when the token needs one
-```
-
-Use the service account's credentials while you set the project up: the wizard checks what that account may do. Once the project is set up, each developer exports their own credentials. `/factory-run` writes to the ticket as whoever runs it.
-
-### 5. Run the install wizard
-
-Open the project in Claude Code, on an up-to-date checkout of the main branch with no local changes, and run:
-
-```
-/factory-init
-```
-
-The wizard:
-
-1. **Detects** the stack, the CI system, the checks the project already has (tests, lint, types, format, build, security, end-to-end), OpenSpec and the git remote. It runs each local check once, twice when it fails, to measure it and set its timeout.
-2. **Asks** you, per category, to keep the existing check, add the recommended one, or skip it. It also asks for the paths that always need a person (such as `src/auth/**`) and whether a staging deploy should be watched.
-3. **Asks for the tracker connection.** On Jira: the site URL and a JQL filter that selects this repository's tickets, such as `project = PAY`. On Linear: the team key, and optionally a project name when the team serves several repositories.
-4. **Matches the statuses** with the tracker's own.
-5. **Checks the service account** on one real ticket. It stops, opening nothing, if the account cannot comment or change a status, or if a Jira workflow lets a claimed ticket be claimed again.
-6. **Opens the install pull request.** It holds `.factory/factory.yaml`, `.factory/adapters.yaml`, `.factory/checks/` and, on GitHub, the workflow `.github/workflows/factory.yml`.
-7. **Opens one pull request per check you chose to add.**
-
-For a Linear project, the resulting `.factory/adapters.yaml` looks like this:
-
-```yaml
-repository: acme/billing-service
-ticket_providers:
-  - kind: linear
-    team: PAY
-    project: Billing service   # only when you gave one
-    token_env: LINEAR_API_KEY
-source_control:
-  kind: github
-  repo: acme/billing-service
-  token_env: GH_TOKEN
-agent_runtime:
-  kind: orca
-```
-
-For Jira, the ticket provider entry is:
-
-```yaml
-  - kind: jira
-    base_url: https://acme.atlassian.net
-    filter: project = PAY
-    token_env: JIRA_TOKEN
-    email_env: JIRA_EMAIL
-```
-
-### 6. Let CI run the factory steps, then merge
-
-The install pull request adds CI steps that run as the service account:
-
-- `factory record-merge` on every merge to main: records the merge and moves the ticket to Done;
-- `factory revert` when the main build fails after an auto-merge;
-- `factory watch` after a deploy to staging, when you asked for a watch.
-
-On GitHub Actions they are in the workflow file. On Bitbucket Pipelines, the pull request description lists the steps to add by hand.
-
-**Store the secrets** that the pull request description lists, in the CI secret store, before you merge. On GitHub they are named `FACTORY_<variable>`, such as `FACTORY_LINEAR_API_KEY`. The source control token comes from GitHub itself.
-
-**Make `factory` installable in CI.** Each CI step first runs the install command you gave the wizard. The wizard suggests `npm install --global software-factory@<version>`. That works only once the package is published to an npm registry, and it is not published yet. Until it is, install it from this repository's git URL into a folder, and put that folder on the `PATH`.
-
-This repository is private, so CI needs a token that can read it:
-
-1. On GitHub, create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) limited to the repository `PierreLeducTLM/software-factory`, with the permission **Contents: Read-only**.
-2. Store it in the project's CI secret store as `FACTORY_REPO_TOKEN`. On Bitbucket, store it as a secured repository variable.
-
-On GitHub Actions, give the wizard this install command:
-
-```bash
-npm install --prefix "$HOME/.factory" "git+https://x-access-token:${{ secrets.FACTORY_REPO_TOKEN }}@github.com/PierreLeducTLM/software-factory.git#v0.1.0" && echo "$HOME/.factory/node_modules/.bin" >> "$GITHUB_PATH"
-```
-
-On Bitbucket Pipelines, use this one:
-
-```bash
-npm install --prefix "$HOME/.factory" "git+https://x-access-token:$FACTORY_REPO_TOKEN@github.com/PierreLeducTLM/software-factory.git#v0.1.0" && export PATH="$HOME/.factory/node_modules/.bin:$PATH"
-```
-
-Replace `v0.1.0` with the tag of the engine the project pins. If the repository becomes public, drop the `x-access-token:…@` part and the token. Do not drop `--prefix` to install globally: npm builds a package installed globally from git without its build tools, and the install fails.
-
-Then **merge the install pull request**. Until it is merged, nothing changes in the project.
-
-### 7. Check the setup
-
-```bash
-factory doctor --ticket PAY-142
-```
-
-The `--ticket` option names any real ticket the factory can see. The command reports drift, such as a renamed CI job, a secret the CI workflow no longer passes, a check that fails on main, an engine pin that does not match, or a service account that lost a permission. `/factory-doctor` does the same and offers fixes through pull requests. Add `--run-checks` to run every check once more.
-
----
-
-## Building your first ticket
-
-1. **Write the ticket** in the tracker and put it in To refine. The description holds the spec in plain words, for people.
-2. **Attach a draft spec.** Refinement starts from a draft OpenSpec change; it never writes one from nothing. Draft the change in the project, for example with OpenSpec's `/opsx:propose`, then attach its files to the ticket:
+1. **Write the ticket** in your tracker and put it in To refine. Its description holds the spec in plain words, for people.
+2. **Attach a draft spec.** Refinement starts from a draft OpenSpec change and never writes one from nothing. Draft the change in the project, for example with OpenSpec's `/opsx:propose`, then attach it:
 
    ```bash
    factory push PAY-142 --from openspec/changes/<change-name>
    ```
 
-3. **Refine it** in Claude Code with `/factory-refine PAY-142`. The skill works through the open questions with you, tightens the spec files, runs the ready gate and asks for your approval. The ticket moves to Ready for Dev.
-4. **Build it** with `/factory-run PAY-142`, or `/factory-next` to take the next ticket labelled `factory-auto`. The factory claims the ticket, builds it, runs the gates and the review, and opens the pull request. The ticket moves to In review. If the build cannot succeed, the ticket moves to Blocked and its factory comment says why and what to do.
-5. **Review and merge** the pull request. In shadow mode, a person always merges.
+3. **Refine it** with `/factory-refine PAY-142`. The skill works through the open questions with you, tightens the spec, runs the ready gate and asks for your approval. The ticket moves to Ready for Dev.
+4. **Build it** with `/factory-run PAY-142`, or `/factory-next` for the next ticket labelled `factory-auto`. The factory claims the ticket, builds it, runs the gates and the review, and opens the pull request. The ticket moves to In review. If the build cannot succeed, the ticket moves to Blocked, and its factory comment says why and what to do.
+5. **Review and merge** the pull request. Every risk level starts in **shadow mode**: a person merges each factory pull request. You enable auto-merge per risk level later, once the factory has earned it.
 6. **CI records the merge** and moves the ticket to Done.
 
-Follow every ticket on the dashboard:
-
-```bash
-factory view          # from the project folder; http://127.0.0.1:4790
-```
-
-The dashboard is read-only. It reads the tickets through the same credentials as the command line, refreshes on its own, and can open a run that is on your machine in Orca.
+Two labels are optional: `factory-auto` marks a ticket that `/factory-next` may pick up, and `factory:no-automerge` keeps a ticket's pull request away from auto-merge.
 
 ## Changing the setup later
 
 - **Add, remove or tune a check, the risk policy or the staging watch:** `/factory-workflow`. It validates the change and opens a pull request.
-- **Move a project to a newer factory engine:** `factory migrate` opens one upgrade pull request. A project pins its engine in `factory.yaml`, and a factory command refuses to run on a project pinned to another release.
-- **Something stopped working:** `/factory-doctor`.
+- **Move to a newer engine:** `factory migrate`.
+- **Something stopped working:** `/factory-doctor`, or `factory doctor --ticket PAY-142` in a terminal.
 
-Run `factory` with no arguments for every command. Add `--json` to any command for one line of JSON.
+## The dashboard
+
+`factory view` opens a read-only dashboard of the project's tickets at http://127.0.0.1:4790. `factory view --sample` shows it on sample data. It needs the dashboard built, which the project's copy of the engine does not include. Build it once from a checkout of this repository:
+
+```bash
+git clone https://github.com/PierreLeducTLM/software-factory.git
+cd software-factory
+pnpm install
+pnpm build:view
+npm link          # puts a `factory` command on your PATH that can open the dashboard
+```
 
 ## Developing the factory
 
@@ -269,4 +139,4 @@ pnpm mutation        # Stryker mutation testing
 pnpm test:view       # dashboard tests
 ```
 
-The design, the specs and the task list are in `openspec/changes/define-software-factory-v1/`.
+The design, the specs and the task list are in `openspec/changes/define-software-factory-v1/`. A release is a tag `vX.Y.Z` on `main`. The plugin, the package and `src/version.ts` carry the same version, and a project pins it in `.factory/package.json`.

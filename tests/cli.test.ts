@@ -18,7 +18,7 @@ import { getMockTicket } from './contracts/ticket-provider-contract.js';
 
 const FACTORY_YAML = `
 schema: 1
-engine: 0.1.0
+engine: 0.2.0
 states: { to_refine: To refine, spec_review: Spec review, ready_for_dev: Ready for Dev, in_development: In development, in_review: In review, blocked: Blocked, done: Done }
 labels: { auto: factory-auto, no_automerge: "factory:no-automerge" }
 checks:
@@ -707,7 +707,7 @@ describe('setting the command line up in a project', () => {
   });
 
   it('lists every problem in a config file on its own line', async () => {
-    const broken = FACTORY_YAML.replace('schema: 1', 'schema: 9').replace('engine: 0.1.0\n', '');
+    const broken = FACTORY_YAML.replace('schema: 1', 'schema: 9').replace('engine: 0.2.0\n', '');
     const cwd = getProjectFolder({ 'factory.yaml': broken, 'adapters.yaml': ADAPTERS_YAML });
 
     const message = await createRealDeps({ cwd, env: ENV }).then(
@@ -747,9 +747,9 @@ describe('setting the command line up in a project', () => {
   });
 
   it('runs a project pinned to another patch of the same engine release', async () => {
-    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML.replace('engine: 0.1.0', 'engine: 0.1.7'), 'adapters.yaml': ADAPTERS_YAML });
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML.replace('engine: 0.2.0', 'engine: 0.2.7'), 'adapters.yaml': ADAPTERS_YAML });
 
-    expect((await createRealDeps({ cwd, env: ENV })).config.engine).toBe('0.1.7');
+    expect((await createRealDeps({ cwd, env: ENV })).config.engine).toBe('0.2.7');
   });
 
   it('writes as factory-ci where git has no user name, as in CI', async () => {
@@ -765,8 +765,8 @@ describe('setting the command line up in a project', () => {
     [{ 'factory.yaml': FACTORY_YAML.replace('schema: 1', 'schema: 9'), 'adapters.yaml': ADAPTERS_YAML }, '.factory/factory.yaml: schema: Invalid input: expected 1'],
     [{ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML.replace('kind: orca', 'kind: other') }, '.factory/adapters.yaml: agent_runtime.kind: Invalid input: expected "orca"'],
     [
-      { 'factory.yaml': FACTORY_YAML.replace('engine: 0.1.0', 'engine: 0.2.0'), 'adapters.yaml': ADAPTERS_YAML },
-      'This project pins factory engine 0.2.0 in .factory/factory.yaml, and this is engine 0.1.0. Install engine 0.2.0, or upgrade the project with /factory-doctor.',
+      { 'factory.yaml': FACTORY_YAML.replace('engine: 0.2.0', 'engine: 0.3.0'), 'adapters.yaml': ADAPTERS_YAML },
+      'This project pins factory engine 0.3.0 in .factory/factory.yaml, and this is engine 0.2.0. Install engine 0.3.0, or upgrade the project with /factory-doctor.',
     ],
   ])('explains what is wrong with the project config (%#)', async (files, message) => {
     await expect(createRealDeps({ cwd: getProjectFolder(files), env: ENV })).rejects.toThrow(message);

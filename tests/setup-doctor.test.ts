@@ -7,7 +7,7 @@ import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
 
 const FACTORY = `
 schema: 1
-engine: 0.1.0
+engine: 0.2.0
 states: { to_refine: To refine, spec_review: Spec review, ready_for_dev: Ready for Dev, in_development: In development, in_review: In review, blocked: Blocked, done: Done }
 labels: { auto: factory-auto, no_automerge: "factory:no-automerge" }
 checks:
@@ -54,7 +54,7 @@ jobs:
 const PACKAGE = JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .' }, devDependencies: { typescript: '5' } });
 
 const HEALTHY: Readonly<Record<string, string>> = {
-  ...engineFiles('0.1.0'),
+  ...engineFiles('0.2.0'),
   '.factory/factory.yaml': FACTORY,
   '.factory/adapters.yaml': ADAPTERS,
   '.github/workflows/ci.yml': CI,
@@ -173,17 +173,17 @@ describe('factory doctor', () => {
   });
 
   it('says when the project pins another engine', async () => {
-    expect((await examine(HEALTHY, { engine: '0.2.0' })).messages).toEqual(['engine: .factory/factory.yaml pins engine 0.1.0, and this is engine 0.2.0']);
-    expect((await examine(HEALTHY, { engine: '0.1.9' })).messages).toEqual([]);
+    expect((await examine(HEALTHY, { engine: '0.3.0' })).messages).toEqual(['engine: .factory/factory.yaml pins engine 0.2.0, and this is engine 0.3.0']);
+    expect((await examine(HEALTHY, { engine: '0.2.9' })).messages).toEqual([]);
   });
 
   it('says when the factory is not installed in the project, or its install pins another engine', async () => {
     const { '.factory/package.json': _pin, ...notInstalled } = HEALTHY;
-    const other = { ...HEALTHY, '.factory/package.json': enginePackage('0.2.0') };
+    const other = { ...HEALTHY, '.factory/package.json': enginePackage('0.3.0') };
     const { '.factory/bin/factory': _launcher, ...noLauncher } = HEALTHY;
 
     expect((await examine(notInstalled)).messages).toEqual(['engine: The factory is not installed in the project. Run "factory migrate" and merge the pull request it opens']);
-    expect((await examine(other)).messages).toEqual(['engine: .factory/package.json installs another engine than the 0.1.0 pinned in .factory/factory.yaml. Run "factory migrate"']);
+    expect((await examine(other)).messages).toEqual(['engine: .factory/package.json installs another engine than the 0.2.0 pinned in .factory/factory.yaml. Run "factory migrate"']);
     expect((await examine(noLauncher)).messages).toEqual(['engine: The factory is not installed in the project. Run "factory migrate" and merge the pull request it opens']);
   });
 
