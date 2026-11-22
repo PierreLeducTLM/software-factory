@@ -23,6 +23,8 @@ Ask these together, in one message, and nothing more:
 
 The person can name other variables: pass them with `--token-env` and `--email-env`.
 
+The command also opens the pull request through the API of the source control, so it needs a token there. On GitHub it is `GH_TOKEN`: when it is not set and `gh auth status` shows a login, run the command with `GH_TOKEN=$(gh auth token)` in front of it. On Bitbucket it is `BITBUCKET_TOKEN` and `BITBUCKET_USERNAME`, which the person must export. Other names go through `--source-token-env` and `--source-username-env`.
+
 ## 2. Run it
 
 Linear:

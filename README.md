@@ -21,7 +21,10 @@ Claude installs the plugin, asks you three things (your tracker, a ticket to tes
    - Linear: `export LINEAR_API_KEY=…`, a personal API key from Linear's settings, under API keys.
    - Jira: `export JIRA_TOKEN=…` and `export JIRA_EMAIL=…`, from [an Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
    - Use a dedicated service account, not your own. The factory's CI steps write to tickets as that account.
-2. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
+2. **Your source control token is available.** The install opens its pull request through the API of GitHub or Bitbucket.
+   - GitHub: `export GH_TOKEN=$(gh auth token)`. Claude does this for you when `gh` is logged in.
+   - Bitbucket: `export BITBUCKET_TOKEN=…` and `export BITBUCKET_USERNAME=…`, an app password.
+3. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
 
    | Factory state | Typical name |
    |---|---|
@@ -34,7 +37,7 @@ Claude installs the plugin, asks you three things (your tracker, a ticket to tes
    | done | Done |
 
    On **Jira**, a ticket must not be able to move from In development to In development, since that is what stops two people claiming one ticket. Remove any global transition into In development. The install checks it. On **Linear**, add the statuses to the team's workflow. Linear accepts any status change, so the factory checks each claim itself.
-3. **The tools are installed:** Node.js 22 or later, git, Claude Code, Orca (its `orca` command) and OpenSpec (`npm install --global @fission-ai/openspec`). Claude checks and tells you what is missing.
+4. **The tools are installed:** Node.js 22 or later, git, Claude Code, Orca (its `orca` command) and OpenSpec (`npm install --global @fission-ai/openspec`). Claude checks and tells you what is missing.
 
 **After the pull request is open,** you have two things to do:
 
