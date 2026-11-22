@@ -1,6 +1,6 @@
 import { stringify } from 'yaml';
 import { z } from 'zod';
-import { parseAdaptersConfig, parseFactoryConfig } from '../config/project-config.js';
+import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig } from '../config/project-config.js';
 import { CATEGORIES, type Category } from './detect.js';
 
 const DURATION = z.string().regex(/^\d+(s|m|h)$/, 'Use a number followed by s, m or h, such as 90s or 6m');
@@ -30,8 +30,11 @@ const InstallAnswersSchema = z.object({
   watch: z.object({ checks: z.array(NAME).min(1), duration: DURATION, interval: DURATION, environment: NAME }).optional(),
 });
 
+const ConnectionSchema = InstallAnswersSchema.pick({ repository: true, mainBranch: true, ticketProvider: true, sourceControl: true });
+
 export type ChosenCheck = z.infer<typeof ChosenCheckSchema>;
 export type InstallAnswers = z.infer<typeof InstallAnswersSchema>;
+export type Connection = z.infer<typeof ConnectionSchema>;
 
 export type Install = { readonly files: Readonly<Record<string, string>>; readonly manual: readonly string[]; readonly secrets: readonly string[] };
 
@@ -79,7 +82,7 @@ const factoryYaml = ({ engine, mainBranch, states, labels, checks, sensitivePath
     },
   });
 
-const adaptersYaml = ({ repository, ticketProvider, sourceControl }: InstallAnswers): string =>
+const adaptersYaml = ({ repository, ticketProvider, sourceControl }: Connection): string =>
   stringify({
     repository,
     ticket_providers: [{ kind: ticketProvider.kind, base_url: ticketProvider.baseUrl, filter: ticketProvider.filter, token_env: ticketProvider.tokenEnv, email_env: ticketProvider.emailEnv }],
@@ -181,4 +184,16 @@ export const parseInstallAnswers = (text: string): InstallAnswers => {
   const parsed = InstallAnswersSchema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => `answers: ${issue.path.join('.')}: ${issue.message}`).join('\n'));
   return parsed.data;
+};
+
+export const parseConnection = (text: string): Connection => {
+  const parsed = ConnectionSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) throw new Error(parsed.error.issues.map((issue) => `answers: ${issue.path.join('.')}: ${issue.message}`).join('\n'));
+  return parsed.data;
+};
+
+export const adaptersFor = (connection: Connection): AdaptersConfig => {
+  const parsed = parseAdaptersConfig(adaptersYaml(connection));
+  if (!parsed.ok) throw new Error(parsed.issues.map((issue) => `${ADAPTERS_YAML}: ${issue.path}: ${issue.message}`).join('\n'));
+  return parsed.value;
 };

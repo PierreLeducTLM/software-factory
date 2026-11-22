@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseAdaptersConfig, parseFactoryConfig } from '../src/config/project-config.js';
 import { detectProject } from '../src/setup/detect.js';
-import { buildInstall, parseInstallAnswers, type InstallAnswers } from '../src/setup/install.js';
+import { buildInstall, parseConnection, parseInstallAnswers, type InstallAnswers } from '../src/setup/install.js';
 import { createInMemoryProjectFiles } from '../src/setup/project-files.js';
 
 const getAnswers = (overrides?: Partial<InstallAnswers>): InstallAnswers => ({
@@ -156,6 +156,15 @@ describe('the CI steps of an install elsewhere', () => {
 describe('the answers file', () => {
   it('reads valid answers', () => {
     expect(parseInstallAnswers(JSON.stringify(getAnswers()))).toEqual(getAnswers());
+  });
+
+  it('reads the connection alone from answers still being filled in', () => {
+    const { repository, mainBranch, ticketProvider, sourceControl } = getAnswers();
+
+    expect(parseConnection(JSON.stringify({ repository, mainBranch, ticketProvider, sourceControl, checks: 'not chosen yet' }))).toEqual({ repository, mainBranch, ticketProvider, sourceControl });
+    expect(() => parseConnection(JSON.stringify({ repository, mainBranch: '', ticketProvider: { ...ticketProvider, baseUrl: '' } }))).toThrow(
+      /^answers: mainBranch: .*\nanswers: ticketProvider\.baseUrl: .*\nanswers: sourceControl: /,
+    );
   });
 
   it('names every field that is wrong', () => {
