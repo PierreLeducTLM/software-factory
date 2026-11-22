@@ -6,6 +6,12 @@
   "engines": {
     "node": ">=22"
   },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "factory": "dist/cli/bin.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -14,7 +20,8 @@
     "mutation": "stryker run",
     "build": "tsc -p tsconfig.build.json",
     "test:view": "pnpm --filter @software-factory/view test",
-    "build:view": "pnpm --filter @software-factory/view build"
+    "build:view": "pnpm --filter @software-factory/view build",
+    "prepare": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "yaml": "^2.9.1",
@@ -28,8 +35,5 @@
     "@vitest/coverage-v8": "^5.1.1",
     "typescript": "^5.9.3",
     "vitest": "^5.1.1"
-  },
-  "bin": {
-    "factory": "dist/cli/bin.js"
   }
 }
