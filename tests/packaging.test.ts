@@ -30,7 +30,7 @@ describe('the factory plugin', () => {
   });
 
   it('ships the skills a project needs to set the factory up, run it and keep it healthy', () => {
-    expect(skills.toSorted()).toEqual(['factory-doctor', 'factory-refine', 'factory-run']);
+    expect(skills.toSorted()).toEqual(['factory-doctor', 'factory-init', 'factory-refine', 'factory-run', 'factory-workflow']);
   });
 
   it.each(skills)('names the %s skill after its folder and says when to use it', (skill) => {
