@@ -1,0 +1,13 @@
+{
+  "name": "software-factory",
+  "owner": { "name": "Software Factory" },
+  "description": "The software factory plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "software-factory",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Refine, build and maintain a project's software factory from Claude Code."
+    }
+  ]
+}
