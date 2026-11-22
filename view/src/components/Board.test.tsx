@@ -103,6 +103,23 @@ describe('board', () => {
     await expect.element(panel).not.toBeInTheDocument();
   });
 
+  it('opens a run on this machine in Orca, and says why when Orca cannot', async () => {
+    const openInOrca = vi.fn(async (key: string) => (key === 'PAY-142' ? { ok: true as const } : { ok: false as const, message: 'Orca could not open the run: Orca is not running' }));
+    const screen = await render(<BoardScreen columns={getColumns({ build: [getCard(), getCard({ key: 'ENG-95' })] })} loadDetail={async () => getDetail()} openInOrca={openInOrca} />);
+
+    await screen.getByRole('button', { name: /Open PAY-142/ }).click();
+    await screen.getByRole('button', { name: 'Open in Orca' }).click();
+
+    await expect.element(screen.getByText('Opened in Orca.')).toBeVisible();
+    expect(openInOrca).toHaveBeenCalledWith('PAY-142');
+
+    await screen.getByRole('button', { name: /Open ENG-95/ }).click();
+    await expect.element(screen.getByText('Opened in Orca.')).not.toBeInTheDocument();
+    await screen.getByRole('button', { name: 'Open in Orca' }).click();
+
+    await expect.element(screen.getByText('Orca could not open the run: Orca is not running')).toBeVisible();
+  });
+
   it('says a run on another machine is in that developer\'s Orca, and offers the command and the pull request', async () => {
     const card = getCard({ onThisMachine: false, claimant: 'maya', command: '/factory-run PAY-142', pullRequest: 'https://github.test/pull/412' });
     const copy = vi.fn(async () => undefined);
@@ -115,6 +132,7 @@ describe('board', () => {
     await expect.element(screen.getByRole('link', { name: 'Open pull request' })).toHaveAttribute('href', 'https://github.test/pull/412');
     await expect.element(screen.getByRole('button', { name: 'Copied' })).toBeVisible();
     expect(copy).toHaveBeenCalledWith('/factory-run PAY-142');
+    expect(screen.getByRole('button', { name: 'Open in Orca' }).elements()).toHaveLength(0);
   });
 
   it('says so when the ticket has no factory record, or the record holds nothing for a section', async () => {

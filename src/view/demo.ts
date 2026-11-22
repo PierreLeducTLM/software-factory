@@ -147,5 +147,6 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     repository: REPOSITORY,
     machine: MACHINE,
     now,
+    openWorktree: () => Promise.reject(new Error('This is sample data, with no Orca session behind it.')),
   });
 };

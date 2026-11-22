@@ -15,6 +15,10 @@ export const fetchDetail = createServerFn({ method: 'GET' })
   .validator((key: string) => key)
   .handler(async ({ data }) => (await (await getSource()).detail(data)) ?? null);
 
+export const openRun = createServerFn({ method: 'POST' })
+  .validator((key: string) => key)
+  .handler(async ({ data }) => (await getSource()).openInOrca(data));
+
 const PERIODS = [7, 30, 90];
 
 export const fetchHealth = createServerFn({ method: 'GET' })

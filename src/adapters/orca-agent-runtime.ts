@@ -36,21 +36,28 @@ export const createCommandRunner = (binary: string): CommandRunner => {
   return async (args, options) => ({ stdout: (await run(binary, [...args], options === undefined ? {} : { cwd: options.cwd })).stdout });
 };
 
-export const createOrcaAgentRuntime = ({ run }: { readonly run: CommandRunner }): AgentRuntime => {
-  const ask = async (args: readonly string[]): Promise<Reply> => {
-    const { stdout } = await run([...args, '--json']);
-    const envelope = EnvelopeSchema.safeParse(stdout.trimStart().startsWith('{') ? JSON.parse(stdout) : undefined);
-    if (!envelope.success) throw new Error(`Orca did not answer with JSON: ${stdout.slice(0, 200)}`);
-    return envelope.data.ok
-      ? { ok: true, result: envelope.data.result }
-      : { ok: false, code: envelope.data.error.code, message: envelope.data.error.message };
+const askOrca = async (run: CommandRunner, args: readonly string[]): Promise<Reply> => {
+  const { stdout } = await run([...args, '--json']);
+  const envelope = EnvelopeSchema.safeParse(stdout.trimStart().startsWith('{') ? JSON.parse(stdout) : undefined);
+  if (!envelope.success) throw new Error(`Orca did not answer with JSON: ${stdout.slice(0, 200)}`);
+  return envelope.data.ok ? { ok: true, result: envelope.data.result } : { ok: false, code: envelope.data.error.code, message: envelope.data.error.message };
+};
+
+const demandOfOrca = async (run: CommandRunner, args: readonly string[]): Promise<unknown> => {
+  const reply = await askOrca(run, args);
+  if (!reply.ok) throw new Error(reply.message);
+  return reply.result;
+};
+
+export const createOrcaWorktreeOpener =
+  ({ run }: { readonly run: CommandRunner }) =>
+  async (worktreeId: string): Promise<void> => {
+    await demandOfOrca(run, ['worktree', 'activate', '--worktree', `id:${worktreeId}`]);
   };
 
-  const demand = async (args: readonly string[]): Promise<unknown> => {
-    const reply = await ask(args);
-    if (!reply.ok) throw new Error(reply.message);
-    return reply.result;
-  };
+export const createOrcaAgentRuntime = ({ run }: { readonly run: CommandRunner }): AgentRuntime => {
+  const ask = (args: readonly string[]): Promise<Reply> => askOrca(run, args);
+  const demand = (args: readonly string[]): Promise<unknown> => demandOfOrca(run, args);
 
   return {
     currentWorktree: async () => {

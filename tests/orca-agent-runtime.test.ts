@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCommandRunner, createOrcaAgentRuntime, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
+import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
 
 const WORKTREE = {
   id: '42023d6c::/work/billing/pay-142',
@@ -18,7 +18,7 @@ const getRuntime = (replies: Readonly<Record<string, string>>) => {
     calls.push(args);
     return { stdout: replies[`${args[0]} ${args[1]}`] ?? failed('unknown_command', 'Unknown command') };
   };
-  return { runtime: createOrcaAgentRuntime({ run }), calls };
+  return { runtime: createOrcaAgentRuntime({ run }), open: createOrcaWorktreeOpener({ run }), calls };
 };
 
 describe('Orca agent runtime', () => {
@@ -89,6 +89,20 @@ describe('Orca agent runtime', () => {
     const session = await runtime.startSession({ worktree, agent: 'claude', prompt: 'go' });
 
     expect(session).toEqual({ worktreeId: WORKTREE.id, host: 'ssh:build-box', surface: 'chat' });
+  });
+
+  it('brings a recorded worktree to the front on its host', async () => {
+    const { open, calls } = getRuntime({ 'worktree activate': ok({ worktree: WORKTREE }) });
+
+    await open('42023d6c::/work/billing/pay-142');
+
+    expect(calls).toEqual([['worktree', 'activate', '--worktree', 'id:42023d6c::/work/billing/pay-142', '--json']]);
+  });
+
+  it('fails with Orca\'s message when the worktree cannot be opened', async () => {
+    const { open } = getRuntime({ 'worktree activate': failed('selector_not_found', 'No worktree matches id:gone') });
+
+    await expect(open('gone')).rejects.toThrow('No worktree matches id:gone');
   });
 
   it('posts progress as the worktree comment', async () => {

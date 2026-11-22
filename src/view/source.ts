@@ -1,5 +1,6 @@
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import type { FactoryConfig } from '../config/project-config.js';
+import { parseComment } from '../record/ticket-record.js';
 import { buildHealth, type Health } from './health.js';
 import { buildBoard, buildNeedsYou, buildRunDetail, type Column, type NeedsYouItem, type RunDetail } from './model.js';
 import { createViewStore } from './store.js';
@@ -10,7 +11,10 @@ type Options = {
   readonly repository: string;
   readonly machine: string;
   readonly now: () => string;
+  readonly openWorktree: (worktreeId: string) => Promise<void>;
 };
+
+export type OpenResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 export type ViewData = {
   readonly repository: string;
@@ -29,13 +33,14 @@ export type ViewSource = {
   readonly load: () => Promise<ViewData>;
   readonly detail: (key: string) => Promise<RunDetail | undefined>;
   readonly health: (periodDays: number) => Promise<Health>;
+  readonly openInOrca: (key: string) => Promise<OpenResult>;
 };
 
 const DONE_WINDOW_DAYS = 7;
 const MS_PER_DAY = 86_400_000;
 const RUNNING_COLUMNS = ['revalidate', 'build', 'review'];
 
-export const createViewSource = ({ providers, config, repository, machine, now }: Options): ViewSource => {
+export const createViewSource = ({ providers, config, repository, machine, now, openWorktree }: Options): ViewSource => {
   const store = createViewStore({ providers, states: config.states, now, doneWindowDays: DONE_WINDOW_DAYS });
   const state: { attemptedAt?: number } = {};
 
@@ -70,6 +75,18 @@ export const createViewSource = ({ providers, config, repository, machine, now }
       await fresh();
       const ticket = store.snapshot().tickets.find((candidate) => candidate.key === key);
       return ticket === undefined ? undefined : buildRunDetail(ticket, { config, now: now(), machine, repository });
+    },
+
+    openInOrca: async (key) => {
+      await fresh();
+      const comment = store.snapshot().tickets.find((candidate) => candidate.key === key)?.factoryComment;
+      const parsed = comment === undefined ? undefined : parseComment(comment, { trustEdited: false });
+      const run = parsed?.status === 'ok' ? parsed.record.runs.at(-1) : undefined;
+      if (run?.machine !== machine) return { ok: false, message: `${key} has no run on this machine.` };
+      return openWorktree(run.worktreeId).then(
+        () => ({ ok: true }),
+        (error: unknown) => ({ ok: false, message: `Orca could not open the run: ${error instanceof Error ? error.message : String(error)}` }),
+      );
     },
 
     health: async (periodDays) => {

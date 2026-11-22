@@ -5,7 +5,7 @@ import { createBitbucketSourceControl } from '../adapters/bitbucket-source-contr
 import { createGitHubSourceControl } from '../adapters/github-source-control.js';
 import { createFetchHttp, sleep, withRateLimitRetry, type Http } from '../adapters/http.js';
 import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
-import { createCommandRunner, createOrcaAgentRuntime, type CommandRunner } from '../adapters/orca-agent-runtime.js';
+import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, type CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
@@ -87,6 +87,7 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
     repository: adapters.repository,
     machine: hostname(),
     now,
+    openWorktree: createOrcaWorktreeOpener({ run: createCommandRunner('orca') }),
   });
 };
 

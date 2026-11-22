@@ -78,3 +78,9 @@ it('shows a run with a failed first attempt and a second one being built', async
   expect(card?.onThisMachine).toBe(true);
   expect(detail?.sections.map((section) => section.title)).toEqual(['Refinement', 'Run 1 of 3', 'Attempt 1 of 5', 'Attempt 2 of 5']);
 });
+
+it('says that a sample run has no Orca session to open', async () => {
+  const source = createDemoViewSource({ config: getConfig(), now: () => '2026-11-21T08:00:00Z' });
+
+  expect(await source.openInOrca('PAY-149')).toEqual({ ok: false, message: 'Orca could not open the run: This is sample data, with no Orca session behind it.' });
+});
