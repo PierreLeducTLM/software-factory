@@ -45,7 +45,7 @@ Write the answers to a JSON file outside the repository, such as `$TMPDIR/factor
 | `sensitivePaths` | step 2 |
 | `ticketProvider` | Jira: `{ kind: "jira", baseUrl, filter, tokenEnv, emailEnv }`. The filter is a JQL fragment that selects this repository's tickets. Linear: `{ kind: "linear", team, project?, tokenEnv }`. `team` is the team key that prefixes ticket keys, such as `PAY`; `project` narrows to one Linear project by name, for a team shared by several repositories. The `*Env` fields are names of environment variables, never the token itself |
 | `sourceControl` | `{ kind: "github" or "bitbucket", tokenEnv, usernameEnv? }` |
-| `ci` | `{ system, workflow, install }`: `system` from `detection.ci.system`; `workflow`, the name of the CI workflow that builds main, which the revert step follows; `install`, `npm install --global software-factory@<engine>` |
+| `ci` | `{ system, workflow, install }`: `system` from `detection.ci.system`; `workflow`, the name of the CI workflow that builds main, which the revert step follows; `install`, the command that puts `factory` on the CI's `PATH`. Ask whether the factory is published to the team's npm registry: if so, `npm install --global software-factory@<engine>`. If not, install it from the factory's git URL into a folder, as the README's "Make `factory` installable in CI" shows, and never with `--global`, which fails for a git URL |
 | `watch` | only with a staging deploy: `{ checks, duration, interval, environment }` |
 | `states` | step 4 |
 
