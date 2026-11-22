@@ -266,6 +266,11 @@ Rollback is not applicable: these are planning artifacts only.
 
 ## Open Questions
 
+- **Linear and GitHub Issues adapters (task 6.6, postponed).** The shared contract needs stored spec files, statuses, and a claim of which exactly one of two racing attempts wins. Before building them, decide:
+  - statuses on GitHub Issues, which has none: a GitHub Projects status field (recommended) or labels;
+  - spec files on GitHub Issues, which has no attachment API: one marked issue comment per file (recommended);
+  - spec files on Linear, whose attachments are links: Linear's file upload, linked from the issue (recommended);
+  - the claim lock, since neither refuses a status change when the ticket has already moved: re-read right after the change and let the later claimer back off (recommended). This narrows the race without closing it, so the racing-claims contract test would be relaxed for these two providers.
 - **Default poll interval per provider.** 60 seconds suits Jira Cloud. Linear and GitHub limits may justify different defaults. These can be tuned without changing the specs.
 - **Per-adapter comment budget.** The exact size per provider can be set during adapter implementation.
 - **Notify-suppressed edits.** Whether each provider supports them affects only notification noise, not the behavior.
