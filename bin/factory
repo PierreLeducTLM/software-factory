@@ -1,0 +1,13 @@
+#!/bin/sh
+# The factory command for Claude Code skills.
+# A project that installed the factory runs the engine it pins. Before that, as during /factory-init,
+# this runs the engine of this plugin's release, installed once into the user cache.
+plugin=$(cd "$(dirname "$0")/.." && pwd)
+root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [ -f "$root/.factory/bin/factory" ]; then exec sh "$root/.factory/bin/factory" "$@"; fi
+version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$plugin/.claude-plugin/plugin.json" | head -1)
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/software-factory/$version"
+mkdir -p "$dir/bin"
+[ -f "$dir/package.json" ] || printf '{\n  "private": true,\n  "dependencies": {\n    "software-factory": "git+https://github.com/PierreLeducTLM/software-factory.git#v%s"\n  }\n}\n' "$version" > "$dir/package.json"
+cp "$plugin/engine/launcher" "$dir/bin/factory"
+exec sh "$dir/bin/factory" "$@"
