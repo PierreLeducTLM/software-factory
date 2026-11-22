@@ -7,7 +7,7 @@ import type { ProjectFiles } from './project-files.js';
 
 export type PublishedFile = { readonly branch: string; readonly base: string; readonly path: string; readonly content: string; readonly message: string };
 
-type UpgradeDeps = {
+export type UpgradeDeps = {
   readonly files: ProjectFiles;
   readonly publishFile: (file: PublishedFile) => Promise<void>;
   readonly openPullRequest: (request: OpenPullRequest) => Promise<{ readonly url: string }>;

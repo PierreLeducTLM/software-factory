@@ -33,23 +33,26 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
     },
-    publishFile: async ({ branch, base, path, content, message }: PublishedFile): Promise<void> => {
-      const folder = await mkdtemp(join(tmpdir(), 'factory-publish-'));
-      await run(['fetch', '--quiet', 'origin', base]);
-      await run(['worktree', 'add', '--quiet', '-b', branch, folder, `origin/${base}`]);
-      try {
-        const target = join(folder, path);
-        await mkdir(dirname(target), { recursive: true });
-        await writeFile(target, content);
-        await run(['-C', folder, 'add', path]);
-        await run(['-C', folder, 'commit', '--quiet', '-m', message]);
-        await run(['-C', folder, 'push', '--quiet', '--set-upstream', 'origin', branch]);
-      } finally {
-        await run(['worktree', 'remove', '--force', folder]);
-      }
-    },
   };
 };
+
+export const createFilePublisher =
+  ({ run }: { readonly run: CommandRunner }) =>
+  async ({ branch, base, path, content, message }: PublishedFile): Promise<void> => {
+    const folder = await mkdtemp(join(tmpdir(), 'factory-publish-'));
+    await run(['fetch', '--quiet', 'origin', base]);
+    await run(['worktree', 'add', '--quiet', '-b', branch, folder, `origin/${base}`]);
+    try {
+      const target = join(folder, path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content);
+      await run(['-C', folder, 'add', path]);
+      await run(['-C', folder, 'commit', '--quiet', '-m', message]);
+      await run(['-C', folder, 'push', '--quiet', '--set-upstream', 'origin', branch]);
+    } finally {
+      await run(['worktree', 'remove', '--force', folder]);
+    }
+  };
 
 const OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 

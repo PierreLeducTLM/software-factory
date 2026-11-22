@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCommandRunner, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
-import { createGitInputs, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
+import { createFilePublisher, createGitInputs, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
 
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Test Dev', '-c', 'user.email=test@example.test', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -25,6 +25,11 @@ const getClone = () => {
   execFileSync('git', ['clone', '-q', origin, clone]);
   git(clone, 'config', 'user.name', 'Pierre Dev');
   return { origin, clone, first };
+};
+
+const publisherFor = (cwd: string) => {
+  const run = createCommandRunner('git');
+  return createFilePublisher({ run: (args) => run(args, { cwd }) });
 };
 
 const inputsFor = (cwd: string, mainBranch = 'main') => {
@@ -114,7 +119,7 @@ describe('git inputs', () => {
     writeFileSync(join(clone, 'a.txt'), 'unsaved work');
     const change = { branch: 'factory/upgrade-engine-0.2.0', base: 'main', path: '.factory/factory.yaml', content: 'schema: 1\nengine: 0.2.0\n', message: 'chore: upgrade the factory engine to 0.2.0' };
 
-    await inputsFor(clone).publishFile(change);
+    await publisherFor(clone)(change);
 
     expect(git(origin, 'show', `${change.branch}:.factory/factory.yaml`)).toBe('schema: 1\nengine: 0.2.0');
     expect(git(origin, 'log', '-1', '--format=%s %an', change.branch)).toBe('chore: upgrade the factory engine to 0.2.0 Pierre Dev');
@@ -129,7 +134,7 @@ describe('git inputs', () => {
     git(clone, 'config', 'user.email', 'pierre@example.test');
     git(clone, 'remote', 'set-url', '--push', 'origin', join(clone, 'nowhere'));
 
-    await expect(inputsFor(clone).publishFile({ branch: 'factory/x', base: 'main', path: '.factory/checks/x.md', content: 'x', message: 'x' })).rejects.toThrow(/nowhere/);
+    await expect(publisherFor(clone)({ branch: 'factory/x', base: 'main', path: '.factory/checks/x.md', content: 'x', message: 'x' })).rejects.toThrow(/nowhere/);
 
     expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
   });

@@ -5,13 +5,22 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runCli } from './cli.js';
 import { createSpecFolder } from './inputs.js';
-import { createRealDeps } from './real-deps.js';
+import { createRealDeps, createSetupDeps } from './real-deps.js';
+import { setupCommand } from './setup-command.js';
 import { viewCommand } from './view-command.js';
 
 const [command, ...rest] = process.argv.slice(2);
+const SETUP_COMMANDS = ['doctor', 'migrate'];
 
 process.exitCode =
-  command === 'view'
+  SETUP_COMMANDS.includes(command ?? '')
+    ? await setupCommand({
+        argv: process.argv.slice(2),
+        deps: async () => createSetupDeps({ cwd: process.cwd(), env: process.env }),
+        write: (line) => console.log(line),
+        writeError: (line) => console.error(line),
+      })
+    : command === 'view'
     ? await viewCommand({
         argv: rest,
         cwd: process.cwd(),

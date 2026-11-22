@@ -10,7 +10,7 @@ import type { Ticket } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
-import { createProjectViewSource, createRealDeps, createSampleViewSource } from '../src/cli/real-deps.js';
+import { createProjectViewSource, createRealDeps, createSampleViewSource, createSetupDeps } from '../src/cli/real-deps.js';
 import type { SourceControl } from '../src/adapters/source-control.js';
 import type { LoopDeps } from '../src/factory/build-loop.js';
 import type { ScriptRun } from '../src/factory/checks.js';
@@ -437,11 +437,11 @@ describe('factory command line', () => {
       expect(code).toBe(2);
       expect(errors[0]).toBe('Usage: factory <command> <KEY> [options]');
       expect(
-        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', '--json'].filter(
+        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', '--json'].filter(
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(18);
+      expect(errors).toHaveLength(21);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -631,6 +631,21 @@ describe('setting the command line up in a project', () => {
     expect(typeof source.load).toBe('function');
     await expect(createProjectViewSource({ cwd, env: {} })).rejects.toThrow('Set the JIRA_EMAIL environment variable');
     await expect(createProjectViewSource({ cwd: getProjectFolder({ 'adapters.yaml': ADAPTERS_YAML }), env: ENV })).rejects.toThrow('.factory/factory.yaml is missing');
+  });
+
+  it('sets the setup commands up even when the project config is broken, and reaches the providers only when asked', async () => {
+    const cwd = getProjectFolder({ 'factory.yaml': 'schema: [' });
+    const broken = createSetupDeps({ cwd, env: ENV });
+    const configured = createSetupDeps({ cwd: getProjectFolder({ 'adapters.yaml': ADAPTERS_YAML }), env: {} });
+
+    expect(await broken.files.read('.factory/factory.yaml')).toBe('schema: [');
+    expect((await broken.runScript('echo checked', { timeoutSeconds: 5 })).output).toBe('checked\n');
+    expect(broken.now()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    await expect(broken.checkAccess('PAY-142')).rejects.toThrow('.factory/adapters.yaml is missing');
+    await expect(broken.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('.factory/adapters.yaml is missing');
+    await expect(configured.checkAccess('PAY-142')).rejects.toThrow('Set the JIRA_EMAIL environment variable');
+    await expect(configured.openPullRequest({ branch: 'b', base: 'main', title: 't', body: '' })).rejects.toThrow('Set the GH_TOKEN environment variable');
+    await expect(broken.publishFile({ branch: 'b', base: 'main', path: 'x', content: 'x', message: 'x' })).rejects.toThrow(/origin/);
   });
 
   it('offers a dashboard on sample data that needs no project config and no credentials', async () => {

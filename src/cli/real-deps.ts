@@ -13,8 +13,10 @@ import type { LoopDeps } from '../factory/build-loop.js';
 import { assessSpec } from '../factory/risk.js';
 import { createDemoViewSource } from '../view/demo.js';
 import { createViewSource, type ViewSource } from '../view/source.js';
+import { createProjectFiles } from '../setup/project-files.js';
 import { enginePinMatches, enginePinMessage } from '../version.js';
-import { createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
+import type { SetupDeps } from './setup-command.js';
+import { createFilePublisher, createGitInputs, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
 
@@ -117,5 +119,19 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     linesChangedOnBranch: git.linesChangedOnBranch,
     pushBranch: git.pushBranch,
     commitMessage: git.commitMessage,
+  };
+};
+
+export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
+  const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
+  const runGit = createCommandRunner('git');
+  const adapters = (): Promise<AdaptersConfig> => loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
+  return {
+    files: createProjectFiles(cwd),
+    runScript: createScriptRunner({ cwd }),
+    now,
+    checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
+    publishFile: createFilePublisher({ run: (args) => runGit(args, { cwd }) }),
+    openPullRequest: async (request) => createSourceControl(await adapters(), env, http).openPullRequest(request),
   };
 };

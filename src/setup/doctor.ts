@@ -13,7 +13,7 @@ export type Finding = { readonly kind: FindingKind; readonly message: string };
 
 export type DoctorReport = { readonly ok: boolean; readonly findings: readonly Finding[] };
 
-type DoctorDeps = {
+export type DoctorDeps = {
   readonly files: ProjectFiles;
   readonly runScript: (command: string, options: { readonly timeoutSeconds: number }) => Promise<ScriptRun>;
   readonly now: () => string;
