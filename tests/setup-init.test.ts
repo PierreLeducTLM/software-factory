@@ -167,6 +167,14 @@ describe('the install wizard', () => {
     expect([...published, ...opened]).toEqual([]);
   });
 
+  it('names Linear when the Linear account may not write to the ticket', async () => {
+    const { deps } = getInit({ access: { comment: false, transition: true } });
+
+    const result = await installFactory(deps, getAnswers({ ticketProvider: { kind: 'linear', team: 'PAY', tokenEnv: 'LINEAR_API_KEY' } }), { ticket: 'PAY-1' });
+
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Grant the missing permission in Linear') });
+  });
+
   it('opens no pull request while the workflow lets a claimed ticket be claimed again', async () => {
     const { deps, published, opened } = getInit({ reenter: true });
 

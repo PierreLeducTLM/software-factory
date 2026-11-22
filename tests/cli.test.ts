@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runtime.js';
 import { createInMemorySourceControl } from '../src/adapters/in-memory-source-control.js';
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
@@ -660,6 +660,44 @@ describe('setting the command line up in a project', () => {
     expect(() => configured.sourceControl(adapters.value)).toThrow('Set the GH_TOKEN environment variable');
   });
 
+  it('connects to Linear when adapters.yaml names a Linear team, with the API key from the environment', async () => {
+    const linearYaml = ADAPTERS_YAML.replace(/ {2}- kind: jira\n(?: {4}.*\n)+/, '  - kind: linear\n    team: PAY\n    token_env: LINEAR_API_KEY\n');
+    const linear = parseAdaptersConfig(linearYaml);
+    const noTeam = parseAdaptersConfig(linearYaml.replace('    team: PAY\n', ''));
+    const unsupported = parseAdaptersConfig(linearYaml.replace('kind: linear', 'kind: github-issues'));
+    if (!linear.ok || !noTeam.ok || !unsupported.ok) throw new Error('invalid test adapters');
+    const deps = createSetupDeps({ cwd: getProjectFolder({ 'adapters.yaml': linearYaml }), env: { LINEAR_API_KEY: 'key' } });
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': linearYaml });
+
+    expect(typeof deps.tickets(linear.value).listStatuses).toBe('function');
+    expect(() => createSetupDeps({ cwd, env: {} }).tickets(linear.value)).toThrow('Set the LINEAR_API_KEY environment variable');
+    expect(() => deps.tickets(noTeam.value)).toThrow('The linear ticket provider needs team and token_env in .factory/adapters.yaml');
+    expect(() => deps.tickets(unsupported.value)).toThrow('No supported ticket provider is configured. Only jira and linear are supported so far');
+    expect(typeof (await createProjectViewSource({ cwd, env: { LINEAR_API_KEY: 'key' } })).load).toBe('function');
+  });
+
+  it('talks to Linear\'s API and upload storage, searching the configured project, and names Linear on the dashboard', async () => {
+    const linearYaml = ADAPTERS_YAML.replace(/ {2}- kind: jira\n(?: {4}.*\n)+/, '  - kind: linear\n    team: PAY\n    project: Billing service\n    token_env: LINEAR_API_KEY\n');
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': linearYaml });
+    const sent: { readonly url: string; readonly body: string }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: { readonly body: string }) => {
+      sent.push({ url, body: init.body });
+      return new Response(JSON.stringify({ data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } }));
+    });
+    try {
+      const deps = await createRealDeps({ cwd, env: { LINEAR_API_KEY: 'key', GH_TOKEN: 'gh' } });
+      await deps.tickets.search({});
+      const view = await (await createProjectViewSource({ cwd, env: { LINEAR_API_KEY: 'key' } })).load();
+
+      expect(sent[0]?.url).toBe('https://api.linear.app/graphql');
+      expect(sent[0]?.body).toContain('"project":{"name":{"eq":"Billing service"}}');
+      expect(view.providers).toEqual(['Linear']);
+      await expect(deps.tickets.readAttachment('https://uploads.linear.app.evil.test/x')).rejects.toThrow('Attachment link is not on https://uploads.linear.app');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('offers a dashboard on sample data that needs no project config and no credentials', async () => {
     const data = await createSampleViewSource().load();
 
@@ -770,7 +808,7 @@ describe('setting the command line up in a project', () => {
     [ADAPTERS_YAML.replace('    email_env: JIRA_EMAIL\n', ''), 'The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml'],
     [ADAPTERS_YAML.replace('    base_url: https://acme.atlassian.net\n', ''), 'The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml'],
     [ADAPTERS_YAML.replace('    filter: project = PAY\n', ''), 'The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml'],
-    [ADAPTERS_YAML.replace('kind: jira', 'kind: linear'), 'No supported ticket provider is configured. Only jira is supported so far'],
+    [ADAPTERS_YAML.replace('kind: jira', 'kind: github-issues'), 'No supported ticket provider is configured. Only jira and linear are supported so far'],
     [ADAPTERS_YAML.replace(', token_env: GH_TOKEN', ''), 'The github source control needs token_env in .factory/adapters.yaml'],
     [ADAPTERS_YAML.replace('kind: github', 'kind: bitbucket').replace(', token_env: GH_TOKEN', ''), 'The bitbucket source control needs token_env in .factory/adapters.yaml'],
   ])('explains what the ticket provider entry lacks (%#)', async (adapters, message) => {

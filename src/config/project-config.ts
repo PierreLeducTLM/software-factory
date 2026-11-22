@@ -115,6 +115,8 @@ const AdaptersConfigSchema = z.object({
         kind: z.enum(['jira', 'linear', 'github-issues']),
         base_url: z.string().optional(),
         filter: z.string().optional(),
+        team: z.string().optional(),
+        project: z.string().optional(),
         token_env: z.string().optional(),
         email_env: z.string().optional(),
       }),
@@ -143,6 +145,10 @@ export const sampleFactoryConfig = (): FactoryConfig =>
   });
 export type Check = z.infer<typeof CheckSchema>;
 export type AdaptersConfig = z.infer<typeof AdaptersConfigSchema>;
+
+export type SupportedTicketProvider = 'jira' | 'linear';
+
+export const TICKET_PROVIDER_NAMES: Readonly<Record<SupportedTicketProvider, string>> = { jira: 'Jira', linear: 'Linear' };
 
 const SECRET_FIELD_NAME = /(token|secret|password|api[_-]?key)$/i;
 const SECRET_VALUE = /^(ghp_|github_pat_|xox[abp]-|ATATT|lin_api_)/;

@@ -24,7 +24,10 @@ const InstallAnswersSchema = z.object({
   labels: z.object({ auto: NAME, no_automerge: NAME }).optional(),
   checks: z.array(ChosenCheckSchema),
   sensitivePaths: z.array(NAME),
-  ticketProvider: z.object({ kind: z.literal('jira'), baseUrl: NAME, filter: NAME, tokenEnv: NAME, emailEnv: NAME }),
+  ticketProvider: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('jira'), baseUrl: NAME, filter: NAME, tokenEnv: NAME, emailEnv: NAME }),
+    z.object({ kind: z.literal('linear'), team: NAME, project: NAME.optional(), tokenEnv: NAME }),
+  ]),
   sourceControl: z.object({ kind: z.enum(['github', 'bitbucket']), tokenEnv: NAME, usernameEnv: NAME.optional() }),
   ci: z.object({ system: z.enum(['github-actions', 'bitbucket-pipelines', 'none']), workflow: NAME.optional(), install: NAME }),
   watch: z.object({ checks: z.array(NAME).min(1), duration: DURATION, interval: DURATION, environment: NAME }).optional(),
@@ -82,10 +85,15 @@ const factoryYaml = ({ engine, mainBranch, states, labels, checks, sensitivePath
     },
   });
 
+const ticketProviderEntry = (provider: Connection['ticketProvider']) =>
+  provider.kind === 'jira'
+    ? { kind: provider.kind, base_url: provider.baseUrl, filter: provider.filter, token_env: provider.tokenEnv, email_env: provider.emailEnv }
+    : { kind: provider.kind, team: provider.team, project: provider.project, token_env: provider.tokenEnv };
+
 const adaptersYaml = ({ repository, ticketProvider, sourceControl }: Connection): string =>
   stringify({
     repository,
-    ticket_providers: [{ kind: ticketProvider.kind, base_url: ticketProvider.baseUrl, filter: ticketProvider.filter, token_env: ticketProvider.tokenEnv, email_env: ticketProvider.emailEnv }],
+    ticket_providers: [ticketProviderEntry(ticketProvider)],
     source_control: {
       kind: sourceControl.kind,
       repo: repository,
@@ -95,7 +103,8 @@ const adaptersYaml = ({ repository, ticketProvider, sourceControl }: Connection)
     agent_runtime: { kind: 'orca' },
   });
 
-const providerEnvs = ({ ticketProvider }: InstallAnswers): readonly string[] => [ticketProvider.tokenEnv, ticketProvider.emailEnv];
+const providerEnvs = ({ ticketProvider }: InstallAnswers): readonly string[] =>
+  ticketProvider.kind === 'jira' ? [ticketProvider.tokenEnv, ticketProvider.emailEnv] : [ticketProvider.tokenEnv];
 
 const githubJob = (condition: string, install: string, command: string): readonly string[] => [
   `    if: ${condition}`,

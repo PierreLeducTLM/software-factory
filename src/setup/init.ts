@@ -1,6 +1,6 @@
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import type { ProviderStatus, TicketProvider } from '../adapters/ticket-provider.js';
-import type { AdaptersConfig } from '../config/project-config.js';
+import { TICKET_PROVIDER_NAMES, type AdaptersConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION } from '../version.js';
 import { detectProject, type Detection } from './detect.js';
@@ -27,7 +27,6 @@ export type InstallResult =
 
 const INSTALL_BRANCH = 'factory/install';
 const INSTALL_TITLE = 'chore: install the software factory';
-const PROVIDER_NAMES: Readonly<Record<InstallAnswers['ticketProvider']['kind'], string>> = { jira: 'Jira' };
 
 export const detectForInit = async (deps: InitDeps, { verify }: { readonly verify: boolean }): Promise<InitDetection> => {
   const remoteUrl = await deps.remoteUrl();
@@ -52,7 +51,7 @@ const installBody = (secrets: readonly string[], manual: readonly string[]): str
 export const installFactory = async (deps: InitDeps, answers: InstallAnswers, { ticket }: { readonly ticket: string }): Promise<InstallResult> => {
   const adapters = adaptersFor(answers);
   const tickets = deps.tickets(adapters);
-  const provider = PROVIDER_NAMES[answers.ticketProvider.kind];
+  const provider = TICKET_PROVIDER_NAMES[answers.ticketProvider.kind];
   const access = await tickets.checkAccess(ticket);
   const missing = [...(access.comment ? [] : ['comment on']), ...(access.transition ? [] : ['change the status of'])];
   if (missing.length > 0) {

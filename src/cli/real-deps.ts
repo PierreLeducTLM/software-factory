@@ -5,10 +5,11 @@ import { createBitbucketSourceControl } from '../adapters/bitbucket-source-contr
 import { createGitHubSourceControl } from '../adapters/github-source-control.js';
 import { createFetchHttp, sleep, withRateLimitRetry, type Http } from '../adapters/http.js';
 import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
+import { createLinearTicketProvider } from '../adapters/linear-ticket-provider.js';
 import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, type CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
-import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, type AdaptersConfig, type ConfigResult } from '../config/project-config.js';
+import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, TICKET_PROVIDER_NAMES, type AdaptersConfig, type ConfigResult, type SupportedTicketProvider } from '../config/project-config.js';
 import type { LoopDeps } from '../factory/build-loop.js';
 import { assessSpec } from '../factory/risk.js';
 import { createDemoViewSource } from '../view/demo.js';
@@ -42,6 +43,8 @@ const fromEnv = (env: Options['env'], name: string): string => {
 };
 
 const GITHUB_API = 'https://api.github.com';
+const LINEAR_API = 'https://api.linear.app/graphql';
+const LINEAR_UPLOADS = 'https://uploads.linear.app';
 const BITBUCKET_API = 'https://api.bitbucket.org/2.0';
 
 const createSourceControl = ({ source_control: source }: AdaptersConfig, env: Options['env'], http: Http): SourceControl => {
@@ -57,9 +60,34 @@ const createSourceControl = ({ source_control: source }: AdaptersConfig, env: Op
   });
 };
 
+type TicketProviderEntry = AdaptersConfig['ticket_providers'][number];
+
+type SupportedEntry = TicketProviderEntry & { readonly kind: SupportedTicketProvider };
+
+const isSupported = (entry: TicketProviderEntry): entry is SupportedEntry => entry.kind === 'jira' || entry.kind === 'linear';
+
+const supportedProvider = (adapters: AdaptersConfig): SupportedEntry => {
+  const provider = adapters.ticket_providers.find(isSupported);
+  if (provider === undefined) throw new Error('No supported ticket provider is configured. Only jira and linear are supported so far');
+  return provider;
+};
+
+const createLinearProvider = ({ team, project, token_env: tokenEnv }: TicketProviderEntry, adapters: AdaptersConfig, env: Options['env'], http: Http): TicketProvider => {
+  if (team === undefined || tokenEnv === undefined) throw new Error('The linear ticket provider needs team and token_env in .factory/adapters.yaml');
+  return createLinearTicketProvider({
+    apiUrl: LINEAR_API,
+    uploadsUrl: LINEAR_UPLOADS,
+    token: fromEnv(env, tokenEnv),
+    team,
+    ...(project === undefined ? {} : { project }),
+    repository: adapters.repository,
+    http,
+  });
+};
+
 const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], http: Http): TicketProvider => {
-  const provider = adapters.ticket_providers.find((candidate) => candidate.kind === 'jira');
-  if (provider === undefined) throw new Error('No supported ticket provider is configured. Only jira is supported so far');
+  const provider = supportedProvider(adapters);
+  if (provider.kind === 'linear') return createLinearProvider(provider, adapters, env, http);
   const { base_url: baseUrl, filter, token_env: tokenEnv, email_env: emailEnv } = provider;
   if (baseUrl === undefined || filter === undefined || tokenEnv === undefined || emailEnv === undefined) {
     throw new Error('The jira ticket provider needs base_url, filter, token_env and email_env in .factory/adapters.yaml');
@@ -82,7 +110,7 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
   const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
   const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
   return createViewSource({
-    providers: [{ name: 'Jira', provider: createTicketProvider(adapters, env, http) }],
+    providers: [{ name: TICKET_PROVIDER_NAMES[supportedProvider(adapters).kind], provider: createTicketProvider(adapters, env, http) }],
     config,
     repository: adapters.repository,
     machine: hostname(),

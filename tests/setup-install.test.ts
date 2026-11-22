@@ -73,6 +73,25 @@ describe('the files of an install', () => {
     expect(buildInstall(getAnswers()).files['.factory/adapters.yaml']).not.toContain('username_env');
   });
 
+  it('writes a Linear connection with its team, its project when one is set, and only the API key to store', () => {
+    const linear = getAnswers({ ticketProvider: { kind: 'linear', team: 'PAY', project: 'Billing service', tokenEnv: 'LINEAR_API_KEY' } });
+    const { files, secrets } = buildInstall(linear);
+    const parsed = parseAdaptersConfig(files['.factory/adapters.yaml'] ?? '');
+    const teamOnly = buildInstall(getAnswers({ ticketProvider: { kind: 'linear', team: 'PAY', tokenEnv: 'LINEAR_API_KEY' } }));
+
+    expect(parsed.ok && parsed.value.ticket_providers).toEqual([{ kind: 'linear', team: 'PAY', project: 'Billing service', token_env: 'LINEAR_API_KEY' }]);
+    expect(teamOnly.files['.factory/adapters.yaml']).not.toContain('project');
+    expect(secrets).toEqual(['FACTORY_LINEAR_API_KEY']);
+    expect(files['.github/workflows/factory.yml']).toContain('  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}');
+    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines', install: 'npm i -g software-factory' } })).secrets).toEqual(['LINEAR_API_KEY', 'GH_TOKEN']);
+  });
+
+  it('refuses a Linear connection without a team', () => {
+    const { repository, mainBranch, sourceControl } = getAnswers();
+
+    expect(() => parseConnection(JSON.stringify({ repository, mainBranch, sourceControl, ticketProvider: { kind: 'linear', tokenEnv: 'LINEAR_API_KEY' } }))).toThrow(/answers: ticketProvider\.team: /);
+  });
+
   it('adds the folder for agent check rubrics', () => {
     expect(buildInstall(getAnswers()).files['.factory/checks/README.md']).toContain('# Agent check rubrics');
   });
