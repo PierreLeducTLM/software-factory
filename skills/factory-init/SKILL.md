@@ -43,7 +43,7 @@ Write the answers to a JSON file outside the repository, such as `$TMPDIR/factor
 | `mainBranch` | the branch you are on |
 | `checks` | each kept check: `{ id, category, source, run or job, blocking, timeout }`, with the timeout from step 1. Leave out the checks to add: they come in their own pull requests |
 | `sensitivePaths` | step 2 |
-| `ticketProvider` | `{ kind: "jira", baseUrl, filter, tokenEnv, emailEnv }`. The filter selects this repository's tickets. The two `*Env` fields are names of environment variables, never the token itself |
+| `ticketProvider` | Jira: `{ kind: "jira", baseUrl, filter, tokenEnv, emailEnv }`. The filter is a JQL fragment that selects this repository's tickets. Linear: `{ kind: "linear", team, project?, tokenEnv }`. `team` is the team key that prefixes ticket keys, such as `PAY`; `project` narrows to one Linear project by name, for a team shared by several repositories. The `*Env` fields are names of environment variables, never the token itself |
 | `sourceControl` | `{ kind: "github" or "bitbucket", tokenEnv, usernameEnv? }` |
 | `ci` | `{ system, workflow, install }`: `system` from `detection.ci.system`; `workflow`, the name of the CI workflow that builds main, which the revert step follows; `install`, `npm install --global software-factory@<engine>` |
 | `watch` | only with a staging deploy: `{ checks, duration, interval, environment }` |
@@ -59,7 +59,7 @@ It reads the provider's statuses and matches each factory state by name and cate
 
 ## 5. Check the service account and open the install pull request
 
-The CI steps write to the tickets as a service account. Ask the person for the account, and to export its token and email into the variables named in `ticketProvider`. Ask for one ticket key the filter returns.
+The CI steps write to the tickets as a service account. Ask the person for the account, and to export its credentials into the variables named in `ticketProvider`: on Jira an API token and the account's email, on Linear a personal API key of that account. Ask for one ticket key the filter, or the Linear team and project, returns.
 
 ```bash
 factory init install --answers <file> --ticket <KEY> --json
@@ -69,7 +69,7 @@ factory init install --answers <file> --ticket <KEY> --json
 |---|---|
 | `ok: true` | Share the `url`. List the `secrets` to store in the CI secret store before merging, and the `manual` steps |
 | `reason: "service_account"` | Show the `message`: it names the missing permission. No pull request was opened. Run the command again once the permission is granted |
-| `reason: "claim_lock"` | The workflow lets a claimed ticket be claimed again. Ask the provider's admin to remove that transition, then run the command again. No pull request was opened |
+| `reason: "claim_lock"` | The Jira workflow lets a claimed ticket be claimed again. Ask the Jira admin to remove that transition, then run the command again. No pull request was opened. Linear never gives this answer: the factory checks each claim itself |
 | an error | Show it. An `answers: <field>` error names the field to fix in the answers file |
 
 The install pull request holds `.factory/factory.yaml`, `.factory/adapters.yaml`, `.factory/checks/` and, on GitHub, the factory workflow. Every risk level starts in shadow mode.
