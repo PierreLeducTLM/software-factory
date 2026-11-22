@@ -192,6 +192,13 @@ The score becomes a level at `risk.thresholds` (medium 3, high 6 by default), so
 - **Cost per merge is shown as "Not reported".** Orca does not report cost (A-finding), so there is nothing to sum.
 - **The shadow-mode suggestion counts the latest changes of a level in the chosen period.** A threshold of 20 may need the 30- or 90-day period to be reached.
 
+### D20. Setup commands, the engine pin and upgrades
+- **`factory doctor` and `factory migrate` work on a broken setup.** They do not load the configuration up front, since reporting a broken one is their job. They reach the ticket provider or the source control only for the step that needs it: `--ticket` for the doctor, the pull request for migrate.
+- **The pin names a release.** `engine: 0.1.0` in `factory.yaml` accepts any 0.1.x engine. Every ticket command and CI step refuses a project pinned to another release, and a CI step then skips without failing the build, as in D19. This is what keeps one project's upgrade from changing another's behavior.
+- **`factory migrate` is the upgrade.** It opens one pull request that pins the running engine and applies any schema migration, on a `factory/upgrade-engine-<version>` branch cut from the latest main in a temporary worktree, so the developer's checkout is untouched. Until it is merged, the project keeps its pin. It never moves a project to an older release. When the schema does not change, only the `engine:` line changes, so comments and layout survive. A schema migration rewrites the file.
+- **Doctor's exit code.** 0 when nothing drifted, 1 when it found drift, 2 for misuse, so a script or a scheduled CI job can stop on drift.
+- **The repository is the plugin.** `.claude-plugin/plugin.json` and the `skills/` folder make it installable with `/plugin`. The plugin, the npm package and the engine carry one version, which a test enforces. The plugin does not install the `factory` command: it must be on the PATH, and the pin check catches an install of the wrong release.
+
 ### D15. Adapter choices found while building
 - **Repository scoping is the adapter's configuration, not a search criterion.** A ticket-provider adapter is created for one repository with one filter, and every ticket it returns names that repository.
 - **The refine skill is written from scratch, and there is no revalidate skill.** The first design doc assumed drafts of `openspec-refine` and `openspec-revalidate` existed. They do not, and OpenSpec ships neither. The factory gets one skill, `factory-refine`, named for the factory so it is not mistaken for an OpenSpec skill. Revalidation is a step `factory run` performs through the CLI, not a skill.
