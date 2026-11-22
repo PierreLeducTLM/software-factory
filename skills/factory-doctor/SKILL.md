@@ -1,6 +1,6 @@
 ---
 name: factory-doctor
-description: Check a project's factory setup for drift and fix what it finds through reviewed pull requests. Use when the user says "/factory-doctor", "factory doctor", asks whether the factory setup is healthy, renamed a CI job, sees a factory CI step skipped, upgraded the factory engine, or gets "This project pins factory engine" from a factory command.
+description: Check the factory setup for drift and fix it through pull requests. Use when the user says /factory-doctor or a factory command reports a drift or pin problem.
 ---
 
 # Factory doctor
@@ -28,7 +28,7 @@ Group the findings by kind. Quote each message as it is: it names the file, fiel
 | `config` | `factory.yaml` or `adapters.yaml` is missing or invalid | Missing: run `/factory-init`. Invalid: fix the named field with `/factory-workflow` |
 | `secret` | A token is written in `adapters.yaml` | Treat the token as leaked: ask the person to revoke it now. Then replace the value with a `*_env` variable name through `/factory-workflow`, and store the new token in the CI secret store |
 | `schema` | The configuration uses an older schema than this engine | Run `factory migrate` (see step 3) |
-| `engine` | The project pins another engine release | Pinned release older: run `factory migrate`. Pinned release newer: install that engine version; never move a project back |
+| `engine` | The factory is not installed in the project's `.factory/` folder, its pin disagrees with the engine files, or the project pins another engine release | Run `factory migrate` and merge the pull request it opens. Never move a project back to an older engine. The project's own copy of the engine runs when it is installed, so a newer pin needs nothing on this machine |
 | `ci_job` | A `source: ci` check reads a CI job that no CI file defines | Ask whether the job was renamed or removed. Renamed: point the check's `job` at the new name with `/factory-workflow`. Removed: remove the check or make it local, also with `/factory-workflow` |
 | `unused_script` | The project has a script that no gate runs | Offer to add it as a check with `/factory-workflow`. It is fine to leave it out: say so and move on |
 | `ci_step` | The pipeline does not run a factory CI step | Show where the step goes and open a pull request that adds it. Without `record-merge`, merges are never recorded |

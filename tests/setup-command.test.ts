@@ -261,13 +261,26 @@ describe('factory init', () => {
     const ci = { ...NEW_PROJECT, 'bitbucket-pipelines.yml': 'pipelines:\n  default:\n    - step:\n        name: Test\n        script:\n          - pnpm test\n' };
     const setup = getSetup(ci, { statuses: ALL_STATUSES, runs: [{ exitCode: 1, output: 'x', timedOut: false }, { exitCode: 1, output: 'x', timedOut: false }] });
 
-    const { out, errors } = await setup.run('init', '--ticket', 'PAY-1', '--base-url', 'https://acme.atlassian.net', '--filter', 'project = PAY', '--token-env', 'T', '--email-env', 'E', '--repository', 'acme/other', '--main-branch', 'develop', '--source-control', 'bitbucket', '--source-token-env', 'BT', '--source-username-env', 'BU', '--sensitive-paths', 'src/auth/**,db/**', '--statuses', 'blocked=Blocked', '--verify');
+    const { out, errors } = await setup.run('init', '--ticket', 'PAY-1', '--base-url', 'https://acme.atlassian.net', '--filter', 'project = PAY', '--token-env', 'T', '--email-env', 'E', '--repository', 'acme/other', '--main-branch', 'develop', '--source-control', 'bitbucket', '--source-token-env', 'BT', '--source-username-env', 'BU', '--sensitive-paths', 'src/auth/**,db/**', '--statuses', 'blocked=Blocked', '--project', 'Billing', '--verify');
 
     expect(errors).toEqual([]);
     expect(out[1]).toBe('Tracker: Jira, https://acme.atlassian.net, key in T');
     expect(out[2]).toBe('Repository: acme/other on bitbucket, branch develop, token in BT');
     expect(out[3]).toMatch(/^Checks, blocking: .* Advisory, because they fail or are flaky on this branch: test/);
     expect(out).toContain('Store these CI secrets: FACTORY_REPO_TOKEN, T, E, BT, BU');
+    expect(setup.published[0]?.files['.factory/factory.yaml']).toContain('src/auth/**');
+    expect(setup.published[0]?.files['.factory/adapters.yaml']).toContain('base_url: https://acme.atlassian.net');
+  });
+
+  it('leaves out the steps by hand when CI does everything, and takes the statuses the person chose', async () => {
+    const few = ['To refine', 'Backlog', 'Doing', 'Done', 'Ready for Dev'].map((name) => ({ name, category: 'todo' as const }));
+    const ci = { ...NEW_PROJECT, '.github/workflows/ci.yml': 'name: CI\njobs:\n  t:\n    steps:\n      - run: pnpm test\n' };
+
+    const { out, errors } = await getSetup(ci, { statuses: few }).run('init', '--ticket', 'PAY-1', '--team', 'PAY', '--source-control', 'github', '--statuses', 'spec_review=Backlog;in_review=Doing;blocked=Doing');
+
+    expect(errors).toEqual([]);
+    expect(out).not.toContain('By hand:');
+    expect(out).toContain('Statuses: to_refine=To refine, spec_review=Backlog, ready_for_dev=Ready for Dev, in_development=Doing, in_review=Doing, blocked=Doing, done=Done');
   });
 
   it('answers with the result as JSON', async () => {
@@ -296,7 +309,8 @@ describe('factory init', () => {
 
   it.each([
     [['--statuses', 'sleeping=Done'], 'Unknown state "sleeping" in --statuses. Use: to_refine, spec_review, ready_for_dev, in_development, in_review, blocked, done'],
-    [['--statuses', 'done'], 'Unknown state "done" in --statuses. Use: to_refine, spec_review, ready_for_dev, in_development, in_review, blocked, done'],
+    [['--statuses', 'done'], 'The state "done" in --statuses needs a status: done=<status>'],
+    [['--statuses', 'done='], 'The state "done" in --statuses needs a status: done=<status>'],
     [['--source-control', 'gitlab'], 'Unknown source control "gitlab". Use github or bitbucket'],
   ])('refuses a wrong option (%j)', async (option, message) => {
     expect(await getSetup(NEW_PROJECT, { statuses: ALL_STATUSES }).run('init', '--ticket', 'PAY-1', '--team', 'PAY', ...option)).toEqual({ code: 1, out: [], errors: [message] });

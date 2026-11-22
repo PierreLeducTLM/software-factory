@@ -11,7 +11,7 @@ import { ENGINE_VERSION } from '../src/version.js';
 const STATUSES: readonly ProviderStatus[] = ['Backlog', 'Spec review', 'Ready for Dev', 'In Progress', 'In Review', 'Blocked', 'Done'].map((name) => ({ name, category: 'todo' }));
 
 const PROJECT: Readonly<Record<string, string>> = {
-  'package.json': JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .', build: 'tsc', 'test:e2e': 'playwright test', format: 'prettier --write .', 'format:check': 'prettier --check .' }, devDependencies: { typescript: '5' } }),
+  'package.json': JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .', typecheck: 'tsc --noEmit', build: 'tsc', 'test:e2e': 'playwright test', format: 'prettier --write .', 'format:check': 'prettier --check .', audit: 'pnpm audit' }, devDependencies: { typescript: '5' } }),
   'pnpm-lock.yaml': '',
 };
 
@@ -69,6 +69,7 @@ const getInit = (world: World = {}) => {
   return { deps, reached, published, opened, connections };
 };
 
+const JIRA_NO_FILTER: InitInput = { ticket: 'PAY-1', baseUrl: 'https://acme.atlassian.net', verify: false };
 const LINEAR: InitInput = { ticket: 'PAY-1', team: 'PAY', verify: false };
 const JIRA: InitInput = { ticket: 'PAY-1', baseUrl: 'https://acme.atlassian.net', filter: 'project = PAY', verify: false };
 
@@ -116,9 +117,23 @@ describe('setting a project up in one step', () => {
     expect(factoryOf(published).checks.map((check) => ({ id: check.id, blocking: check.blocking, timeout: check.timeout, run: 'run' in check ? check.run : undefined }))).toEqual([
       { id: 'test', blocking: true, timeout: '10m', run: 'pnpm run test' },
       { id: 'lint', blocking: true, timeout: '5m', run: 'pnpm run lint' },
+      { id: 'typecheck', blocking: true, timeout: '5m', run: 'pnpm run typecheck' },
       { id: 'format-check', blocking: true, timeout: '2m', run: 'pnpm run format:check' },
+      { id: 'audit', blocking: true, timeout: '10m', run: 'pnpm run audit' },
       { id: 'build', blocking: true, timeout: '10m', run: 'pnpm run build' },
       { id: 'test-e2e', blocking: true, timeout: '15m', run: 'pnpm run test:e2e' },
+    ]);
+  });
+
+  it('keeps the checks of the CI as they are, by job, with the timeout of a CI job', async () => {
+    const { deps, published } = getInit({ files: WITH_CI });
+
+    await initProject(deps, LINEAR);
+
+    const ci = factoryOf(published).checks.filter((check) => 'source' in check && check.source === 'ci');
+    expect(ci.map((check) => ({ id: check.id, blocking: check.blocking, timeout: check.timeout, job: 'job' in check ? check.job : undefined }))).toEqual([
+      { id: 'tests', blocking: true, timeout: '15m', job: 'tests' },
+      { id: 'security-scan', blocking: true, timeout: '15m', job: 'Security scan' },
     ]);
   });
 
@@ -165,6 +180,7 @@ describe('setting a project up in one step', () => {
     const jira = getInit();
 
     expect(await initProject(none.deps, { ticket: 'PAY-1', verify: false })).toEqual({ ok: false, reason: 'missing', missing: ['--team (Linear), or --base-url and --filter (Jira)'], message: 'Missing: --team (Linear), or --base-url and --filter (Jira)' });
+    expect(await initProject(getInit({ remoteUrl: undefined }).deps, JIRA_NO_FILTER)).toMatchObject({ message: 'Missing: --filter (Jira); --repository; --source-control github|bitbucket' });
     expect(await initProject(jira.deps, { ticket: 'PAY-1', baseUrl: 'https://acme.atlassian.net', verify: false })).toMatchObject({ ok: false, reason: 'missing', missing: ['--filter (Jira)'] });
     expect(await initProject(partial.deps, { ...LINEAR, baseUrl: 'https://acme.atlassian.net' })).toMatchObject({ ok: false, reason: 'missing', missing: ['--team or --base-url, not both'] });
     expect([...none.connections, ...jira.connections, ...partial.connections]).toEqual([]);
@@ -206,8 +222,16 @@ describe('matching the statuses while setting up', () => {
     const result = await initProject(deps, LINEAR);
 
     expect(result).toMatchObject({ ok: false, reason: 'statuses', unmatched: ['spec_review', 'in_review', 'blocked'], available: ['Backlog', 'Ready for Dev', 'Doing', 'Done'] });
-    expect(result).toMatchObject({ message: expect.stringContaining('--statuses "spec_review=<status>;in_review=<status>;blocked=<status>"') });
+    expect(result).toMatchObject({ message: 'No status matches spec_review, in_review, blocked. Choose one for each with --statuses "spec_review=<status>;in_review=<status>;blocked=<status>". The tracker has: Backlog, Ready for Dev, Doing, Done.' });
     expect([...published, ...opened]).toEqual([]);
+  });
+
+  it('asks only about the states the person did not already choose', async () => {
+    const { deps } = getInit({ statuses: FEW });
+
+    const result = await initProject(deps, { ...LINEAR, statuses: { spec_review: 'Backlog' } });
+
+    expect(result).toMatchObject({ ok: false, unmatched: ['in_review', 'blocked'], message: expect.stringContaining('No status matches in_review, blocked. Choose one for each with --statuses "in_review=<status>;blocked=<status>"') });
   });
 
   it('goes on with the statuses the person chose for the ones it could not match', async () => {
@@ -224,23 +248,27 @@ describe('matching the statuses while setting up', () => {
 
     const result = await initProject(deps, { ...LINEAR, statuses: { blocked: 'On ice' } });
 
-    expect(result).toMatchObject({ ok: false, reason: 'statuses', message: expect.stringContaining('"On ice"') });
+    expect(result).toEqual({ ok: false, reason: 'statuses', unmatched: [], available: STATUSES.map((status) => status.name), message: 'The tracker has no status "On ice". It has: Backlog, Spec review, Ready for Dev, In Progress, In Review, Blocked, Done.' });
     expect(published).toEqual([]);
   });
 });
 
 describe('measuring the checks while setting up', () => {
   it('runs each check when asked, makes the failing and the flaky ones advisory, and sets timeouts from the measure', async () => {
-    const { deps, published, reached } = getInit({ runs: { 'pnpm run lint': [FAIL, FAIL], 'pnpm run build': [FAIL, PASS] } });
+    const { deps, published, reached } = getInit({ files: WITH_CI, runs: { 'pnpm run lint': [FAIL, FAIL], 'pnpm run build': [FAIL, PASS] } });
 
     await initProject(deps, { ...LINEAR, verify: true });
 
     expect(factoryOf(published).checks.map(({ id, blocking, timeout }) => ({ id, blocking, timeout }))).toEqual([
       { id: 'test', blocking: true, timeout: '30s' },
       { id: 'lint', blocking: false, timeout: '30s' },
+      { id: 'typecheck', blocking: true, timeout: '30s' },
       { id: 'format-check', blocking: true, timeout: '30s' },
+      { id: 'audit', blocking: true, timeout: '30s' },
       { id: 'build', blocking: false, timeout: '30s' },
       { id: 'test-e2e', blocking: true, timeout: '30s' },
+      { id: 'tests', blocking: true, timeout: '15m' },
+      { id: 'security-scan', blocking: true, timeout: '15m' },
     ]);
     expect(reached).toContain('pnpm run lint');
   });
@@ -274,6 +302,22 @@ describe('the CI of the project while setting up', () => {
     await initProject(deps, LINEAR);
 
     expect(published[0]?.files['.github/workflows/factory.yml']).toContain('workflows: ["CI"]');
+  });
+
+  it('does not mistake its own workflow for the one that builds main, when it is installed again', async () => {
+    const { deps, published } = getInit({ files: { ...PROJECT, '.github/workflows/factory.yml': 'name: Factory\non: push\njobs:\n  record-merge:\n    steps:\n      - run: factory record-merge\n', '.github/workflows/build.yml': 'name: Build\non: push\njobs:\n  site:\n    steps:\n      - run: echo hi\n' } });
+
+    await initProject(deps, LINEAR);
+
+    expect(published[0]?.files['.github/workflows/factory.yml']).toContain('workflows: ["Build"]');
+  });
+
+  it('follows the only workflow of the project even when none of its jobs is a check', async () => {
+    const { deps, published } = getInit({ files: { ...PROJECT, '.github/workflows/build.yml': 'name: Build\non: push\njobs:\n  site:\n    steps:\n      - run: echo hi\n' } });
+
+    await initProject(deps, LINEAR);
+
+    expect(published[0]?.files['.github/workflows/factory.yml']).toContain('workflows: ["Build"]');
   });
 
   it('leaves the revert step out, and says so, when it cannot tell which workflow builds main', async () => {
@@ -314,7 +358,7 @@ describe('what setting up refuses', () => {
       summary: [
         'Tracker: Linear, team PAY, key in LINEAR_API_KEY',
         'Repository: acme/billing-service on github, branch trunk, token in GH_TOKEN',
-        'Checks, all blocking: test, lint, format-check, build, test-e2e',
+        'Checks, all blocking: test, lint, typecheck, format-check, audit, build, test-e2e',
         'Statuses: to_refine=Backlog, spec_review=Spec review, ready_for_dev=Ready for Dev, in_development=In Progress, in_review=In Review, blocked=Blocked, done=Done',
         'Every risk level starts in shadow mode, with no sensitive paths and no staging watch. Change them later with /factory-workflow.',
       ],
@@ -322,10 +366,10 @@ describe('what setting up refuses', () => {
   });
 
   it('names the advisory checks in the summary', async () => {
-    const { deps } = getInit({ runs: { 'pnpm run lint': [FAIL, FAIL] } });
+    const { deps } = getInit({ runs: { 'pnpm run lint': [FAIL, FAIL], 'pnpm run build': [FAIL, PASS] } });
 
     const result = await initProject(deps, { ...LINEAR, verify: true });
 
-    expect(result).toMatchObject({ ok: true, summary: expect.arrayContaining(['Checks, blocking: test, format-check, build, test-e2e. Advisory, because they fail or are flaky on this branch: lint']) });
+    expect(result).toMatchObject({ ok: true, summary: expect.arrayContaining(['Checks, blocking: test, typecheck, format-check, audit, test-e2e. Advisory, because they fail or are flaky on this branch: lint, build']) });
   });
 });

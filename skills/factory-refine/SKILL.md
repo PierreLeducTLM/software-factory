@@ -1,6 +1,7 @@
 ---
 name: factory-refine
-description: Refine a ticket's draft spec until it can be built with no further questions, then get it approved. Use when the user wants to refine a ticket, answer a spec's open questions, get a ticket to Ready for Dev, or handle a ticket the factory sent back. Also use when the user says "factory refine" or "/factory-refine <KEY>".
+description: Refine a ticket's draft spec and get it approved. Use when the user wants to refine a ticket or answer a spec's open questions.
+argument-hint: "[KEY]"
 ---
 
 # Factory refine

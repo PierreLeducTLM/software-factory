@@ -1,6 +1,6 @@
 ---
 name: factory-workflow
-description: Change the factory workflow of a project, such as adding, removing or tuning a check, changing the risk policy or the staging watch, through a validated and reviewed pull request. Use when the user says "/factory-workflow", "factory workflow", "add a check to the factory", "make this check advisory", "change the factory pipeline", or a factory doctor finding suggests /factory-workflow.
+description: Change the project's factory checks, risk policy or staging watch through a pull request. Use when the user says /factory-workflow or wants to add or tune a check.
 ---
 
 # Factory workflow

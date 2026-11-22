@@ -74,9 +74,24 @@ const STATES: readonly FactoryState[] = ['to_refine', 'spec_review', 'ready_for_
 
 const statesOf = (text: string): Readonly<Partial<Record<FactoryState, string>>> | string => {
   const entries = text.split(';').map((pair) => pair.split('='));
-  const wrong = entries.find(([state, status]) => !STATES.some((known) => known === state) || status === undefined || status === '');
-  if (wrong !== undefined) return `Unknown state "${wrong[0]}" in --statuses. Use: ${STATES.join(', ')}`;
-  return Object.fromEntries(entries.map(([state, status]) => [state, status]));
+  const unknown = entries.find(([state]) => !STATES.some((known) => known === state));
+  if (unknown !== undefined) return `Unknown state "${unknown[0]}" in --statuses. Use: ${STATES.join(', ')}`;
+  const bare = entries.find(([, status]) => status === undefined || status === '');
+  if (bare !== undefined) return `The state "${bare[0]}" in --statuses needs a status: ${bare[0]}=<status>`;
+  return Object.fromEntries(entries);
+};
+
+const TEXT_FLAGS: Readonly<Record<string, keyof InitInput>> = {
+  '--team': 'team',
+  '--project': 'project',
+  '--base-url': 'baseUrl',
+  '--filter': 'filter',
+  '--token-env': 'tokenEnv',
+  '--email-env': 'emailEnv',
+  '--repository': 'repository',
+  '--main-branch': 'mainBranch',
+  '--source-token-env': 'sourceTokenEnv',
+  '--source-username-env': 'sourceUsernameEnv',
 };
 
 const initInput = (flags: Flags): InitInput | string => {
@@ -85,24 +100,11 @@ const initInput = (flags: Flags): InitInput | string => {
   if (typeof chosen === 'string') return chosen;
   const control = optional(flags, '--source-control');
   if (control !== undefined && control !== 'github' && control !== 'bitbucket') return `Unknown source control "${control}". Use github or bitbucket`;
-  const text = (flag: string, key: keyof InitInput): Partial<InitInput> => {
-    const given = optional(flags, flag);
-    return given === undefined ? {} : { [key]: given };
-  };
   const paths = optional(flags, '--sensitive-paths');
   return {
     ticket: value(flags, '--ticket'),
     verify: flags.switches.includes('--verify'),
-    ...text('--team', 'team'),
-    ...text('--project', 'project'),
-    ...text('--base-url', 'baseUrl'),
-    ...text('--filter', 'filter'),
-    ...text('--token-env', 'tokenEnv'),
-    ...text('--email-env', 'emailEnv'),
-    ...text('--repository', 'repository'),
-    ...text('--main-branch', 'mainBranch'),
-    ...text('--source-token-env', 'sourceTokenEnv'),
-    ...text('--source-username-env', 'sourceUsernameEnv'),
+    ...Object.fromEntries(Object.entries(TEXT_FLAGS).flatMap(([flag, key]) => (flag in flags.values ? [[key, value(flags, flag)]] : []))),
     ...(control === undefined ? {} : { sourceControl: control }),
     ...(statuses === undefined ? {} : { statuses: chosen }),
     ...(paths === undefined ? {} : { sensitivePaths: paths.split(',') }),
@@ -139,7 +141,7 @@ const COMMANDS: Readonly<Record<string, Spec & { readonly run: Run }>> = {
   migrate: { valued: NONE, required: NONE, switches: NONE, run: async (_flags, deps) => upgradeReply(await upgradeProject(deps, {})) },
   'init detect': { valued: NONE, required: NONE, switches: ['--verify'], run: async (flags, deps) => detectReply(await detectForInit(deps, { verify: flags.switches.includes('--verify') })) },
   init: {
-    valued: ['--team', '--project', '--base-url', '--filter', '--token-env', '--email-env', '--repository', '--main-branch', '--source-control', '--source-token-env', '--source-username-env', '--statuses', '--sensitive-paths'],
+    valued: [...Object.keys(TEXT_FLAGS), '--source-control', '--statuses', '--sensitive-paths'],
     required: ['--ticket'],
     switches: ['--verify'],
     run: async (flags, deps) => {

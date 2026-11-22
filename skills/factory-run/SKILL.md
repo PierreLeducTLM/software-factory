@@ -1,6 +1,7 @@
 ---
 name: factory-run
-description: Build an approved ticket through the factory, from Ready for Dev to a pull request, with no questions to the person along the way. Use when the user says "/factory-run <KEY>", "/factory-next", "factory run", "build this ticket", "resume this ticket", or wants to retry a Blocked ticket.
+description: Build an approved ticket into a pull request. Use when the user says /factory-run or /factory-next, or wants to build or retry a ticket.
+argument-hint: "[KEY]"
 ---
 
 # Factory run
