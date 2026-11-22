@@ -17,12 +17,11 @@ Claude installs the plugin, asks you three things (your tracker, a ticket to tes
 
 **Before you paste it, have these ready:**
 
-1. **Your GitHub login can read this repository.** It is private. If `gh auth status` says you are logged in with access, you are set.
-2. **Your tracker's API key is exported in the shell Claude Code runs in.** Never paste the key into the chat.
+1. **Your tracker's API key is exported in the shell Claude Code runs in.** Never paste the key into the chat.
    - Linear: `export LINEAR_API_KEY=…`, a personal API key from Linear's settings, under API keys.
    - Jira: `export JIRA_TOKEN=…` and `export JIRA_EMAIL=…`, from [an Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
    - Use a dedicated service account, not your own. The factory's CI steps write to tickets as that account.
-3. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
+2. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
 
    | Factory state | Typical name |
    |---|---|
@@ -35,11 +34,11 @@ Claude installs the plugin, asks you three things (your tracker, a ticket to tes
    | done | Done |
 
    On **Jira**, a ticket must not be able to move from In development to In development, since that is what stops two people claiming one ticket. Remove any global transition into In development. The install checks it. On **Linear**, add the statuses to the team's workflow. Linear accepts any status change, so the factory checks each claim itself.
-4. **The tools are installed:** Node.js 22 or later, git, Claude Code, Orca (its `orca` command) and OpenSpec (`npm install --global @fission-ai/openspec`). Claude checks and tells you what is missing.
+3. **The tools are installed:** Node.js 22 or later, git, Claude Code, Orca (its `orca` command) and OpenSpec (`npm install --global @fission-ai/openspec`). Claude checks and tells you what is missing.
 
 **After the pull request is open,** you have two things to do:
 
-1. **Store the secrets it lists in your CI secret store.** `FACTORY_REPO_TOKEN` is a read-only token for this repository, so that CI can install the factory. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) limited to `PierreLeducTLM/software-factory`, with the permission **Contents: Read-only**. The other secrets are your tracker's credentials. On Bitbucket, store them as secured repository variables.
+1. **Store the secrets it lists in your CI secret store.** They are your tracker's credentials. On Bitbucket, store them as secured repository variables.
 2. **Merge the install pull request.** Until it is merged, nothing changes in the project.
 
 Then check it with `factory doctor --ticket PAY-142`, using a real ticket key. That command is available once the plugin is installed and Claude Code is restarted. Claude can run it for you right away.
@@ -56,7 +55,7 @@ If you are Claude and the user asked you to install the software factory from th
    claude plugin install software-factory@software-factory
    ```
 
-   If the marketplace is already added, run `claude plugin marketplace update software-factory` instead. A failure with a permission or "not found" error means the user's GitHub login cannot read the repository: tell them so and stop.
+   If the marketplace is already added, run `claude plugin marketplace update software-factory` instead.
 3. **Set the project up.** Run `claude plugin list --json`, and read the `installPath` of `software-factory@software-factory`. Read `<installPath>/skills/factory-init/SKILL.md` and follow it. It tells you what to ask, and the `factory` command it uses is `<installPath>/bin/factory`, since the plugin is not on the PATH until Claude Code restarts.
 4. **Finish** as that skill says: share the pull request and what it settled on, the secrets to store, and the steps to do by hand.
 

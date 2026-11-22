@@ -82,9 +82,9 @@ describe('the files of an install', () => {
 
     expect(parsed.ok && parsed.value.ticket_providers).toEqual([{ kind: 'linear', team: 'PAY', project: 'Billing service', token_env: 'LINEAR_API_KEY' }]);
     expect(teamOnly.files['.factory/adapters.yaml']).not.toContain('project');
-    expect(secrets).toEqual(['FACTORY_REPO_TOKEN', 'FACTORY_LINEAR_API_KEY']);
+    expect(secrets).toEqual(['FACTORY_LINEAR_API_KEY']);
     expect(files['.github/workflows/factory.yml']).toContain('  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}');
-    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' } })).secrets).toEqual(['FACTORY_REPO_TOKEN', 'LINEAR_API_KEY', 'GH_TOKEN']);
+    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' } })).secrets).toEqual(['LINEAR_API_KEY', 'GH_TOKEN']);
   });
 
   it('installs the engine in the project: its pin, a launcher that runs it, and a gitignore for its install', () => {
@@ -122,9 +122,9 @@ describe('the CI steps of an install on GitHub', () => {
     expect(workflow).toContain('  push:\n    branches: [main]\n  workflow_run:\n    workflows: ["CI"]\n    types: [completed]\n    branches: [main]\npermissions:');
     expect(workflow).toContain("    if: github.event_name == 'push'\n");
     expect(workflow).toContain("    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'\n");
-    expect(workflow).toContain('env:\n  FACTORY_REPO_TOKEN: ${{ secrets.FACTORY_REPO_TOKEN }}\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
+    expect(workflow).toContain('env:\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
     expect(workflow).toContain('          fetch-depth: 0\n');
-    expect(install.secrets).toEqual(['FACTORY_REPO_TOKEN', 'FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
     expect(install.manual).toEqual([]);
   });
 
@@ -162,8 +162,8 @@ describe('the CI steps of an install elsewhere', () => {
       'Add this after-script to the step that builds main:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then .factory/bin/factory revert --commit $BITBUCKET_COMMIT; fi',
     ]);
     expect(watched.manual[2]).toBe('Add this step after the deployment to staging:\n- step:\n    name: Factory watch\n    script:\n      - .factory/bin/factory watch --commit $BITBUCKET_COMMIT');
-    expect(install.secrets).toEqual(['FACTORY_REPO_TOKEN', 'JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN', 'BB_USER']);
-    expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['FACTORY_REPO_TOKEN', 'JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
+    expect(install.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN', 'BB_USER']);
+    expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
   });
 
   it('says what to run when the project has no CI', () => {

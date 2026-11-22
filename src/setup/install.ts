@@ -57,7 +57,6 @@ A rubric says, in plain language, what the reviewing agent must check and what p
 Add a check with \`/factory-workflow\`. It writes the rubric, validates the configuration and opens a pull request.
 `;
 
-const REPO_TOKEN = 'FACTORY_REPO_TOKEN';
 const FACTORY = '.factory/bin/factory';
 
 const secretName = (env: string): string => `FACTORY_${env}`;
@@ -136,7 +135,6 @@ const githubWorkflow = (answers: InstallAnswers): string => {
     '  contents: write',
     '  pull-requests: write',
     'env:',
-    `  ${REPO_TOKEN}: \${{ secrets.${REPO_TOKEN} }}`,
     ...providerEnvs(answers).map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
     `  ${sourceControl.tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`,
     'jobs:',
@@ -190,7 +188,7 @@ export const buildInstall = (answers: InstallAnswers): Install => {
       ...(system === 'none' ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
       ...(github && workflow === undefined ? ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] : []),
     ],
-    secrets: system === 'none' ? [] : [REPO_TOKEN, ...(github ? providerEnvs(answers).map(secretName) : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])])],
+    secrets: system === 'none' ? [] : [...(github ? providerEnvs(answers).map(secretName) : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])])],
   };
 };
 

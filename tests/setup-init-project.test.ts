@@ -91,7 +91,7 @@ describe('setting a project up in one step', () => {
 
     const result = await initProject(deps, LINEAR);
 
-    expect(result).toMatchObject({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_REPO_TOKEN', 'FACTORY_LINEAR_API_KEY'] });
+    expect(result).toMatchObject({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_LINEAR_API_KEY'] });
     expect(opened).toHaveLength(1);
     expect(adaptersOf(published)).toEqual({
       repository: 'acme/billing-service',
@@ -153,7 +153,7 @@ describe('setting a project up in one step', () => {
 
     const result = await initProject(deps, JIRA);
 
-    expect(result).toMatchObject({ ok: true, secrets: ['FACTORY_REPO_TOKEN', 'FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'] });
+    expect(result).toMatchObject({ ok: true, secrets: ['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'] });
     expect(adaptersOf(published).ticket_providers).toEqual([{ kind: 'jira', base_url: 'https://acme.atlassian.net', filter: 'project = PAY', token_env: 'JIRA_TOKEN', email_env: 'JIRA_EMAIL' }]);
   });
 

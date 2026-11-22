@@ -267,7 +267,7 @@ describe('factory init', () => {
     expect(out[1]).toBe('Tracker: Jira, https://acme.atlassian.net, key in T');
     expect(out[2]).toBe('Repository: acme/other on bitbucket, branch develop, token in BT');
     expect(out[3]).toMatch(/^Checks, blocking: .* Advisory, because they fail or are flaky on this branch: test/);
-    expect(out).toContain('Store these CI secrets: FACTORY_REPO_TOKEN, T, E, BT, BU');
+    expect(out).toContain('Store these CI secrets: T, E, BT, BU');
     expect(setup.published[0]?.files['.factory/factory.yaml']).toContain('src/auth/**');
     expect(setup.published[0]?.files['.factory/adapters.yaml']).toContain('base_url: https://acme.atlassian.net');
   });
@@ -280,7 +280,7 @@ describe('factory init', () => {
 
     expect(errors).toEqual([]);
     expect(out).not.toContain('By hand:');
-    expect(out.at(-1)).toMatch(/^Store these CI secrets: FACTORY_REPO_TOKEN/);
+    expect(out.at(-1)).toMatch(/^Store these CI secrets: FACTORY_/);
     expect(out).toContain('Statuses: to_refine=To refine, spec_review=Backlog, ready_for_dev=Ready for Dev, in_development=Doing, in_review=Doing, blocked=Doing, done=Done');
   });
 

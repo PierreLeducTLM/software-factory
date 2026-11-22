@@ -63,9 +63,9 @@ To look at what the command would find before it changes anything, run `factory 
 
 Share the pull request `url`, then the `summary` lines, so the person can say if something is wrong: the tracker, the repository, the checks and which are advisory, the statuses.
 
-Then give the two things to do before merging:
+Then give the things to do before merging:
 
-1. **Store the `secrets` in the CI secret store** (when the list is not empty). `FACTORY_REPO_TOKEN` is a read-only token for the factory's repository, so that CI can install the factory. The others are the tracker's credentials, for a dedicated service account.
+1. **Store the `secrets` in the CI secret store** (when the list is not empty). They are the tracker's credentials, for a dedicated service account.
 2. **Do the `manual` steps,** if any.
 
 The pull request holds `.factory/factory.yaml`, `.factory/adapters.yaml`, `.factory/package.json` (which pins the engine), `.factory/bin/factory` (which installs and runs it) and, on GitHub, the factory workflow. Every risk level starts in shadow mode, so a person merges each factory pull request.
