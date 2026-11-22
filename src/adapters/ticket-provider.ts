@@ -42,4 +42,5 @@ export interface TicketProvider {
   search(criteria: TicketSearch): Promise<readonly Ticket[]>;
   listStatuses(): Promise<readonly ProviderStatus[]>;
   checkAccess(key: string): Promise<Access>;
+  canReenter(request: { readonly key: string; readonly status: string }): Promise<boolean>;
 }

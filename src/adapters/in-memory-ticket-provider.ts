@@ -66,5 +66,10 @@ export const createInMemoryTicketProvider = ({ tickets, now, statuses, access = 
       if (find(key) === undefined) throw new Error(`Ticket ${key} was not found`);
       return access;
     },
+
+    canReenter: async ({ key }) => {
+      if (find(key) === undefined) throw new Error(`Ticket ${key} was not found`);
+      return false;
+    },
   };
 };

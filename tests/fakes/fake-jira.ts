@@ -21,6 +21,8 @@ type Options = {
   readonly pageSize?: number;
   readonly permissions?: { readonly comment: boolean; readonly transition: boolean };
   readonly extraStatuses?: readonly { readonly name: string; readonly statusCategory?: { readonly key: string } }[];
+  readonly globalTransitionsTo?: readonly string[];
+  readonly loopingStatuses?: readonly string[];
 };
 
 const jiraTime = (iso: string): string => iso.replace('Z', '.000+0000');
@@ -57,7 +59,7 @@ const matchesJql = (issue: Issue, jql: string, now: string): boolean => {
 
 const CATEGORY_KEYS: Readonly<Record<string, string>> = { 'To refine': 'new', 'Spec review': 'new', 'Ready for Dev': 'new', Done: 'done' };
 
-export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100, permissions = { comment: true, transition: true }, extraStatuses = [] }: Options) => {
+export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100, permissions = { comment: true, transition: true }, extraStatuses = [], globalTransitionsTo = [], loopingStatuses = [] }: Options) => {
   const issues: Issue[] = tickets.map((ticket) => ({
     key: ticket.key,
     summary: ticket.title,
@@ -127,12 +129,15 @@ export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100, permissi
     }
     if (rest === '/transitions' && request.method === 'GET') {
       return json(200, {
-        transitions: statuses.filter((name) => name !== issue.status).map((name) => ({ id: `to:${name}`, to: { name } })),
+        transitions: statuses.flatMap((name) => {
+          const global = globalTransitionsTo.includes(name);
+          return name === issue.status && !global && !loopingStatuses.includes(name) ? [] : [{ id: `to:${name}`, to: { name }, isGlobal: global }];
+        }),
       });
     }
     if (rest === '/transitions' && request.method === 'POST') {
       const target = (body as { transition: { id: string } }).transition.id.slice('to:'.length);
-      if (target === issue.status) return empty(400);
+      if (target === issue.status && !globalTransitionsTo.includes(target)) return empty(400);
       issue.status = target;
       issue.statusChanged = now();
       touch(issue);

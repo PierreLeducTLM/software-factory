@@ -28,7 +28,7 @@ const IssueSchema = z.object({
 });
 
 const SearchPageSchema = z.object({ issues: z.array(IssueSchema), nextPageToken: z.string().optional() });
-const TransitionsSchema = z.object({ transitions: z.array(z.object({ id: z.string(), to: z.object({ name: z.string() }) })) });
+const TransitionsSchema = z.object({ transitions: z.array(z.object({ id: z.string(), to: z.object({ name: z.string() }), isGlobal: z.boolean().optional() })) });
 const CommentSchema = z.object({ id: z.string(), body: z.string() });
 const PropertySchema = z.object({ value: FactoryPropertySchema });
 const ListedAttachmentsSchema = z.object({
@@ -208,6 +208,14 @@ export const createJiraTicketProvider = ({ baseUrl, email, token, repository, fi
       const response = await call('GET', `/rest/api/2/mypermissions?issueKey=${encodeURIComponent(issueKey)}&permissions=ADD_COMMENTS,TRANSITION_ISSUES`);
       const { ADD_COMMENTS: comment, TRANSITION_ISSUES: transition } = PermissionsSchema.parse(JSON.parse(response.body)).permissions;
       return { comment: comment.havePermission, transition: transition.havePermission };
+    },
+
+    canReenter: async ({ key: issueKey, status }) => {
+      const issue = await readIssue(issueKey);
+      if (issue === undefined) throw new Error(`Ticket ${issueKey} was not found`);
+      const { transitions } = TransitionsSchema.parse(JSON.parse((await call('GET', `${issuePath(issueKey)}/transitions`)).body));
+      const inStatus = issue.fields.status.name === status;
+      return transitions.some((transition) => transition.to.name === status && (inStatus || transition.isGlobal === true));
     },
   };
 };

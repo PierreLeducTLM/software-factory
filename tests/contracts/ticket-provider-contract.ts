@@ -206,5 +206,13 @@ export const describeTicketProviderContract = (
       expect(await provider.checkAccess('PAY-142')).toEqual({ comment: true, transition: true });
       await expect(provider.checkAccess('PAY-999')).rejects.toThrow();
     });
+
+    it('does not let a ticket move again into the status it is already in, which keeps a claim exclusive', async () => {
+      const { provider } = setup([getMockTicket({ status: 'In development' }), getMockTicket({ key: 'PAY-151' })]);
+
+      expect(await provider.canReenter({ key: 'PAY-142', status: 'In development' })).toBe(false);
+      expect(await provider.canReenter({ key: 'PAY-151', status: 'In development' })).toBe(false);
+      await expect(provider.canReenter({ key: 'PAY-999', status: 'In development' })).rejects.toThrow('PAY-999');
+    });
   });
 };

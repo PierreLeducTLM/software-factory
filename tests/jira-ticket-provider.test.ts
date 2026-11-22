@@ -52,6 +52,20 @@ describe('Jira ticket provider', () => {
     ]);
   });
 
+  it('sees that a global transition lets a claimed ticket be claimed again', async () => {
+    const { provider } = getSetup([getMockTicket({ status: 'In development' }), getMockTicket({ key: 'PAY-151' })], { fake: { globalTransitionsTo: ['In development'] } });
+
+    expect(await provider.canReenter({ key: 'PAY-142', status: 'In development' })).toBe(true);
+    expect(await provider.canReenter({ key: 'PAY-151', status: 'In development' })).toBe(true);
+    expect(await provider.canReenter({ key: 'PAY-151', status: 'Done' })).toBe(false);
+  });
+
+  it('sees a transition from a status to itself on a ticket in that status', async () => {
+    const { provider } = getSetup([getMockTicket({ status: 'In development' })], { fake: { loopingStatuses: ['In development'] } });
+
+    expect(await provider.canReenter({ key: 'PAY-142', status: 'In development' })).toBe(true);
+  });
+
   it('says whether the account can comment on and transition a ticket', async () => {
     const full = getSetup([getMockTicket()]);
     const readOnly = getSetup([getMockTicket()], { fake: { permissions: { comment: true, transition: false } } });
