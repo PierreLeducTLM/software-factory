@@ -64,10 +64,10 @@ Delivered as two new artifacts that replace the originals, which are left unchan
 
 ## 5. Phase 4: Portability
 
-- [ ] 5.1 Implement `/factory-init` detect, verify and coverage for the TypeScript and Django stacks, with a CI-files fallback, and verify the "Timeouts from measurements" and "Unsupported stack" scenarios
-- [ ] 5.2 Implement status and label matching, and verify the "All statuses match" scenario
-- [ ] 5.3 Deliver the install PR (with the record-merge and revert CI steps, and watch when enabled) and one PR per added check, including the service-account setup and permission check, and verify the "Missing type checker", "Project without staging" and "Service account cannot transition" scenarios
-- [ ] 5.4 Implement `/factory-workflow` (translate, validate, diff, run on main, PR), and verify the "New check fails on main" scenario
+- [x] 5.1 Implement `/factory-init` detect, verify and coverage for the TypeScript and Django stacks, with a CI-files fallback, and verify the "Timeouts from measurements" and "Unsupported stack" scenarios
+- [x] 5.2 Implement status and label matching, and verify the "All statuses match" scenario
+- [x] 5.3 Deliver the install PR (with the record-merge and revert CI steps, and watch when enabled) and one PR per added check, including the service-account setup and permission check, and verify the "Missing type checker", "Project without staging" and "Service account cannot transition" scenarios
+- [x] 5.4 Implement `/factory-workflow` (translate, validate, diff, run on main, PR), and verify the "New check fails on main" scenario
 - [x] 5.5 Implement `/factory-doctor` drift checks, including missing CI steps, the CI service account and secrets, and verify the "Renamed CI job" and "Token in config" scenarios
 - [x] 5.6 Package as a Claude Code plugin with version pinning and schema migrations, and verify the "Engine pinned" and "Upgrade with schema change" scenarios
 - [ ] 5.7 Pilot gate: a second project on the other stack is installed with no hand edits
