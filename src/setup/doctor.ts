@@ -1,11 +1,12 @@
 import type { Access } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult, type FactoryConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
-import { ENGINE_VERSION, enginePinMatches, isNewerPatch } from '../version.js';
+import { ENGINE_VERSION, enginePinMatches } from '../version.js';
 import { detectProject } from './detect.js';
 import { ENGINE_PACKAGE_PATH, enginePackage, LAUNCHER_PATH } from './engine-files.js';
 import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles } from './project-files.js';
+import { isNewerPatch } from './upgrade.js';
 import { verifyChecks } from './verify.js';
 
 export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' | 'unused_script' | 'ci_step' | 'ci_secret' | 'failing_check' | 'flaky_check' | 'service_account' | 'claim_lock';

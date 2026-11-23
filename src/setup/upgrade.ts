@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import { parseAdaptersConfig } from '../config/project-config.js';
-import { ENGINE_VERSION, enginePinMatches, isNewerPatch } from '../version.js';
+import { ENGINE_VERSION, enginePinMatches } from '../version.js';
 import { detectProject, mainBuildWorkflow } from './detect.js';
 import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
 import { factoryWorkflow, WORKFLOW_FILE, type FactoryWorkflow } from './install.js';
@@ -46,6 +46,10 @@ const isNewer = (pinned: string, running: string): boolean => {
   const [runningMajor = 0, runningMinor = 0] = release(running);
   return pinnedMajor > runningMajor || (pinnedMajor === runningMajor && pinnedMinor > runningMinor);
 };
+
+const patch = (version: string): number => Number(version.split('.')[2] ?? 0);
+
+export const isNewerPatch = (pinned: string, running: string): boolean => enginePinMatches(pinned, running) && patch(running) > patch(pinned);
 
 const pinned = (text: string, engine: string): string => text.replace(/^engine:.*/m, `engine: ${engine}`);
 
