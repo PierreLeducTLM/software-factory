@@ -12,6 +12,7 @@ const getWorld = (seed: readonly Ticket[]) => {
   const searches: TicketSearch[] = [];
   const calls: string[] = [];
   const failing = { on: false };
+  const gone = new Set<string>();
   const spy = <A extends unknown[], R>(name: string, method: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => {
     calls.push(name);
     return method(...args);
@@ -30,11 +31,11 @@ const getWorld = (seed: readonly Ticket[]) => {
     search: async (criteria) => {
       searches.push(criteria);
       if (failing.on) throw new Error('Jira answered 503 to POST /rest/api/3/search/jql');
-      return inner.search(criteria);
+      return (await inner.search(criteria)).filter((ticket) => !gone.has(ticket.key));
     },
   };
   const store = createViewStore({ providers: [{ name: 'Jira', provider }], states: STATUSES, now: () => clock.now, doneWindowDays: 7 });
-  return { store, inner, clock, searches, calls, failing };
+  return { store, inner, clock, searches, calls, failing, gone };
 };
 
 const keys = (tickets: readonly { readonly key: string }[]): readonly string[] => tickets.map((ticket) => ticket.key).toSorted();
@@ -163,6 +164,99 @@ describe('view store', () => {
     expect(reopened.snapshot()).toEqual({ tickets: [] });
     await reopened.refresh();
     expect(keys(reopened.snapshot().tickets)).toEqual(['A-1']);
+  });
+
+  it('forgets what it holds and reads every tracked ticket again, as on the first load, when reloaded', async () => {
+    const { store, clock, searches, gone } = getWorld([
+      getMockTicket({ key: 'A-1', status: 'Ready for Dev' }),
+      getMockTicket({ key: 'A-2', status: 'In development' }),
+      getMockTicket({ key: 'A-3', status: 'Done', updatedAt: '2026-11-20T10:00:00Z' }),
+    ]);
+    await store.refresh();
+    clock.now = '2026-11-21T08:00:10Z';
+    gone.add('A-2');
+
+    await store.reload();
+
+    const snapshot = store.snapshot();
+    expect(keys(snapshot.tickets)).toEqual(['A-1', 'A-3']);
+    expect(snapshot.tickets.every((ticket) => ticket.provider === 'Jira')).toBe(true);
+    expect(snapshot.refreshedAt).toBe('2026-11-21T08:00:10Z');
+    expect(searches.slice(2)).toEqual([
+      { statuses: ['To refine', 'Spec review', 'Ready for Dev', 'In development', 'In review', 'Blocked'] },
+      { statuses: ['Done'], updatedSince: '2026-11-14T08:00:10Z' },
+    ]);
+  });
+
+  it('is fresh again after a reload that follows a failed refresh', async () => {
+    const { store, clock, failing } = getWorld([getMockTicket({ key: 'A-1', status: 'Ready for Dev' })]);
+    await store.refresh();
+    failing.on = true;
+    clock.now = '2026-11-21T08:01:00Z';
+    await store.refresh();
+    failing.on = false;
+    clock.now = '2026-11-21T08:02:00Z';
+
+    await store.reload();
+
+    expect(store.snapshot()).toEqual({ tickets: [expect.objectContaining({ key: 'A-1' })], refreshedAt: '2026-11-21T08:02:00Z' });
+  });
+
+  it('keeps the tickets it had and says since when it is stale when a reload cannot reach the provider', async () => {
+    const { store, clock, failing } = getWorld([getMockTicket({ key: 'A-1', status: 'Ready for Dev' }), getMockTicket({ key: 'A-2', status: 'Blocked' })]);
+    await store.refresh();
+    failing.on = true;
+    clock.now = '2026-11-21T08:00:10Z';
+
+    await store.reload();
+
+    expect(store.snapshot()).toMatchObject({ refreshedAt: '2026-11-21T08:00:00Z', staleSince: '2026-11-21T08:00:00Z', problem: 'Jira answered 503 to POST /rest/api/3/search/jql' });
+    expect(keys(store.snapshot().tickets)).toEqual(['A-1', 'A-2']);
+  });
+
+  it('reloads without reading any ticket one by one or writing anything', async () => {
+    const { store, calls } = getWorld([getMockTicket({ key: 'A-1', status: 'Ready for Dev' })]);
+
+    await store.refresh();
+    await store.reload();
+
+    expect(calls).toEqual([]);
+  });
+
+  it('merges in several changed tickets at once without showing any of them twice', async () => {
+    const { store, inner, clock } = getWorld([getMockTicket({ key: 'A-1', status: 'Ready for Dev' }), getMockTicket({ key: 'A-2', status: 'Ready for Dev' }), getMockTicket({ key: 'A-3', status: 'Ready for Dev' })]);
+    await store.refresh();
+    clock.now = '2026-11-21T08:01:00Z';
+    await inner.transition({ key: 'A-2', from: 'Ready for Dev', to: 'In development' });
+    await inner.transition({ key: 'A-3', from: 'Ready for Dev', to: 'Blocked' });
+
+    await store.refresh();
+
+    expect(store.snapshot().tickets.map((ticket) => [ticket.key, ticket.status]).toSorted()).toEqual([['A-1', 'Ready for Dev'], ['A-2', 'In development'], ['A-3', 'Blocked']]);
+  });
+
+  it('keeps a ticket of one provider when a ticket with the same key changes in another provider', async () => {
+    const clock = { now: '2026-11-21T08:00:00Z' };
+    const jira = createInMemoryTicketProvider({ tickets: [getMockTicket({ key: 'X-1', status: 'Ready for Dev' })], now: () => clock.now });
+    const linear = createInMemoryTicketProvider({ tickets: [getMockTicket({ key: 'X-1', status: 'Ready for Dev' })], now: () => clock.now });
+    const store = createViewStore({ providers: [{ name: 'Jira', provider: jira }, { name: 'Linear', provider: linear }], states: STATUSES, now: () => clock.now, doneWindowDays: 7 });
+    await store.refresh();
+    clock.now = '2026-11-21T08:01:00Z';
+    await linear.transition({ key: 'X-1', from: 'Ready for Dev', to: 'Blocked' });
+
+    await store.refresh();
+
+    expect(store.snapshot().tickets.map((ticket) => [ticket.provider, ticket.status]).toSorted()).toEqual([['Jira', 'Ready for Dev'], ['Linear', 'Blocked']]);
+  });
+
+  it('has no refresh time when its very first read, a reload, fails', async () => {
+    const { store, failing } = getWorld([getMockTicket({ key: 'A-1', status: 'Ready for Dev' })]);
+    failing.on = true;
+
+    await store.reload();
+
+    expect('refreshedAt' in store.snapshot()).toBe(false);
+    expect(store.snapshot()).toMatchObject({ tickets: [], staleSince: '2026-11-21T08:00:00Z' });
   });
 
   it('merges several ticket providers, naming each ticket\'s provider', async () => {

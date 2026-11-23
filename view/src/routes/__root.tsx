@@ -1,7 +1,7 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
-import { Freshness } from '../components/Freshness';
-import { fetchView } from '../server/functions';
+import { HeaderStatus } from '../components/HeaderStatus';
+import { fetchView, reloadView } from '../server/functions';
 import styles from '../styles.css?url';
 
 export const Route = createRootRoute({
@@ -52,13 +52,15 @@ function RootComponent() {
             </nav>
           </div>
           {view.ok ? (
-            <Freshness
+            <HeaderStatus
               loadedAt={view.data.loadedAt}
               running={view.data.running}
               needsYou={view.data.needsYou.length}
               {...(view.data.refreshedAt === undefined ? {} : { refreshedAt: view.data.refreshedAt })}
               {...(view.data.staleSince === undefined ? {} : { staleSince: view.data.staleSince })}
               {...(view.data.problem === undefined ? {} : { problem: view.data.problem })}
+              reload={() => reloadView()}
+              refresh={() => router.invalidate()}
             />
           ) : null}
         </header>
