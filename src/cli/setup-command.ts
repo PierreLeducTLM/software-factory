@@ -39,7 +39,8 @@ const USAGE = [
 
 const reply = (result: { readonly ok: boolean }, lines: readonly string[], errors: readonly string[] = []): Reply => ({ result, lines, errors });
 
-const doctorReply = (report: DoctorReport): Reply => reply(report, report.ok ? ['No drift found'] : ['Drift found:', ...report.findings.map((finding) => `- ${finding.message}`)]);
+const doctorReply = ({ notes, ...report }: DoctorReport): Reply =>
+  reply(report, [...(report.ok ? ['No drift found'] : ['Drift found:', ...report.findings.map((finding) => `- ${finding.message}`)]), ...(notes.length === 0 ? [] : ['Notes:', ...notes.map((note) => `- ${note}`)])]);
 
 const upgradeReply = (result: UpgradeResult): Reply => {
   if (!result.ok) return reply(result, [], [result.message]);

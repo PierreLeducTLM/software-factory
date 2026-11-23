@@ -1,7 +1,7 @@
 import type { Access } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult, type FactoryConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
-import { ENGINE_VERSION, enginePinMatches } from '../version.js';
+import { ENGINE_VERSION, enginePinMatches, isNewerPatch } from '../version.js';
 import { detectProject } from './detect.js';
 import { ENGINE_PACKAGE_PATH, enginePackage, LAUNCHER_PATH } from './engine-files.js';
 import { migrateConfig, type Migration } from './migrate.js';
@@ -12,7 +12,7 @@ export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' |
 
 export type Finding = { readonly kind: FindingKind; readonly message: string };
 
-export type DoctorReport = { readonly ok: boolean; readonly findings: readonly Finding[] };
+export type DoctorReport = { readonly ok: boolean; readonly findings: readonly Finding[]; readonly notes: readonly string[] };
 
 export type DoctorDeps = {
   readonly files: ProjectFiles;
@@ -101,6 +101,9 @@ const driftFindings = async (deps: DoctorDeps, config: FactoryConfig, adapters: 
   ];
 };
 
+const patchNotes = (pinned: string, engine: string = ENGINE_VERSION): readonly string[] =>
+  isNewerPatch(pinned, engine) ? [`Engine ${engine} is a newer patch than the ${pinned} pinned in ${FACTORY_YAML}. Run "factory migrate" to move the project to it`] : [];
+
 export const runDoctor = async (deps: DoctorDeps, options: DoctorOptions): Promise<DoctorReport> => {
   const factoryText = await deps.files.read(FACTORY_YAML);
   const schema = schemaFindings(factoryText, options.upgrade);
@@ -109,5 +112,5 @@ export const runDoctor = async (deps: DoctorDeps, options: DoctorOptions): Promi
   const drift = factory.value !== undefined ? await driftFindings(deps, factory.value, adapters.value, options) : [];
   const account = options.ticket === undefined ? [] : await accountFindings(deps, options.ticket, factory.value?.states.in_development);
   const findings = [...factory.findings, ...adapters.findings, ...drift, ...account];
-  return { ok: findings.length === 0, findings };
+  return { ok: findings.length === 0, findings, notes: factory.value === undefined ? [] : patchNotes(factory.value.engine, options.engine) };
 };

@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import { parseAdaptersConfig } from '../config/project-config.js';
-import { ENGINE_VERSION, enginePinMatches } from '../version.js';
+import { ENGINE_VERSION, enginePinMatches, isNewerPatch } from '../version.js';
 import { detectProject, mainBuildWorkflow } from './detect.js';
 import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
 import { factoryWorkflow, WORKFLOW_FILE, type FactoryWorkflow } from './install.js';
@@ -91,7 +91,7 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
   if (!migrated.ok) return { ok: false, reason: 'schema', message: migrated.message };
   const pin = PinSchema.parse(parse(text));
   if (isNewer(pin.engine, engine)) return { ok: false, reason: 'newer_engine', message: `This project pins factory engine ${pin.engine}, newer than this engine (${engine}). Install engine ${pin.engine} instead.` };
-  const moving = !(migrated.from === migrated.to && enginePinMatches(pin.engine, engine));
+  const moving = migrated.from !== migrated.to || !enginePinMatches(pin.engine, engine) || isNewerPatch(pin.engine, engine);
   const target = moving ? engine : pin.engine;
   const installed = await staleEngineFiles(deps.files, target);
   const paths = Object.keys(installed);

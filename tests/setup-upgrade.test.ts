@@ -90,15 +90,39 @@ describe('upgrading a project to a newer engine', () => {
   });
 
   it('opens a pull request for a schema change alone', async () => {
-    const { result } = await upgrade(PROJECT, { engine: '0.1.4', upgrade: { target: 2, migrations: [RENAME_RISK] } });
+    const { result } = await upgrade(PROJECT, { engine: '0.1.0', upgrade: { target: 2, migrations: [RENAME_RISK] } });
 
-    expect(result).toMatchObject({ ok: true, action: 'opened', from: { engine: '0.1.0', schema: 1 }, to: { engine: '0.1.4', schema: 2 } });
+    expect(result).toMatchObject({ ok: true, action: 'opened', from: { engine: '0.1.0', schema: 1 }, to: { engine: '0.1.0', schema: 2 } });
   });
 
-  it('does nothing for a project already on this engine release and schema', async () => {
-    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.1.2'), ...engineFiles('0.1.2') }, { engine: '0.1.7' });
+  it('does nothing for a project already on this engine and schema', async () => {
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', 'engine: 0.1.7'), ...engineFiles('0.1.7') }, { engine: '0.1.7' });
 
-    expect(result).toEqual({ ok: true, action: 'none', message: 'Nothing to upgrade: the project is on engine 0.1.2 and schema 1, which this engine (0.1.7) runs as they are.' });
+    expect(result).toEqual({ ok: true, action: 'none', message: 'Nothing to upgrade: the project is on engine 0.1.7 and schema 1, which this engine (0.1.7) runs as they are.' });
+    expect(published).toEqual([]);
+    expect(opened).toEqual([]);
+  });
+
+  it.each([
+    ['0.1.2', '0.1.7'],
+    ['0.2.3', '0.2.4'],
+    ['0.2.9', '0.2.10'],
+  ])('moves a project pinned to %s forward to the newer patch %s, as any engine upgrade', async (pin, engine) => {
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', `engine: ${pin}`), ...engineFiles(pin) }, { engine });
+
+    expect(result).toEqual({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', from: { engine: pin, schema: 1 }, to: { engine, schema: 1 }, applied: [] });
+    expect(published[0]?.files).toEqual({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', `engine: ${engine}`), '.factory/package.json': enginePackage(engine) });
+    expect(opened[0]?.title).toBe(`chore: upgrade the factory engine to ${engine}`);
+    expect(opened[0]?.body.split('\n')[0]).toBe(`Moves this project from factory engine ${pin} to ${engine}.`);
+  });
+
+  it.each([
+    ['0.2.4', '0.2.3'],
+    ['0.2.10', '0.2.9'],
+  ])('never moves a project pinned to %s back to the older patch %s', async (pin, engine) => {
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY.replace('engine: 0.1.0', `engine: ${pin}`), ...engineFiles(pin) }, { engine });
+
+    expect(result).toEqual({ ok: true, action: 'none', message: `Nothing to upgrade: the project is on engine ${pin} and schema 1, which this engine (${engine}) runs as they are.` });
     expect(published).toEqual([]);
     expect(opened).toEqual([]);
   });
@@ -124,7 +148,7 @@ describe('upgrading a project to a newer engine', () => {
   });
 
   it('installs the engine in a project that ran it from elsewhere, leaving its configuration alone', async () => {
-    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY }, { engine: '0.1.5' });
+    const { result, published, opened } = await upgrade({ '.factory/factory.yaml': FACTORY }, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'opened', from: { engine: '0.1.0' }, to: { engine: '0.1.0' } });
     expect(published[0]?.files).toEqual(engineFiles('0.1.0'));
@@ -154,7 +178,7 @@ describe('upgrading a project to a newer engine', () => {
   });
 
   it('brings an outdated launcher up to date and marks it executable, without touching the pin', async () => {
-    const { published } = await upgrade({ ...PROJECT, '.factory/bin/factory': '#!/bin/sh\necho old\n' }, { engine: '0.1.5' });
+    const { published } = await upgrade({ ...PROJECT, '.factory/bin/factory': '#!/bin/sh\necho old\n' }, { engine: '0.1.0' });
 
     expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/bin/factory']);
     expect(published[0]?.executable).toEqual(['.factory/bin/factory']);
@@ -190,7 +214,7 @@ const stepsOf = async (workflow: string | undefined) => (await detectProject({ f
 
 describe('adding the missing factory workflow', () => {
   it('opens a pull request that adds the workflow and lists the secrets to store, on a GitHub project otherwise up to date', async () => {
-    const { result, published, opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+    const { result, published, opened } = await upgrade(CURRENT, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', workflowOnly: true });
     expect(Object.keys(published[0]?.files ?? {})).toEqual([WORKFLOW]);
@@ -212,7 +236,7 @@ describe('adding the missing factory workflow', () => {
   });
 
   it('adds the revert job, triggered by the workflow that builds main, chosen as init chooses it', async () => {
-    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': `${FACTORY}main_branch: trunk\n`, '.github/workflows/ci.yml': BUILD }, { engine: '0.1.5' });
+    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': `${FACTORY}main_branch: trunk\n`, '.github/workflows/ci.yml': BUILD }, { engine: '0.1.0' });
     const workflow = published[0]?.files[WORKFLOW];
 
     expect(await stepsOf(workflow)).toEqual(['record-merge', 'revert']);
@@ -221,7 +245,7 @@ describe('adding the missing factory workflow', () => {
   });
 
   it('leaves the revert job out, and says why, when no workflow builds main', async () => {
-    const { published, opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+    const { published, opened } = await upgrade(CURRENT, { engine: '0.1.0' });
 
     expect(published[0]?.files[WORKFLOW]).not.toContain('workflow_run');
     expect(opened[0]?.body.split('\n')).toContain('The revert step was left out because no workflow builds the main branch.');
@@ -230,7 +254,7 @@ describe('adding the missing factory workflow', () => {
   it('leaves the watch job out, and says why, when the staging watch is on, without touching factory.yaml', async () => {
     const watching = `${FACTORY}watch: { enabled: true, checks: [./smoke.sh] }\n`;
 
-    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': watching }, { engine: '0.1.5' });
+    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': watching }, { engine: '0.1.0' });
 
     expect(published[0]?.files[WORKFLOW]).not.toContain('watch');
     expect(published[0]?.files[WORKFLOW]).not.toContain('deployment_status');
@@ -239,20 +263,20 @@ describe('adding the missing factory workflow', () => {
   });
 
   it('says nothing about the watch when it is off', async () => {
-    const { opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+    const { opened } = await upgrade(CURRENT, { engine: '0.1.0' });
 
     expect(opened[0]?.body).not.toContain('watch');
   });
 
   it('never overwrites a factory workflow that is there', async () => {
-    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.5' });
+    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'none', message: expect.stringMatching(/^Nothing to upgrade: /) });
     expect(published).toEqual([]);
   });
 
   it('adds no workflow on Bitbucket', async () => {
-    const { result, published } = await upgrade({ ...CURRENT, '.factory/adapters.yaml': BITBUCKET_ADAPTERS }, { engine: '0.1.5' });
+    const { result, published } = await upgrade({ ...CURRENT, '.factory/adapters.yaml': BITBUCKET_ADAPTERS }, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'none' });
     expect(published).toEqual([]);
