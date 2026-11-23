@@ -11,6 +11,14 @@ export const fetchView = createServerFn({ method: 'GET' }).handler(async () => {
   }
 });
 
+export const reloadView = createServerFn({ method: 'POST' }).handler(async () => {
+  try {
+    return { ok: true as const, data: await (await getSource()).reload() };
+  } catch (error) {
+    return { ok: false as const, message: messageOf(error) };
+  }
+});
+
 export const fetchDetail = createServerFn({ method: 'GET' })
   .validator((key: string) => key)
   .handler(async ({ data }) => (await (await getSource()).detail(data)) ?? null);

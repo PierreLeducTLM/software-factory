@@ -42,12 +42,13 @@ const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string } = {}
   const inner = createInMemoryTicketProvider({ tickets: seed, now: () => clock.now });
   const searches = { count: 0 };
   const failing = { on: false };
+  const gone = new Set<string>();
   const provider: TicketProvider = {
     ...inner,
     search: async (criteria) => {
       searches.count += 1;
       if (failing.on) throw new Error('Jira is unreachable');
-      return inner.search(criteria);
+      return (await inner.search(criteria)).filter((ticket) => !gone.has(ticket.key));
     },
   };
   const source = createViewSource({
@@ -61,7 +62,7 @@ const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string } = {}
       opened.push(worktreeId);
     },
   });
-  return { source, inner, clock, searches, failing, opened };
+  return { source, inner, clock, searches, failing, opened, gone };
 };
 
 describe('view source', () => {
@@ -119,6 +120,49 @@ describe('view source', () => {
     expect(searches.count).toBe(3);
     expect(late.columns.find((column) => column.id === 'ready')?.cards).toEqual([]);
     expect(late.refreshedAt).toBe('2026-11-21T08:11:00Z');
+  });
+
+  it('reads every ticket again when forced, within the poll interval, and the board shows only what that read returned', async () => {
+    const waiting = { status: 'Ready for Dev', statusSince: '2026-11-19T08:00:00Z' };
+    const { source, clock, searches, gone } = getWorld([getMockTicket({ key: 'PAY-151', ...waiting }), getMockTicket({ key: 'PAY-152', ...waiting })]);
+    expect((await source.load()).needsYou.map((item) => item.key)).toEqual(['PAY-151', 'PAY-152']);
+    clock.now = '2026-11-21T08:10:10Z';
+    gone.add('PAY-152');
+
+    const forced = await source.reload();
+
+    expect(searches.count).toBe(4);
+    expect(forced.columns.find((column) => column.id === 'ready')?.cards.map((card) => card.key)).toEqual(['PAY-151']);
+    expect(forced.needsYou.map((item) => item.key)).toEqual(['PAY-151']);
+    expect(forced.refreshedAt).toBe('2026-11-21T08:10:10Z');
+    expect(forced.loadedAt).toBe('2026-11-21T08:10:10Z');
+  });
+
+  it('waits the whole poll interval after a forced reload before asking the provider again', async () => {
+    const { source, clock, searches } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' })]);
+    await source.load();
+    clock.now = '2026-11-21T08:10:30Z';
+    await source.reload();
+    clock.now = '2026-11-21T08:11:29Z';
+
+    const early = await source.load();
+    clock.now = '2026-11-21T08:11:30Z';
+    await source.load();
+
+    expect(early.refreshedAt).toBe('2026-11-21T08:10:30Z');
+    expect(searches.count).toBe(5);
+  });
+
+  it('keeps the board it had and says it is stale when a forced reload cannot reach the provider', async () => {
+    const { source, clock, failing } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' })]);
+    await source.load();
+    failing.on = true;
+    clock.now = '2026-11-21T08:10:10Z';
+
+    const data = await source.reload();
+
+    expect(data.columns.find((column) => column.id === 'ready')?.cards.map((card) => card.key)).toEqual(['PAY-151']);
+    expect(data).toMatchObject({ refreshedAt: '2026-11-21T08:10:00Z', staleSince: '2026-11-21T08:10:00Z', problem: 'Jira is unreachable' });
   });
 
   it('keeps the last data and says it is stale when the provider cannot be reached', async () => {

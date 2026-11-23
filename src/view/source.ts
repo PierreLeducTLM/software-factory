@@ -31,6 +31,7 @@ export type ViewData = {
 
 export type ViewSource = {
   readonly load: () => Promise<ViewData>;
+  readonly reload: () => Promise<ViewData>;
   readonly detail: (key: string) => Promise<RunDetail | undefined>;
   readonly health: (periodDays: number) => Promise<Health>;
   readonly openInOrca: (key: string) => Promise<OpenResult>;
@@ -51,24 +52,38 @@ export const createViewSource = ({ providers, config, repository, machine, now, 
     await store.refresh();
   };
 
+  const reloaded = async (): Promise<void> => {
+    state.attemptedAt = Date.parse(now());
+    await store.reload();
+  };
+
+  const view = (): ViewData => {
+    const { tickets, refreshedAt, staleSince, problem } = store.snapshot();
+    const options = { config, now: now(), machine, repository };
+    const columns = buildBoard(tickets, options);
+    return {
+      repository,
+      providers: providers.map(({ name }) => name),
+      columns,
+      needsYou: buildNeedsYou(tickets, options),
+      running: columns.filter((column) => RUNNING_COLUMNS.includes(column.id)).flatMap((column) => column.cards).filter((card) => !card.interrupted).length,
+      pollSeconds: config.view.poll_seconds,
+      loadedAt: options.now,
+      ...(refreshedAt === undefined ? {} : { refreshedAt }),
+      ...(staleSince === undefined ? {} : { staleSince }),
+      ...(problem === undefined ? {} : { problem }),
+    };
+  };
+
   return {
     load: async () => {
       await fresh();
-      const { tickets, refreshedAt, staleSince, problem } = store.snapshot();
-      const options = { config, now: now(), machine, repository };
-      const columns = buildBoard(tickets, options);
-      return {
-        repository,
-        providers: providers.map(({ name }) => name),
-        columns,
-        needsYou: buildNeedsYou(tickets, options),
-        running: columns.filter((column) => RUNNING_COLUMNS.includes(column.id)).flatMap((column) => column.cards).filter((card) => !card.interrupted).length,
-        pollSeconds: config.view.poll_seconds,
-        loadedAt: options.now,
-        ...(refreshedAt === undefined ? {} : { refreshedAt }),
-        ...(staleSince === undefined ? {} : { staleSince }),
-        ...(problem === undefined ? {} : { problem }),
-      };
+      return view();
+    },
+
+    reload: async () => {
+      await reloaded();
+      return view();
     },
 
     detail: async (key) => {

@@ -114,6 +114,13 @@ p {
   border-color: rgba(255, 153, 28, 0.6);
 }
 
+.top__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .dot {
   flex: none;
   width: 8px;
@@ -445,6 +452,17 @@ p {
   border: 0;
   background: var(--accent);
   color: #ffffff;
+}
+
+.force-refresh {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+
+.force-refresh:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .list__title {

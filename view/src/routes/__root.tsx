@@ -1,7 +1,8 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
+import { ForceRefresh } from '../components/ForceRefresh';
 import { Freshness } from '../components/Freshness';
-import { fetchView } from '../server/functions';
+import { fetchView, reloadView } from '../server/functions';
 import styles from '../styles.css?url';
 
 export const Route = createRootRoute({
@@ -52,14 +53,17 @@ function RootComponent() {
             </nav>
           </div>
           {view.ok ? (
-            <Freshness
-              loadedAt={view.data.loadedAt}
-              running={view.data.running}
-              needsYou={view.data.needsYou.length}
-              {...(view.data.refreshedAt === undefined ? {} : { refreshedAt: view.data.refreshedAt })}
-              {...(view.data.staleSince === undefined ? {} : { staleSince: view.data.staleSince })}
-              {...(view.data.problem === undefined ? {} : { problem: view.data.problem })}
-            />
+            <div className="top__status">
+              <Freshness
+                loadedAt={view.data.loadedAt}
+                running={view.data.running}
+                needsYou={view.data.needsYou.length}
+                {...(view.data.refreshedAt === undefined ? {} : { refreshedAt: view.data.refreshedAt })}
+                {...(view.data.staleSince === undefined ? {} : { staleSince: view.data.staleSince })}
+                {...(view.data.problem === undefined ? {} : { problem: view.data.problem })}
+              />
+              <ForceRefresh reload={() => reloadView()} refresh={() => router.invalidate()} />
+            </div>
           ) : null}
         </header>
         <div className="rule" />

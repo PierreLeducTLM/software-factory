@@ -16,7 +16,7 @@ export type Snapshot = {
   readonly problem?: string;
 };
 
-export type ViewStore = { readonly refresh: () => Promise<void>; readonly snapshot: () => Snapshot };
+export type ViewStore = { readonly refresh: () => Promise<void>; readonly reload: () => Promise<void>; readonly snapshot: () => Snapshot };
 
 const MS_PER_DAY = 86_400_000;
 
@@ -40,24 +40,33 @@ export const createViewStore = ({ providers, states, now, doneWindowDays }: Opti
     return perProvider.flat();
   };
 
+  const update = async (merge: (held: Snapshot, at: string) => Promise<readonly ViewTicket[]>): Promise<void> => {
+    const at = now();
+    const held = state.snapshot;
+    const { tickets, refreshedAt } = held;
+    try {
+      const merged = await merge(held, at);
+      state.snapshot = { tickets: merged.filter((ticket) => tracked.includes(ticket.status)), refreshedAt: at };
+    } catch (error) {
+      state.snapshot = {
+        tickets,
+        ...(refreshedAt === undefined ? {} : { refreshedAt }),
+        staleSince: state.snapshot.staleSince ?? refreshedAt ?? at,
+        problem: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   return {
     snapshot: () => state.snapshot,
 
-    refresh: async () => {
-      const at = now();
-      const { tickets, refreshedAt } = state.snapshot;
-      try {
+    refresh: () =>
+      update(async ({ tickets, refreshedAt }, at) => {
         const changed = await read(refreshedAt, at);
         const untouched = tickets.filter((ticket) => !changed.some((other) => other.key === ticket.key && other.provider === ticket.provider));
-        state.snapshot = { tickets: [...untouched, ...changed].filter((ticket) => tracked.includes(ticket.status)), refreshedAt: at };
-      } catch (error) {
-        state.snapshot = {
-          tickets,
-          ...(refreshedAt === undefined ? {} : { refreshedAt }),
-          staleSince: state.snapshot.staleSince ?? refreshedAt ?? at,
-          problem: error instanceof Error ? error.message : String(error),
-        };
-      }
-    },
+        return [...untouched, ...changed];
+      }),
+
+    reload: () => update((_held, at) => read(undefined, at)),
   };
 };
