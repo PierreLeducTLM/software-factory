@@ -21,10 +21,10 @@ export const getCard = (overrides?: Partial<Card>): Card => ({
   ...overrides,
 });
 
-const COLUMN_NAMES = { ready: 'Ready', revalidate: 'Revalidate', build: 'Build', review: 'Review', pr: 'Pull request', needs_you: 'Needs you', done: 'Done' } as const;
+const COLUMN_NAMES = { available: 'Available', refining: 'Refining', ready: 'Ready', revalidate: 'Revalidate', build: 'Build', review: 'Review', pr: 'Pull request', needs_you: 'Needs you', done: 'Done' } as const;
 
 export const getColumns = (cards: Partial<Record<Column['id'], readonly Card[]>> = { build: [getCard()] }): readonly Column[] =>
-  (['ready', 'revalidate', 'build', 'review', 'pr', 'needs_you', 'done'] as const).map((id) => ({ id, name: COLUMN_NAMES[id], cards: cards[id] ?? [] }));
+  (['available', 'refining', 'ready', 'revalidate', 'build', 'review', 'pr', 'needs_you', 'done'] as const).map((id) => ({ id, name: COLUMN_NAMES[id], cards: cards[id] ?? [] }));
 
 export const getDetail = (overrides?: Partial<RunDetail>): RunDetail => ({
   key: 'PAY-142',

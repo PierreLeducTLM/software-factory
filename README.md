@@ -111,7 +111,7 @@ To refine → Spec review → Ready for Dev → In development → In review →
 5. **Review and merge** the pull request. Every risk level starts in **shadow mode**: a person merges each factory pull request. You enable auto-merge per risk level later, once the factory has earned it.
 6. **CI records the merge** and moves the ticket to Done.
 
-Two labels are optional: `factory-auto` marks a ticket that `/factory-next` may pick up, and `factory:no-automerge` keeps a ticket's pull request away from auto-merge.
+Three labels are optional: `factory-available` marks a ticket in "to refine" as allowed to go through the factory, so the dashboard shows it in its Available column; `factory-auto` marks a ticket that `/factory-next` may pick up; and `factory:no-automerge` keeps a ticket's pull request away from auto-merge. A project can rename them under `labels` in `.factory/factory.yaml` (`available`, `auto` and `no_automerge`).
 
 ## Changing the setup later
 

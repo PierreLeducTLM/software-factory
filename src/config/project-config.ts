@@ -55,6 +55,8 @@ const WatchSchema = z
   })
   .refine((watch) => !watch.enabled || watch.checks.length > 0, { path: ['checks'], message: 'An enabled watch needs at least one smoke check' });
 
+const DEFAULT_AVAILABLE_LABEL = 'factory-available';
+
 const FactoryConfigSchema = z.object({
   schema: z.literal(1),
   engine: z.string().min(1),
@@ -68,7 +70,7 @@ const FactoryConfigSchema = z.object({
     blocked: z.string().min(1),
     done: z.string().min(1),
   }),
-  labels: z.object({ auto: z.string().min(1), no_automerge: z.string().min(1) }),
+  labels: z.object({ auto: z.string().min(1), no_automerge: z.string().min(1), available: z.string().min(1).default(DEFAULT_AVAILABLE_LABEL) }),
   limits: z
     .object({
       attempts: z.number().int().min(1).default(DEFAULT_ATTEMPTS_PER_RUN),

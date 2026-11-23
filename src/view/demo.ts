@@ -108,7 +108,7 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     by: 'pierre',
   });
 
-  const ticket = (key: string, title: string, status: string, statusAgo: number, record: TicketRecord, labels: readonly string[] = []): Ticket => ({
+  const ticket = (key: string, title: string, status: string, statusAgo: number, record: TicketRecord | undefined, labels: readonly string[] = []): Ticket => ({
     key,
     title,
     status,
@@ -116,11 +116,13 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     repository: REPOSITORY,
     updatedAt: ago(statusAgo),
     statusSince: ago(statusAgo),
-    factoryComment: renderComment({ record, summary: 'Sample data' }),
+    ...(record === undefined ? {} : { factoryComment: renderComment({ record, summary: 'Sample data' }) }),
   });
 
   const { states, labels } = config;
   const tickets: readonly Ticket[] = [
+    ticket('PAY-160', 'Late payment reminders', states.to_refine, 1440, undefined, [labels.available]),
+    ticket('PAY-161', 'Customer portal redesign', states.to_refine, 4300, undefined),
     ticket('PAY-151', 'Export invoices to CSV', states.ready_for_dev, 2880, approved('low')),
     ticket('ENG-90', 'Rate-limit the public API', states.ready_for_dev, 180, approved('medium'), [labels.auto]),
     ticket('PAY-149', 'Validate customer addresses', states.in_development, 1, step(claimed(approved('low'), 'pierre', MACHINE, 1), 'revalidate', 1)),
@@ -133,6 +135,7 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     ticket('PAY-133', 'Multi-currency totals', states.blocked, 25, blocked),
     ticket('PAY-147', 'Tax rounding rules', states.spec_review, 60, sentBack),
     ticket('PAY-155', 'Credit notes', states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), { passed: true, fingerprint: 'demo', findings: [], at: ago(180), by: 'pierre' })),
+    ticket('PAY-158', 'Discount codes', states.spec_review, 45, recordReadyGate(createRecord({ repository: REPOSITORY }), { passed: false, fingerprint: 'demo', findings: ['The spec has 1 open question.'], at: ago(45), by: 'pierre' }), [labels.available]),
     ticket('PAY-130', 'Billing rules v2', states.done, 300, merged('high', 398, 300, { asIs: true })),
     ticket('PAY-128', 'Invoice footer text', states.done, 1500, merged('low', 396, 1500, { asIs: true })),
     ticket('PAY-127', 'Currency symbol placement', states.done, 2900, merged('low', 395, 2900, { asIs: true })),

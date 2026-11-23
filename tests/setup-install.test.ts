@@ -33,7 +33,7 @@ describe('the files of an install', () => {
   it('writes a factory.yaml the factory accepts, with every chosen check at its station and every level in shadow mode', () => {
     const config = factoryOf(getAnswers());
 
-    expect(config).toMatchObject({ schema: 1, engine: '0.1.0', main_branch: 'main', states: { to_refine: 'Backlog', in_development: 'In Progress' }, labels: { auto: 'factory-auto', no_automerge: 'factory:no-automerge' } });
+    expect(config).toMatchObject({ schema: 1, engine: '0.1.0', main_branch: 'main', states: { to_refine: 'Backlog', in_development: 'In Progress' }, labels: { auto: 'factory-auto', no_automerge: 'factory:no-automerge', available: 'factory-available' } });
     expect(config.checks).toEqual([
       { id: 'test', station: 'quality', kind: 'script', source: 'local', blocking: true, timeout: '6m', run: 'pnpm run test' },
       { id: 'lint', station: 'quality', kind: 'script', source: 'local', blocking: false, timeout: '30s', run: 'pnpm run lint' },
@@ -55,7 +55,14 @@ describe('the files of an install', () => {
   });
 
   it('keeps the labels the project chose', () => {
-    expect(factoryOf(getAnswers({ labels: { auto: 'auto-build', no_automerge: 'hands-off' } })).labels).toEqual({ auto: 'auto-build', no_automerge: 'hands-off' });
+    expect(factoryOf(getAnswers({ labels: { auto: 'auto-build', no_automerge: 'hands-off', available: 'let-it-in' } })).labels).toEqual({ auto: 'auto-build', no_automerge: 'hands-off', available: 'let-it-in' });
+  });
+
+  it('writes the available label next to the other two, even when the project chose only those two', () => {
+    const yaml = buildInstall(getAnswers({ labels: { auto: 'auto-build', no_automerge: 'hands-off' } })).files['.factory/factory.yaml'] ?? '';
+
+    expect(yaml).toContain('available: factory-available');
+    expect(factoryOf(getAnswers({ labels: { auto: 'auto-build', no_automerge: 'hands-off' } })).labels).toEqual({ auto: 'auto-build', no_automerge: 'hands-off', available: 'factory-available' });
   });
 
   it('writes an adapters.yaml with the names of the environment variables, and no secret', () => {
