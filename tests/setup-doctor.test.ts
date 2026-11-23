@@ -96,9 +96,9 @@ const without = (files: Readonly<Record<string, string>>, name: string): Readonl
 
 describe('factory doctor', () => {
   it('finds nothing wrong in a healthy project, and runs nothing unless asked', async () => {
-    const { report, commands } = await examine(HEALTHY);
+    const { report, commands } = await examine(HEALTHY, { engine: '0.2.0' });
 
-    expect(report).toEqual({ ok: true, findings: [] });
+    expect(report).toEqual({ ok: true, findings: [], notes: [] });
     expect(commands).toEqual([]);
   });
 
@@ -183,6 +183,7 @@ describe('factory doctor', () => {
       'config: .factory/factory.yaml: checks.0.timeout: Use a number followed by s, m or h, such as 90s or 6m',
       'config: .factory/adapters.yaml: agent_runtime.kind: Invalid input: expected "orca"',
     ]);
+    expect((await examine(invalid, { engine: '0.2.4' })).report.notes).toEqual([]);
   });
 
   it('still checks the pipeline when only adapters.yaml is broken', async () => {
@@ -197,6 +198,29 @@ describe('factory doctor', () => {
   it('says when the project pins another engine', async () => {
     expect((await examine(HEALTHY, { engine: '0.3.0' })).messages).toEqual(['engine: .factory/factory.yaml pins engine 0.2.0, and this is engine 0.3.0']);
     expect((await examine(HEALTHY, { engine: '0.2.9' })).messages).toEqual([]);
+  });
+
+  it('notes a newer patch of the pinned engine without counting it as drift', async () => {
+    const { report } = await examine(HEALTHY, { engine: '0.2.4' });
+
+    expect(report).toEqual({ ok: true, findings: [], notes: ['Engine 0.2.4 is a newer patch than the 0.2.0 pinned in .factory/factory.yaml. Run "factory migrate" to move the project to it'] });
+  });
+
+  it('notes a newer patch next to the drift it finds', async () => {
+    const { report } = await examine({ ...HEALTHY, '.factory/package.json': enginePackage('0.3.0') }, { engine: '0.2.4' });
+
+    expect(report.ok).toBe(false);
+    expect(report.notes).toEqual(['Engine 0.2.4 is a newer patch than the 0.2.0 pinned in .factory/factory.yaml. Run "factory migrate" to move the project to it']);
+  });
+
+  it.each([
+    ['the same patch', '0.2.0', '0.2.0'],
+    ['an older patch', '0.2.5', '0.2.4'],
+    ['another release', '0.2.0', '0.3.0'],
+  ])('notes nothing when the engine is %s', async (_case, pinned, engine) => {
+    const files = { ...HEALTHY, ...engineFiles(pinned), '.factory/factory.yaml': FACTORY.replace('engine: 0.2.0', `engine: ${pinned}`) };
+
+    expect((await examine(files, { engine })).report.notes).toEqual([]);
   });
 
   it('says when the factory is not installed in the project, or its install pins another engine', async () => {

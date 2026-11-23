@@ -147,6 +147,27 @@ describe('factory doctor', () => {
     expect(setup.accessed).toEqual(['PAY-142']);
   });
 
+  it('notes a newer patch of the pinned engine after the report, in the text output only', async () => {
+    const olderPatch = ENGINE_VERSION.replace(/\d+$/, (patch) => String(Number(patch) - 1));
+    const { run } = getSetup({ ...HEALTHY, ...engineFiles(olderPatch), '.factory/factory.yaml': FACTORY.replace(`engine: ${ENGINE_VERSION}`, `engine: ${olderPatch}`) });
+    const note = `- Engine ${ENGINE_VERSION} is a newer patch than the ${olderPatch} pinned in .factory/factory.yaml. Run "factory migrate" to move the project to it`;
+
+    expect(await run('doctor')).toEqual({ code: 0, out: ['No drift found', 'Notes:', note], errors: [] });
+    expect(JSON.parse((await run('doctor', '--json')).out.join(''))).toEqual({ ok: true, findings: [] });
+  });
+
+  it('notes a newer patch after the drift it lists', async () => {
+    const olderPatch = ENGINE_VERSION.replace(/\d+$/, (patch) => String(Number(patch) - 1));
+    const { run } = getSetup({ ...HEALTHY, ...engineFiles(olderPatch), '.factory/factory.yaml': FACTORY.replace(`engine: ${ENGINE_VERSION}`, `engine: ${olderPatch}`), '.factory/adapters.yaml': ADAPTERS.replace('token_env: JIRA_TOKEN', 'token: ATATT3xFf') });
+
+    expect((await run('doctor')).out).toEqual([
+      'Drift found:',
+      '- .factory/adapters.yaml: ticket_providers.0.token: Secrets must not be stored in adapters.yaml',
+      'Notes:',
+      `- Engine ${ENGINE_VERSION} is a newer patch than the ${olderPatch} pinned in .factory/factory.yaml. Run "factory migrate" to move the project to it`,
+    ]);
+  });
+
   it('answers with the report as JSON', async () => {
     const { run } = getSetup({ ...HEALTHY, ...engineFiles('9.0.0'), '.factory/factory.yaml': FACTORY.replace(`engine: ${ENGINE_VERSION}`, 'engine: 9.0.0') });
 

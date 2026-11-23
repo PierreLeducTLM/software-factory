@@ -47,6 +47,10 @@ const isNewer = (pinned: string, running: string): boolean => {
   return pinnedMajor > runningMajor || (pinnedMajor === runningMajor && pinnedMinor > runningMinor);
 };
 
+const patch = (version: string): number => Number(version.split('.')[2] ?? 0);
+
+export const isNewerPatch = (pinned: string, running: string): boolean => enginePinMatches(pinned, running) && patch(running) > patch(pinned);
+
 const pinned = (text: string, engine: string): string => text.replace(/^engine:.*/m, `engine: ${engine}`);
 
 const schemaLines = (from: number, to: number, applied: readonly string[]): readonly string[] =>
@@ -91,7 +95,7 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
   if (!migrated.ok) return { ok: false, reason: 'schema', message: migrated.message };
   const pin = PinSchema.parse(parse(text));
   if (isNewer(pin.engine, engine)) return { ok: false, reason: 'newer_engine', message: `This project pins factory engine ${pin.engine}, newer than this engine (${engine}). Install engine ${pin.engine} instead.` };
-  const moving = !(migrated.from === migrated.to && enginePinMatches(pin.engine, engine));
+  const moving = migrated.from !== migrated.to || !enginePinMatches(pin.engine, engine) || isNewerPatch(pin.engine, engine);
   const target = moving ? engine : pin.engine;
   const installed = await staleEngineFiles(deps.files, target);
   const paths = Object.keys(installed);
