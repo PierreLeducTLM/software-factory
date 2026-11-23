@@ -32,12 +32,11 @@ Only for a `no_spec` refusal. Its `ticket` field holds the ticket's `title` and 
 
 1. **A local draft.** If the person already has a draft change folder for this ticket, offer to attach it. If they accept, attach it (step 4 below) and skip the rest.
 2. **Explore mode.** Otherwise open OpenSpec's explore mode: the `openspec-explore` skill, or the `/opsx:explore` command. Hand off to it rather than following its steps from memory. Start it with the ticket key, its title and its description, and say that the goal is a draft change for that ticket. Let the person drive the exploration, and capture it as an OpenSpec change folder under `openspec/changes/` once the person confirms.
-3. **Explore mode is not installed.** If neither the `openspec-explore` skill nor the `/opsx:explore` command is available, say so, and in the same message:
-   - ask whether to draft the spec with OpenSpec's propose mode instead (the `openspec-propose` skill, or the `/opsx:propose` command), starting from the same ticket key, title and description;
+3. **Explore mode is not installed.** If neither the `openspec-explore` skill nor the `/opsx:explore` command is available, check for propose mode: the `openspec-propose` skill, or the `/opsx:propose` command. If propose mode is not available either, do not offer it: stop as step 5 says, and name `openspec config profile` followed by `openspec update` as the way to install the explore and propose workflows. If propose mode is available, say that explore mode is not, and in the same message:
+   - ask whether to draft the spec with OpenSpec's propose mode instead, starting from the same ticket key, title and description;
    - say that explore mode can be installed by running `openspec config profile` to add the explore workflow, then `openspec update` in the project. Do not run either command yourself.
 
    If the person accepts, run propose mode. If they decline, stop as step 5 below says.
-   If propose mode is not available either, stop as step 5 says, and name `openspec config profile` followed by `openspec update` as the way to install the explore and propose workflows.
 4. **Attach the draft.** Once explore or propose mode has written a change folder, attach that folder and continue at step 2:
 
    ```bash
