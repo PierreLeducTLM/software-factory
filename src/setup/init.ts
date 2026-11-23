@@ -95,6 +95,7 @@ export type InitResult =
 
 const TIMEOUTS: Readonly<Record<Category, string>> = { tests: '10m', lint: '5m', types: '5m', format: '2m', security: '10m', build: '10m', e2e: '15m' };
 const CI_TIMEOUT = '15m';
+const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
 
 const ticketProviderOf = (input: InitInput): Connection['ticketProvider'] | readonly string[] => {
   const { team, baseUrl, filter, project, tokenEnv, emailEnv } = input;
@@ -131,6 +132,11 @@ const checksOf = (detection: Detection, verification: readonly Verification[]): 
       timeout: measured?.timeout ?? (source === 'ci' ? CI_TIMEOUT : TIMEOUTS[category]),
     };
   });
+
+const ciSystemOf = (detection: Detection, sourceControl: Connection['sourceControl']): InstallAnswers['ci']['system'] => {
+  const builds = detection.ci.jobs.some((job) => job.file !== FACTORY_WORKFLOW);
+  return sourceControl.kind === 'github' && !builds ? 'none' : detection.ci.system;
+};
 
 const summaryOf = (answers: InstallAnswers, advisory: readonly string[]): readonly string[] => {
   const { ticketProvider: tracker, sourceControl, repository, mainBranch, checks, states } = answers;
@@ -187,7 +193,7 @@ export const initProject = async (deps: InitDeps, input: InitInput): Promise<Ini
     sensitivePaths: [...(input.sensitivePaths ?? [])],
     ticketProvider,
     sourceControl,
-    ci: { system: detection.ci.system, ...(workflow === undefined ? {} : { workflow }) },
+    ci: { system: ciSystemOf(detection, sourceControl), ...(workflow === undefined ? {} : { workflow }) },
   };
   const installed = await installFactory(deps, answers, { ticket: input.ticket });
   if (!installed.ok) return installed;
