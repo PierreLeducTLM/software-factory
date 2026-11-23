@@ -41,7 +41,8 @@ export type StatusResult =
       readonly approval?: { readonly approver: string; readonly at: string; readonly predictedRisk: Risk };
       readonly questions: readonly SendBackQuestion[];
     }
-  | Refused;
+  | Refused
+  | (Refused & { readonly ticket: { readonly title: string; readonly description: string } });
 
 export type GateResult = { readonly ok: true; readonly passed: boolean; readonly findings: readonly string[] } | Refused;
 export type ApprovalResult = { readonly ok: true; readonly risk: Risk; readonly route: string } | Refused;
@@ -108,13 +109,13 @@ const checkReadiness = async (deps: RefinementDeps, files: readonly SpecFile[]):
 
 type Opened =
   | { readonly ok: true; readonly ticket: Ticket; readonly files: readonly SpecFile[]; readonly record: TicketRecord }
-  | { readonly ok: false; readonly refusal: Refused };
+  | { readonly ok: false; readonly refusal: Refused; readonly ticket?: Ticket };
 
 const open = async (deps: RefinementDeps, key: string): Promise<Opened> => {
   const ticket = await deps.tickets.getTicket(key);
   if (ticket === undefined) return { ok: false, refusal: refuse('not_found', `${key} does not exist`) };
   const files = await loadSpecFiles(deps, key);
-  if (files.length === 0) return { ok: false, refusal: refuse('no_spec', `${key} has no OpenSpec files attached. A draft spec is required`) };
+  if (files.length === 0) return { ok: false, refusal: refuse('no_spec', `${key} has no OpenSpec files attached. A draft spec is required`), ticket };
   const loaded = await loadRecord(deps.tickets, key);
   if (loaded.status === 'edited' || loaded.status === 'invalid') {
     return { ok: false, refusal: refuse('record_edited', `The record on ${key} was edited outside the factory`) };
@@ -154,7 +155,11 @@ export const pushSpecFiles = async (deps: RefinementDeps, key: string, files: re
 
 export const refinementStatus = async (deps: RefinementDeps, key: string): Promise<StatusResult> => {
   const opened = await open(deps, key);
-  if (!opened.ok) return opened.refusal;
+  if (!opened.ok) {
+    return opened.ticket === undefined
+      ? opened.refusal
+      : { ...opened.refusal, ticket: { title: opened.ticket.title, description: opened.ticket.spec ?? '' } };
+  }
   const { readyGate, approval, sendBack } = opened.record.refinement;
   return {
     ok: true,

@@ -100,7 +100,7 @@ To refine → Spec review → Ready for Dev → In development → In review →
 ```
 
 1. **Write the ticket** in your tracker and put it in To refine. Its description holds the spec in plain words, for people.
-2. **Attach a draft spec.** Refinement starts from a draft OpenSpec change and never writes one from nothing. Draft the change in the project, for example with OpenSpec's `/opsx:propose`, then attach it:
+2. **Attach a draft spec.** Refinement starts from a draft OpenSpec change. When the ticket has none attached, `/factory-refine` builds the draft with you through OpenSpec explore mode (`/opsx:explore`), starting from the ticket's title and description, then attaches it and carries on. If explore mode is not installed, it offers OpenSpec's propose mode (`/opsx:propose`) instead. The ticket stays in To refine until the draft is attached. If you already drafted the change yourself, attach it:
 
    ```bash
    factory push PAY-142 --from openspec/changes/<change-name>

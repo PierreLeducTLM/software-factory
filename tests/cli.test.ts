@@ -254,9 +254,32 @@ describe('factory command line', () => {
     const reason = 'PAY-142 has no OpenSpec files attached. A draft spec is required';
 
     expect(await cli.run('pull', 'PAY-142', '--to', folder)).toEqual({ code: 1, out: [], errors: [reason] });
-    expect(await cli.run('status', 'PAY-142')).toEqual({ code: 1, out: [], errors: [reason] });
+    expect(await cli.run('status', 'PAY-142')).toEqual({ code: 1, out: [], errors: [reason, 'Bulk invoice export'] });
+    expect(await cli.run('status', 'PAY-999')).toEqual({ code: 1, out: [], errors: ['PAY-999 does not exist'] });
     expect(await cli.run('push', 'PAY-999', '--from', folder)).toEqual({ code: 1, out: [], errors: ['PAY-999 does not exist'] });
     expect(await cli.run('push', 'PAY-142', '--from', folder)).toEqual({ code: 0, out: ['Attached 1 spec files to PAY-142: proposal.md'], errors: [] });
+  });
+
+  it('shows the title and description of a ticket with no spec in the JSON status, so a draft can start from them', async () => {
+    const cli = await getCli(getMockTicket({ status: 'To refine' }), {});
+
+    expect(await cli.run('status', 'PAY-142', '--json')).toEqual({
+      code: 1,
+      out: [
+        JSON.stringify({
+          ok: false,
+          reason: 'no_spec',
+          message: 'PAY-142 has no OpenSpec files attached. A draft spec is required',
+          ticket: { title: 'Bulk invoice export', description: '## Why\nExport invoices in bulk.' },
+        }),
+      ],
+      errors: [],
+    });
+    expect(await cli.run('pull', 'PAY-142', '--to', mkdtempSync(join(tmpdir(), 'factory-cli-')), '--json')).toEqual({
+      code: 1,
+      out: [JSON.stringify({ ok: false, reason: 'no_spec', message: 'PAY-142 has no OpenSpec files attached. A draft spec is required' })],
+      errors: [],
+    });
   });
 
   const PASS = JSON.stringify({ verdict: 'pass', findings: [], evidence: [] });
