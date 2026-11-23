@@ -17,7 +17,7 @@ import { createViewSource, type ViewSource } from '../view/source.js';
 import { createProjectFiles } from '../setup/project-files.js';
 import { enginePinMatches, enginePinMessage } from '../version.js';
 import type { SetupDeps } from './setup-command.js';
-import { createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecValidator } from './inputs.js';
+import { createChangeArchive, createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecValidator } from './inputs.js';
 
 type Options = { readonly cwd: string; readonly env: Readonly<Record<string, string | undefined>> };
 
@@ -128,6 +128,8 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
   const sourceControl = createSourceControl(adapters, env, http);
   const runGit = createCommandRunner('git');
   const git = createGitInputs({ run: (args) => runGit(args, { cwd }), mainBranch: config.main_branch });
+  const openspec = createCommandRunner('openspec');
+  const archive = createChangeArchive({ git: (args) => runGit(args, { cwd }), openspec });
 
   return {
     tickets,
@@ -137,7 +139,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     machine: hostname(),
     now,
     recordBudget: RECORD_BUDGET,
-    validateSpec: createSpecValidator({ run: createCommandRunner('openspec') }),
+    validateSpec: createSpecValidator({ run: openspec, canonicalSpecs: git.canonicalSpecs }),
     predictRisk: async (files) => assessSpec(config.risk, files).level,
     mainCommit: git.mainCommit,
     changedFilesSince: git.changedFilesSince,
@@ -148,6 +150,8 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     linesChangedOnBranch: git.linesChangedOnBranch,
     pushBranch: git.pushBranch,
     commitMessage: git.commitMessage,
+    changeFolders: archive.changeFolders,
+    archiveChange: archive.archiveChange,
   };
 };
 

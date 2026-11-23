@@ -4,7 +4,7 @@ import { createInMemoryTicketProvider } from '../../src/adapters/in-memory-ticke
 import type { SourceControl } from '../../src/adapters/source-control.js';
 import type { Ticket } from '../../src/adapters/ticket-provider.js';
 import { parseFactoryConfig, type FactoryConfig } from '../../src/config/project-config.js';
-import { advance, type AdvanceInput, type LoopDeps } from '../../src/factory/build-loop.js';
+import { advance, type AdvanceInput, type ChangeFolder, type LoopDeps } from '../../src/factory/build-loop.js';
 import type { ScriptRun } from '../../src/factory/checks.js';
 import { approve } from '../../src/factory/refinement.js';
 import { runTicket } from '../../src/factory/run-lifecycle.js';
@@ -56,7 +56,12 @@ export type WorldOptions = {
   readonly refuseAutoMerge?: Error | string;
   readonly specs?: Readonly<Record<string, string>>;
   readonly commits?: Readonly<Record<string, string>>;
+  readonly changeFolders?: readonly ChangeFolder[];
+  readonly archiveError?: string;
+  readonly archivedFiles?: readonly string[];
 };
+
+const specPath = (name: string): string => name.replaceAll('__', '/');
 
 export const getWorld = async (options?: WorldOptions) => {
   const clock = { seconds: 0 };
@@ -82,6 +87,9 @@ export const getWorld = async (options?: WorldOptions) => {
   const pushes: string[] = [];
   const commits: Record<string, string> = { ...options?.commits };
   const changedOnMain: string[] = [];
+  const events: string[] = [];
+  const archived: string[] = [];
+  const folders = options?.changeFolders ?? [{ name: 'billing-export', files: Object.keys({ ...SPEC_FILES, ...options?.specs }).map(specPath) }];
   const deps: LoopDeps = {
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
@@ -101,10 +109,18 @@ export const getWorld = async (options?: WorldOptions) => {
       return scripts[command]?.shift() ?? { exitCode: 0, output: 'ok', timedOut: false };
     },
     sleep: async () => undefined,
-    changedFilesOnBranch: async () => options?.changedFiles ?? ['src/billing/export.ts'],
+    changedFilesOnBranch: async () => [...(options?.changedFiles ?? ['src/billing/export.ts']), ...archived],
     linesChangedOnBranch: async () => options?.lines ?? 40,
     commitMessage: async (commit) => commits[commit] ?? `Commit ${commit}`,
+    changeFolders: async () => folders,
+    archiveChange: async (name) => {
+      events.push(`archive ${name}`);
+      if (options?.archiveError !== undefined) return { ok: false, error: options.archiveError };
+      archived.push(...(options?.archivedFiles ?? []));
+      return { ok: true };
+    },
     pushBranch: async (branch) => {
+      events.push(`push ${branch}`);
       pushes.push(branch);
       git.push(branch, `commit-${pushes.length}`);
     },
@@ -126,6 +142,7 @@ export const getWorld = async (options?: WorldOptions) => {
     scripts,
     commands,
     pushes,
+    events,
     changedOnMain,
     record,
     status: async () => (await tickets.getTicket('PAY-142'))?.status,

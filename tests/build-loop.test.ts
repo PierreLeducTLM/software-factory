@@ -718,3 +718,122 @@ describe('what advance needs to be told', () => {
     expect(result).toEqual({ ok: false, reason: 'no_worktree', message: 'Run this from inside an Orca worktree' });
   });
 });
+
+const SPEC_PATHS = ['design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'];
+const NOT_FOUND = 'The approved spec of PAY-142 is not in one folder under openspec/changes/. Pull it with factory pull PAY-142 --to openspec/changes/<name> and commit it.';
+const ARCHIVE_ERROR = 'billing MODIFIED failed for header "### Requirement: Bulk export" - not found\nAborted. No files were changed.';
+
+describe('archiving the change at delivery', () => {
+  it('archives the folder that holds the approved spec, then pushes the branch and opens the pull request', async () => {
+    const changeFolders = [
+      { name: 'other-change', files: ['proposal.md', 'tasks.md'] },
+      { name: 'billing-export', files: SPEC_PATHS },
+    ];
+
+    const { world, pullRequest } = await deliverWith({ changeFolders });
+
+    expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
+    expect(pullRequest?.branch).toBe('factory/pay-142');
+  });
+
+  it('scores the risk with the files the archive changed', async () => {
+    const changedFiles = Array.from({ length: 15 }, (_, index) => `src/billing/file-${index}.ts`);
+
+    const { run } = await deliverWith({ changedFiles, archivedFiles: ['openspec/specs/billing/spec.md'] });
+
+    expect(run?.risk?.signals).toContainEqual({ name: 'size', points: 2, reason: '16 files, more than 15' });
+  });
+
+  it('archives nothing when an attempt fails, so the next attempt builds against the change as it was', async () => {
+    const world = await getWorld();
+    await reachReview(world);
+
+    const result = await world.step({ verdicts: { reviewer: fail('Rounds before summing') } });
+
+    expect(result).toMatchObject({ next: 'build', attempt: 2 });
+    expect(world.events).toEqual([]);
+  });
+
+  it('sends the ticket back with the archive error, without a pull request, when the change cannot be archived', async () => {
+    const { world, pullRequest } = await deliverWith({ archiveError: ARCHIVE_ERROR });
+
+    const record = await world.record();
+    expect(world.events).toEqual(['archive billing-export']);
+    expect(world.pushes).toEqual([]);
+    expect(pullRequest).toBeUndefined();
+    expect(await world.status()).toBe('Spec review');
+    expect(record.runs[0]?.status).toBe('sent_back');
+    expect(record.refinement.sendBack?.questions).toEqual([
+      {
+        question: `openspec archive billing-export failed:\n${ARCHIVE_ERROR}\nHow should the delta spec change so that it applies to the canonical specs in openspec/specs/?`,
+        recommended: 'Fix the delta spec so that it applies to the canonical specs in openspec/specs/, then run the ready gate again.',
+      },
+    ]);
+  });
+
+  it('answers sent back when the archive fails', async () => {
+    const world = await getWorld({ archiveError: ARCHIVE_ERROR });
+    await reachReview(world);
+
+    const result = await world.step({ verdicts: { reviewer: PASS } });
+
+    expect(result).toEqual({
+      ok: true,
+      next: 'done',
+      exit: 'sent_back',
+      findings: [`openspec archive billing-export failed:\n${ARCHIVE_ERROR}\nHow should the delta spec change so that it applies to the canonical specs in openspec/specs/?`],
+    });
+  });
+
+  it.each([
+    ['no folder holds the approved spec', [{ name: 'other-change', files: ['proposal.md', 'tasks.md'] }]],
+    ['a folder holds the approved spec and one more spec file', [{ name: 'billing-export', files: [...SPEC_PATHS, 'specs/ledger/spec.md'] }]],
+    ['a folder holds only part of the approved spec', [{ name: 'billing-export', files: ['design.md', 'proposal.md', 'specs/billing/spec.md'] }]],
+    ['a folder holds another delta spec in place of the approved one', [{ name: 'billing-export', files: ['design.md', 'proposal.md', 'specs/ledger/spec.md', 'tasks.md'] }]],
+    [
+      'two folders hold the approved spec',
+      [
+        { name: 'billing-export', files: SPEC_PATHS },
+        { name: 'billing-export-copy', files: SPEC_PATHS },
+      ],
+    ],
+  ])('fails the attempt without archiving or opening a pull request when %s', async (_, changeFolders) => {
+    const world = await getWorld({ changeFolders });
+    await reachReview(world);
+
+    const result = await world.step({ verdicts: { reviewer: PASS } });
+
+    expect(result).toEqual({
+      ok: true,
+      next: 'build',
+      attempt: 2,
+      feedback: [{ id: 'archive', station: 'review', status: 'failed', reason: NOT_FOUND, durationSeconds: 0 }],
+    });
+    expect(world.events).toEqual([]);
+    expect(await world.sourceControl.getPullRequest(401)).toBeUndefined();
+  });
+
+  it('asks for a diagnosis when the change cannot be found on the last attempt', async () => {
+    const world = await getWorld({ attempts: 1, changeFolders: [] });
+    await reachReview(world);
+
+    const result = await world.step({ verdicts: { reviewer: PASS } });
+
+    expect(result).toMatchObject({ next: 'diagnose', attempts: [{ number: 1, failures: [{ id: 'archive', reason: NOT_FOUND }] }] });
+  });
+
+  it('compares the folder with the spec files of the ticket only, not its other attachments', async () => {
+    const { world } = await deliverWith({
+      specs: { 'mockup.png': 'png', 'factory-failure-report-run-1.md': '# Failure report' },
+      changeFolders: [{ name: 'billing-export', files: SPEC_PATHS }],
+    });
+
+    expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
+  });
+
+  it('matches the folder by its markdown files, whatever else it holds', async () => {
+    const { world } = await deliverWith({ changeFolders: [{ name: 'billing-export', files: [...SPEC_PATHS, '.openspec.yaml'] }] });
+
+    expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
+  });
+});

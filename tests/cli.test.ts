@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runtime.js';
 import { createInMemorySourceControl } from '../src/adapters/in-memory-source-control.js';
@@ -81,6 +81,8 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
       return commits[commit] ?? `Commit ${commit}`;
     },
     pushBranch: async (branch) => git.push(branch, 'c1'),
+    changeFolders: async () => [{ name: 'billing-export', files: Object.keys(files).map((name) => name.replaceAll('__', '/')) }],
+    archiveChange: async () => ({ ok: true }),
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
     config: config.value,
@@ -484,6 +486,23 @@ const getProjectFolder = (files: Readonly<Record<string, string>>): string => {
   return root;
 };
 
+const CANONICAL_BILLING = '# billing Specification\n\n## Purpose\nExports invoices for accounting.\n\n## Requirements\n### Requirement: Bulk export\nThe system SHALL export invoices in bulk.\n\n#### Scenario: Export\n- **WHEN** accounting asks for an export\n- **THEN** the invoices are exported\n';
+
+const withOrigin = (cwd: string, files: Readonly<Record<string, string>>): string => {
+  const origin = mkdtempSync(join(tmpdir(), 'factory-origin-'));
+  const run = (folder: string, ...args: readonly string[]) => execFileSync('git', ['-c', 'user.name=Pierre Dev', '-c', 'user.email=pierre@example.test', ...args], { cwd: folder });
+  run(origin, 'init', '-q', '-b', 'main');
+  Object.entries(files).forEach(([path, content]) => {
+    mkdirSync(dirname(join(origin, path)), { recursive: true });
+    writeFileSync(join(origin, path), content);
+  });
+  run(origin, 'commit', '-q', '--allow-empty', '-m', 'main');
+  run(origin, 'add', '.');
+  run(origin, 'commit', '-q', '--allow-empty', '-m', 'canonical specs');
+  run(cwd, 'remote', 'add', 'origin', origin);
+  return cwd;
+};
+
 const ENV = { JIRA_TOKEN: 'secret', JIRA_EMAIL: 'factory@acme.test', GH_TOKEN: 'gh-secret' };
 
 const hasOpenspec = (() => {
@@ -720,7 +739,7 @@ describe('setting the command line up in a project', () => {
   });
 
   it.skipIf(!hasOpenspec)('validates spec files with the real openspec command', async () => {
-    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
+    const cwd = withOrigin(getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML }), {});
     const deps = await createRealDeps({ cwd, env: ENV });
 
     const findings = await deps.validateSpec([
@@ -729,6 +748,21 @@ describe('setting the command line up in a project', () => {
     ]);
 
     expect(findings.some((finding) => finding.includes('must include at least one scenario'))).toBe(true);
+  });
+
+  it.skipIf(!hasOpenspec)('validates a delta with the real openspec command against the canonical specs on main', async () => {
+    const cwd = withOrigin(getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML }), { 'openspec/specs/billing/spec.md': CANONICAL_BILLING });
+    const deps = await createRealDeps({ cwd, env: ENV });
+    const modified = (requirement: string) => [
+      { name: 'proposal.md', content: '# Proposal\n\n## Why\nBecause accounting needs invoices exported in bulk every month.\n\n## What Changes\n- Change export\n' },
+      { name: 'specs__billing__spec.md', content: `# Spec Delta\n\n## MODIFIED Requirements\n### Requirement: ${requirement}\nThe system SHALL export every invoice of the month.\n\n#### Scenario: Export\n- **WHEN** accounting asks for an export\n- **THEN** the invoices are exported\n\n#### Scenario: Monthly export\n- **WHEN** a month ends\n- **THEN** every invoice of the month is exported\n` },
+    ];
+
+    const existing = await deps.validateSpec(modified('Bulk export'));
+    const missing = await deps.validateSpec(modified('Yearly export'));
+
+    expect(existing).toEqual([]);
+    expect(missing.some((finding) => finding.includes('Yearly export') && finding.includes('not found'))).toBe(true);
   });
 
   it('reads the project config, the developer name from git, and predicts risk from the spec', async () => {

@@ -276,6 +276,15 @@ describe('ready gate', () => {
     expect(seen).toEqual([['design.md', 'proposal.md', 'specs__billing__spec.md', 'tasks.md']]);
   });
 
+  it('fails with the finding of a delta that would not apply to the canonical specs', async () => {
+    const world = await getWorld(inSpecReview());
+    const refused = 'billing/spec.md: Archive would refuse this delta: billing MODIFIED failed for header "### Requirement: Bulk export" - not found';
+
+    const result = await runReadyGate(depsFor(world, { validateSpec: async () => [refused] }), 'PAY-142');
+
+    expect(result).toEqual({ ok: true, passed: false, findings: [refused] });
+  });
+
   it('reads the newest copy when a spec file was attached again', async () => {
     const world = await getWorld(inSpecReview(), { ...SPEC_FILES, 'design.md': '# Design\n\n## Decisions\n- D-001: TBD\n' });
     await world.tickets.addAttachment({ key: 'PAY-142', name: 'design.md', content: SPEC_FILES['design.md'] ?? '' });

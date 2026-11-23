@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCommandRunner, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
-import { createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
+import { createChangeArchive, createFilePublisher, createGitInputs, createRepositoryReader, createScriptRunner, createSpecFolder, createSpecValidator } from '../src/cli/inputs.js';
 
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Test Dev', '-c', 'user.email=test@example.test', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -373,5 +373,197 @@ describe('spec validator', () => {
     await createSpecValidator({ run: async () => ({ stdout: VALID }) })(FILES);
 
     expect(readdirSync(tmpdir()).filter((name) => name.startsWith('factory-spec-'))).toHaveLength(before);
+  });
+});
+
+const commitFiles = (cwd: string, files: Readonly<Record<string, string>>, message = 'add files'): string => {
+  Object.entries(files).forEach(([path, content]) => {
+    mkdirSync(dirname(join(cwd, path)), { recursive: true });
+    writeFileSync(join(cwd, path), content);
+  });
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-q', '-m', message);
+  return git(cwd, 'rev-parse', 'HEAD');
+};
+
+describe('canonical specs on main', () => {
+  it('reads every file under openspec/specs on the main branch of origin, fetching it first', async () => {
+    const { origin, clone } = getClone();
+    commitFiles(origin, { 'openspec/specs/billing/spec.md': '# Billing\n', 'openspec/specs/identity/user-auth/spec.md': '# Auth\n', 'openspec/changes/x/proposal.md': '# X\n' });
+    mkdirSync(join(clone, 'openspec/specs/local'), { recursive: true });
+    writeFileSync(join(clone, 'openspec/specs/local/spec.md'), '# Not on main');
+
+    const specs = await inputsFor(clone).canonicalSpecs();
+
+    expect(specs).toEqual([
+      { path: 'billing/spec.md', content: '# Billing\n' },
+      { path: 'identity/user-auth/spec.md', content: '# Auth\n' },
+    ]);
+  });
+
+  it('reads nothing when main has no canonical specs', async () => {
+    const { clone } = getClone();
+
+    expect(await inputsFor(clone).canonicalSpecs()).toEqual([]);
+  });
+});
+
+describe('spec validator with canonical specs', () => {
+  it('lays the canonical specs out under openspec/specs before it validates the change', async () => {
+    const seen: { billing?: string; auth?: string } = {};
+    const run: CommandRunner = async (_args, options) => {
+      const cwd = options?.cwd ?? '';
+      seen.billing = readFileSync(join(cwd, 'openspec/specs/billing/spec.md'), 'utf8');
+      seen.auth = readFileSync(join(cwd, 'openspec/specs/identity/user-auth/spec.md'), 'utf8');
+      return { stdout: VALID };
+    };
+    const canonicalSpecs = async () => [
+      { path: 'billing/spec.md', content: '# Billing' },
+      { path: 'identity/user-auth/spec.md', content: '# Auth' },
+    ];
+
+    const findings = await createSpecValidator({ run, canonicalSpecs })(FILES);
+
+    expect(findings).toEqual([]);
+    expect(seen).toEqual({ billing: '# Billing', auth: '# Auth' });
+  });
+
+  it('reports the finding of a delta that would not apply to the canonical specs', async () => {
+    const refused = JSON.stringify({
+      items: [{ id: 'candidate', valid: true, issues: [{ level: 'INFO', path: 'billing/spec.md', message: 'Archive would refuse this delta: billing MODIFIED failed for header "### Requirement: Bulk export" - not found' }] }],
+    });
+
+    const findings = await createSpecValidator({ run: async () => ({ stdout: refused }), canonicalSpecs: async () => [{ path: 'billing/spec.md', content: '# Billing' }] })(FILES);
+
+    expect(findings).toEqual(['billing/spec.md: Archive would refuse this delta: billing MODIFIED failed for header "### Requirement: Bulk export" - not found']);
+  });
+
+  it('refuses a canonical spec path that would land outside openspec/specs, without running anything', async () => {
+    const calls = { count: 0 };
+    const run: CommandRunner = async () => {
+      calls.count += 1;
+      return { stdout: VALID };
+    };
+
+    await expect(createSpecValidator({ run, canonicalSpecs: async () => [{ path: '../evil.md', content: 'x' }] })(FILES)).rejects.toThrow('../evil.md is not a valid canonical spec path');
+    await expect(createSpecValidator({ run, canonicalSpecs: async () => [{ path: '/etc/evil.md', content: 'x' }] })(FILES)).rejects.toThrow('/etc/evil.md is not a valid canonical spec path');
+    expect(calls.count).toBe(0);
+  });
+});
+
+const CHANGE_FILES = {
+  'openspec/changes/billing-export/proposal.md': '# Proposal\n',
+  'openspec/changes/billing-export/design.md': '# Design\n',
+  'openspec/changes/billing-export/tasks.md': '# Tasks\n\n- [x] 1. Done. Verified by a test.\n',
+  'openspec/changes/billing-export/specs/billing/spec.md': '# Spec Delta\n',
+  'openspec/changes/billing-export/.openspec.yaml': 'schema: spec-driven\n',
+  'openspec/changes/archive/2026-11-01-old/proposal.md': '# Old\n',
+  'openspec/changes/.gitkeep': '',
+  'openspec/changes/ledger/proposal.md': '# Ledger\n',
+};
+
+const ARCHIVE_FAILURE = 'Task status: 1/1 tasks\nbilling MODIFIED failed for header "### Requirement: Bulk export" - not found\nAborted. No files were changed.\n';
+
+const getRunBranch = () => {
+  const { clone } = getClone();
+  git(clone, 'config', 'user.email', 'pierre@example.test');
+  git(clone, 'checkout', '-q', '-b', 'factory/pay-142');
+  const reviewed = commitFiles(clone, { ...CHANGE_FILES, 'src/export.ts': 'export {}\n' }, 'PAY-142 add the exporter');
+  return { clone, reviewed };
+};
+
+const fakeOpenSpec = (calls: { args: readonly string[]; cwd: string }[], failure?: string): CommandRunner => async (args, options) => {
+  const cwd = options?.cwd ?? '';
+  calls.push({ args, cwd });
+  if (failure !== undefined) throw Object.assign(new Error('Command failed: openspec archive'), { stdout: failure });
+  const name = args[1] ?? '';
+  mkdirSync(join(cwd, 'openspec/specs/billing'), { recursive: true });
+  writeFileSync(join(cwd, 'openspec/specs/billing/spec.md'), '# Billing\n');
+  mkdirSync(join(cwd, 'openspec/changes/archive'), { recursive: true });
+  renameSync(join(cwd, 'openspec/changes', name), join(cwd, 'openspec/changes/archive', `2026-11-23-${name}`));
+  return { stdout: `Change '${name}' archived as '2026-11-23-${name}'.` };
+};
+
+const archiveFor = (cwd: string, openspec: CommandRunner) => {
+  const run = createCommandRunner('git');
+  return createChangeArchive({ git: (args) => run(args, { cwd }), openspec });
+};
+
+describe('change archive', () => {
+  it('lists the committed change folders outside archive/, with their files relative to the folder', async () => {
+    const { clone } = getRunBranch();
+    mkdirSync(join(clone, 'openspec/changes/uncommitted'), { recursive: true });
+    writeFileSync(join(clone, 'openspec/changes/uncommitted/proposal.md'), '# Not committed');
+
+    const folders = await archiveFor(clone, fakeOpenSpec([])).changeFolders();
+
+    expect(folders).toEqual([
+      { name: 'billing-export', files: ['.openspec.yaml', 'design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'] },
+      { name: 'ledger', files: ['proposal.md'] },
+    ]);
+  });
+
+  it('lists no folder when the branch has no change', async () => {
+    const { clone } = getClone();
+
+    expect(await archiveFor(clone, fakeOpenSpec([])).changeFolders()).toEqual([]);
+  });
+
+  it('archives the change in a separate checkout and adds the archive to the run branch as one commit', async () => {
+    const { clone, reviewed } = getRunBranch();
+    writeFileSync(join(clone, 'notes.txt'), 'unsaved work');
+    const calls: { args: readonly string[]; cwd: string }[] = [];
+
+    const result = await archiveFor(clone, fakeOpenSpec(calls)).archiveChange('billing-export');
+
+    expect(result).toEqual({ ok: true });
+    expect(calls.map(({ args }) => args)).toEqual([['archive', 'billing-export', '--yes']]);
+    expect(calls[0]?.cwd).not.toBe(clone);
+    expect(git(clone, 'branch', '--show-current')).toBe('factory/pay-142');
+    expect(git(clone, 'rev-parse', 'HEAD~1')).toBe(reviewed);
+    expect(git(clone, 'log', '-1', '--format=%s')).toBe('chore: archive the billing-export OpenSpec change');
+    expect(git(clone, 'show', '--name-status', '--format=', 'HEAD').split('\n').toSorted()).toEqual([
+      'A\topenspec/specs/billing/spec.md',
+      'R100\topenspec/changes/billing-export/.openspec.yaml\topenspec/changes/archive/2026-11-23-billing-export/.openspec.yaml',
+      'R100\topenspec/changes/billing-export/design.md\topenspec/changes/archive/2026-11-23-billing-export/design.md',
+      'R100\topenspec/changes/billing-export/proposal.md\topenspec/changes/archive/2026-11-23-billing-export/proposal.md',
+      'R100\topenspec/changes/billing-export/specs/billing/spec.md\topenspec/changes/archive/2026-11-23-billing-export/specs/billing/spec.md',
+      'R100\topenspec/changes/billing-export/tasks.md\topenspec/changes/archive/2026-11-23-billing-export/tasks.md',
+    ]);
+    expect(existsSync(join(clone, 'openspec/specs/billing/spec.md'))).toBe(true);
+    expect(readFileSync(join(clone, 'notes.txt'), 'utf8')).toBe('unsaved work');
+    expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
+  it('gives the CLI output and leaves the run branch as it was when the archive fails', async () => {
+    const { clone, reviewed } = getRunBranch();
+
+    const result = await archiveFor(clone, fakeOpenSpec([], ARCHIVE_FAILURE)).archiveChange('billing-export');
+
+    expect(result).toEqual({ ok: false, error: ARCHIVE_FAILURE.trim() });
+    expect(git(clone, 'rev-parse', 'HEAD')).toBe(reviewed);
+    expect(git(clone, 'status', '--porcelain')).toBe('');
+    expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
+  it('gives the error message when the CLI cannot be started at all', async () => {
+    const { clone } = getRunBranch();
+    const missing: CommandRunner = async () => {
+      throw new Error('spawn openspec ENOENT');
+    };
+
+    expect(await archiveFor(clone, missing).archiveChange('billing-export')).toEqual({ ok: false, error: 'spawn openspec ENOENT' });
+  });
+
+  it('gives the error message when the CLI fails without output', async () => {
+    const { clone, reviewed } = getRunBranch();
+    const missing: CommandRunner = async () => {
+      throw Object.assign(new Error('spawn openspec ENOENT'), { stdout: '' });
+    };
+
+    const result = await archiveFor(clone, missing).archiveChange('billing-export');
+
+    expect(result).toEqual({ ok: false, error: 'spawn openspec ENOENT' });
+    expect(git(clone, 'rev-parse', 'HEAD')).toBe(reviewed);
   });
 });
