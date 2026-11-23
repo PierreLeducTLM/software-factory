@@ -746,11 +746,34 @@ describe('archiving the change at delivery', () => {
     expect(run?.risk?.signals).toContainEqual({ name: 'size', points: 2, reason: '16 files, more than 15' });
   });
 
-  it('archives nothing when an attempt fails, so the next attempt builds against the change as it was', async () => {
+  it.each([
+    [
+      'the quality gate',
+      async (world: World) => {
+        world.scripts['pnpm test'] = [FAILING];
+        await world.step();
+        return world.step(BUILT);
+      },
+    ],
+    [
+      'openspec-verify',
+      async (world: World) => {
+        await world.step();
+        await world.step(BUILT);
+        return world.step({ verdicts: { 'openspec-verify': fail('Scenario "totals in mixed currencies" is not covered') } });
+      },
+    ],
+    [
+      'the review',
+      async (world: World) => {
+        await reachReview(world);
+        return world.step({ verdicts: { reviewer: fail('Rounds before summing') } });
+      },
+    ],
+  ])('archives nothing when %s fails, so the next attempt builds against the change as it was', async (_, failAt) => {
     const world = await getWorld();
-    await reachReview(world);
 
-    const result = await world.step({ verdicts: { reviewer: fail('Rounds before summing') } });
+    const result = await failAt(world);
 
     expect(result).toMatchObject({ next: 'build', attempt: 2 });
     expect(world.events).toEqual([]);
