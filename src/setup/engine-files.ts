@@ -29,5 +29,5 @@ export const enginePackage = (engine: string): string =>
 export const engineFiles = (engine: string): Readonly<Record<string, string>> => ({
   [ENGINE_PACKAGE_PATH]: enginePackage(engine),
   [LAUNCHER_PATH]: ENGINE_LAUNCHER,
-  '.factory/.gitignore': 'node_modules/\n',
+  '.factory/.gitignore': 'node_modules/\npackage-lock.json\n',
 });

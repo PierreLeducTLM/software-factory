@@ -98,6 +98,7 @@ describe('the files of an install', () => {
     const install = buildInstall(getAnswers({ engine: '0.3.1' }));
 
     expect(install.files).toMatchObject(engineFiles('0.3.1'));
+    expect(install.files['.factory/.gitignore']).toBe('node_modules/\npackage-lock.json\n');
     expect(JSON.parse(install.files['.factory/package.json'] ?? '').dependencies['software-factory']).toMatch(/#v0\.3\.1$/);
     expect(install.executable).toEqual(['.factory/bin/factory']);
   });
