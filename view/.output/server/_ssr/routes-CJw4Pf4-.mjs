@@ -1,8 +1,8 @@
 import { __toESM } from "../_runtime.mjs";
-import { CopyCommand, duration, fetchDetail, openRun } from "./router-CwKO00rL.mjs";
+import { CopyCommand, duration, fetchDetail, openRun } from "./router-BaQNQ9dA.mjs";
 import { isRedirect, require_jsx_runtime, require_react, useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { useLoaderData } from "../_libs/@tanstack/react-router+[3...].mjs";
-// node_modules/.nitro/vite/services/ssr/assets/routes-BGdA4AyS.js
+// node_modules/.nitro/vite/services/ssr/assets/routes-CJw4Pf4-.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function useServerFn(serverFn) {

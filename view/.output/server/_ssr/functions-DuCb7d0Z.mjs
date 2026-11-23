@@ -7,7 +7,7 @@ import { hostname } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-// node_modules/.nitro/vite/services/ssr/assets/functions-BbiXKzoV.js
+// node_modules/.nitro/vite/services/ssr/assets/functions-DuCb7d0Z.js
 var import_dist = require_dist();
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
@@ -1865,27 +1865,32 @@ var createViewStore = ({ providers, states, now, doneWindowDays }) => {
 			}));
 		}))).flat();
 	};
+	const update = async (merge) => {
+		const at = now();
+		const held = state.snapshot;
+		const { tickets, refreshedAt } = held;
+		try {
+			const merged = await merge(held, at);
+			state.snapshot = {
+				tickets: merged.filter((ticket) => tracked.includes(ticket.status)),
+				refreshedAt: at
+			};
+		} catch (error) {
+			state.snapshot = {
+				tickets,
+				...refreshedAt === void 0 ? {} : { refreshedAt },
+				staleSince: state.snapshot.staleSince ?? refreshedAt ?? at,
+				problem: error instanceof Error ? error.message : String(error)
+			};
+		}
+	};
 	return {
 		snapshot: () => state.snapshot,
-		refresh: async () => {
-			const at = now();
-			const { tickets, refreshedAt } = state.snapshot;
-			try {
-				const changed = await read(refreshedAt, at);
-				const untouched = tickets.filter((ticket) => !changed.some((other) => other.key === ticket.key && other.provider === ticket.provider));
-				state.snapshot = {
-					tickets: [...untouched, ...changed].filter((ticket) => tracked.includes(ticket.status)),
-					refreshedAt: at
-				};
-			} catch (error) {
-				state.snapshot = {
-					tickets,
-					...refreshedAt === void 0 ? {} : { refreshedAt },
-					staleSince: state.snapshot.staleSince ?? refreshedAt ?? at,
-					problem: error instanceof Error ? error.message : String(error)
-				};
-			}
-		}
+		refresh: () => update(async ({ tickets, refreshedAt }, at) => {
+			const changed = await read(refreshedAt, at);
+			return [...tickets.filter((ticket) => !changed.some((other) => other.key === ticket.key && other.provider === ticket.provider)), ...changed];
+		}),
+		reload: () => update((_held, at) => read(void 0, at))
 	};
 };
 var DONE_WINDOW_DAYS = 7;
@@ -1909,29 +1914,40 @@ var createViewSource = ({ providers, config, repository, machine, now, openWorkt
 		state.attemptedAt = at;
 		await store.refresh();
 	};
+	const reloaded = async () => {
+		state.attemptedAt = Date.parse(now());
+		await store.reload();
+	};
+	const view = () => {
+		const { tickets, refreshedAt, staleSince, problem } = store.snapshot();
+		const options = {
+			config,
+			now: now(),
+			machine,
+			repository
+		};
+		const columns = buildBoard(tickets, options);
+		return {
+			repository,
+			providers: providers.map(({ name }) => name),
+			columns,
+			needsYou: buildNeedsYou(tickets, options),
+			running: columns.filter((column) => RUNNING_COLUMNS.includes(column.id)).flatMap((column) => column.cards).filter((card) => !card.interrupted).length,
+			pollSeconds: config.view.poll_seconds,
+			loadedAt: options.now,
+			...refreshedAt === void 0 ? {} : { refreshedAt },
+			...staleSince === void 0 ? {} : { staleSince },
+			...problem === void 0 ? {} : { problem }
+		};
+	};
 	return {
 		load: async () => {
 			await fresh();
-			const { tickets, refreshedAt, staleSince, problem } = store.snapshot();
-			const options = {
-				config,
-				now: now(),
-				machine,
-				repository
-			};
-			const columns = buildBoard(tickets, options);
-			return {
-				repository,
-				providers: providers.map(({ name }) => name),
-				columns,
-				needsYou: buildNeedsYou(tickets, options),
-				running: columns.filter((column) => RUNNING_COLUMNS.includes(column.id)).flatMap((column) => column.cards).filter((card) => !card.interrupted).length,
-				pollSeconds: config.view.poll_seconds,
-				loadedAt: options.now,
-				...refreshedAt === void 0 ? {} : { refreshedAt },
-				...staleSince === void 0 ? {} : { staleSince },
-				...problem === void 0 ? {} : { problem }
-			};
+			return view();
+		},
+		reload: async () => {
+			await reloaded();
+			return view();
 		},
 		detail: async (key) => {
 			await fresh();
@@ -2195,6 +2211,11 @@ var createDemoViewSource = ({ config, now }) => {
 		openWorktree: () => Promise.reject(/* @__PURE__ */ new Error("This is sample data, with no Orca session behind it."))
 	});
 };
+object({
+	code: number(),
+	stdout: string().default(""),
+	stderr: string().default("")
+});
 object({ code: number() });
 object({ items: tuple([object({ issues: array(object({
 	path: string(),
@@ -2301,6 +2322,24 @@ var fetchView = createServerFn({ method: "GET" }).handler(fetchView_createServer
 		};
 	}
 });
+var reloadView_createServerFn_handler = createServerRpc({
+	id: "9626c782228982b94e45134c43ed37990be326a9d948c83165234ac1facbb9b8",
+	name: "reloadView",
+	filename: "src/server/functions.ts"
+}, (opts) => reloadView.__executeServer(opts));
+var reloadView = createServerFn({ method: "POST" }).handler(reloadView_createServerFn_handler, async () => {
+	try {
+		return {
+			ok: true,
+			data: await (await getSource()).reload()
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			message: messageOf(error)
+		};
+	}
+});
 var fetchDetail_createServerFn_handler = createServerRpc({
 	id: "556e74f1f6692729f191d3f7ae147ed330525a375e523f7fe97b12869b3d33bc",
 	name: "fetchDetail",
@@ -2336,4 +2375,4 @@ var fetchHealth = createServerFn({ method: "GET" }).validator((days) => PERIODS.
 		};
 	}
 });
-export { fetchDetail_createServerFn_handler, fetchHealth_createServerFn_handler, fetchView_createServerFn_handler, openRun_createServerFn_handler };
+export { fetchDetail_createServerFn_handler, fetchHealth_createServerFn_handler, fetchView_createServerFn_handler, openRun_createServerFn_handler, reloadView_createServerFn_handler };
