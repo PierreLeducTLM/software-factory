@@ -339,13 +339,24 @@ describe('the CI of the project while setting up', () => {
     expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] });
   });
 
-  it('adds nothing to a project without CI, and says what to run by hand', async () => {
+  it('says no workflow builds main when the only workflow is the factory workflow from an earlier install', async () => {
+    const factoryOnly = 'name: Factory\non: push\njobs:\n  record-merge:\n    steps:\n      - run: .factory/bin/factory record-merge --commit ${{ github.sha }}\n';
+    const { deps, published } = getInit({ files: { ...PROJECT, '.github/workflows/factory.yml': factoryOnly } });
+
+    const result = await initProject(deps, LINEAR);
+
+    expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
+    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.'] });
+  });
+
+  it('adds the factory workflow without revert to a GitHub project without CI, and says why revert is missing', async () => {
     const { deps, published } = getInit();
 
     const result = await initProject(deps, LINEAR);
 
-    expect(Object.keys(published[0]?.files ?? {})).not.toContain('.github/workflows/factory.yml');
-    expect(result).toMatchObject({ ok: true, secrets: [] });
+    expect(published[0]?.files['.github/workflows/factory.yml']).toContain('record-merge');
+    expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
+    expect(result).toMatchObject({ ok: true, secrets: ['FACTORY_LINEAR_API_KEY'], manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.'] });
   });
 });
 

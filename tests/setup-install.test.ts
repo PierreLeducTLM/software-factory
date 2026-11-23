@@ -148,6 +148,17 @@ describe('the CI steps of an install on GitHub', () => {
     expect(install.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
     expect(install.manual).toEqual(['The revert step was left out: name the workflow that builds the main branch, then run the install again.']);
   });
+
+  it('adds the factory workflow with record-merge, and lists the tracker secrets, on a GitHub repository with no CI', async () => {
+    const install = buildInstall(getAnswers({ ci: { system: 'none' } }));
+    const workflow = install.files['.github/workflows/factory.yml'] ?? '';
+    const detection = await detectProject({ files: createInMemoryProjectFiles({ '.github/workflows/factory.yml': workflow }) });
+
+    expect(detection.ci.factorySteps).toEqual(['record-merge']);
+    expect(workflow).not.toContain('workflow_run');
+    expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(install.manual).toEqual(['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.']);
+  });
 });
 
 describe('the CI steps of an install elsewhere', () => {
@@ -166,8 +177,20 @@ describe('the CI steps of an install elsewhere', () => {
     expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
   });
 
-  it('says what to run when the project has no CI', () => {
-    const install = buildInstall(getAnswers({ ci: { system: 'none' } }));
+  it('keeps the GitHub workflow for a Bitbucket repository whose CI is GitHub Actions, and the Bitbucket steps for a GitHub repository built by Bitbucket Pipelines', () => {
+    const actions = buildInstall(getAnswers({ sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
+    const pipelines = buildInstall(getAnswers({ ci: { system: 'bitbucket-pipelines' } }));
+
+    expect(Object.keys(actions.files)).toContain('.github/workflows/factory.yml');
+    expect(actions.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(actions.manual).toEqual([]);
+    expect(Object.keys(pipelines.files)).not.toContain('.github/workflows/factory.yml');
+    expect(pipelines.manual).toHaveLength(2);
+    expect(pipelines.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'GH_TOKEN']);
+  });
+
+  it('says what to run when a Bitbucket project has no CI', () => {
+    const install = buildInstall(getAnswers({ ci: { system: 'none' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
 
     expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
     expect(install.manual).toEqual(['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.']);

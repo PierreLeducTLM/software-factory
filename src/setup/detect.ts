@@ -230,3 +230,16 @@ export const detectProject = async ({ files, remoteUrl, mainBranch }: Options): 
     ...(mainBranch === undefined ? {} : { mainBranch }),
   };
 };
+
+const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
+const NamedSchema = z.object({ name: z.string() });
+
+export const mainBuildWorkflow = async (files: ProjectFiles, detection: Detection): Promise<string | undefined> => {
+  if (detection.ci.system !== 'github-actions') return undefined;
+  const others = detection.ci.files.filter((file) => file !== FACTORY_WORKFLOW);
+  const holding = detection.candidates.find((candidate) => candidate.source === 'ci')?.from;
+  const file = holding ?? (others.length === 1 ? others[0] : undefined);
+  if (file === undefined) return undefined;
+  const named = NamedSchema.safeParse(yamlOf(await files.read(file)));
+  return named.success ? named.data.name : file;
+};

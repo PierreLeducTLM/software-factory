@@ -1,11 +1,10 @@
-import { parse } from 'yaml';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { TICKET_PROVIDER_NAMES, type AdaptersConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION } from '../version.js';
 import type { FactoryState } from '../record/ticket-record.js';
-import { detectProject, type Category, type Detection } from './detect.js';
+import { detectProject, mainBuildWorkflow, type Category, type Detection } from './detect.js';
 import { adaptersFor, buildInstall, type ChosenCheck, type Connection, type InstallAnswers } from './install.js';
 import { matchStatuses } from './match-statuses.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
@@ -134,14 +133,9 @@ const checksOf = (detection: Detection, verification: readonly Verification[]): 
     };
   });
 
-const workflowOf = async (deps: InitDeps, detection: Detection): Promise<string | undefined> => {
-  if (detection.ci.system !== 'github-actions') return undefined;
-  const others = detection.ci.files.filter((file) => file !== FACTORY_WORKFLOW);
-  const holding = detection.candidates.find((candidate) => candidate.source === 'ci')?.from;
-  const file = holding ?? (others.length === 1 ? others[0] : undefined);
-  if (file === undefined) return undefined;
-  const name: unknown = (parse((await deps.files.read(file)) ?? '') as { readonly name?: unknown } | null)?.name;
-  return typeof name === 'string' ? name : file;
+const ciSystemOf = (detection: Detection, sourceControl: Connection['sourceControl']): InstallAnswers['ci']['system'] => {
+  const builds = detection.ci.jobs.some((job) => job.file !== FACTORY_WORKFLOW);
+  return sourceControl.kind === 'github' && !builds ? 'none' : detection.ci.system;
 };
 
 const summaryOf = (answers: InstallAnswers, advisory: readonly string[]): readonly string[] => {
@@ -189,7 +183,7 @@ export const initProject = async (deps: InitDeps, input: InitInput): Promise<Ini
   }
 
   const verification = input.verify ? await verifyChecks(deps, detection.candidates) : [];
-  const workflow = await workflowOf(deps, detection);
+  const workflow = await mainBuildWorkflow(deps.files, detection);
   const answers: InstallAnswers = {
     engine: ENGINE_VERSION,
     repository,
@@ -199,7 +193,7 @@ export const initProject = async (deps: InitDeps, input: InitInput): Promise<Ini
     sensitivePaths: [...(input.sensitivePaths ?? [])],
     ticketProvider,
     sourceControl,
-    ci: { system: detection.ci.system, ...(workflow === undefined ? {} : { workflow }) },
+    ci: { system: ciSystemOf(detection, sourceControl), ...(workflow === undefined ? {} : { workflow }) },
   };
   const installed = await installFactory(deps, answers, { ticket: input.ticket });
   if (!installed.ok) return installed;

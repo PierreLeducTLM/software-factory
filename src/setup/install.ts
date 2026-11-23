@@ -46,7 +46,7 @@ const STATIONS: Readonly<Record<Category, string>> = { tests: 'quality', lint: '
 const DEFAULT_LABELS = { auto: 'factory-auto', no_automerge: 'factory:no-automerge' };
 const FACTORY_YAML = '.factory/factory.yaml';
 const ADAPTERS_YAML = '.factory/adapters.yaml';
-const WORKFLOW_FILE = '.github/workflows/factory.yml';
+export const WORKFLOW_FILE = '.github/workflows/factory.yml';
 const BITBUCKET_FILE = 'bitbucket-pipelines.yml';
 
 const RUBRICS_README = `# Agent check rubrics
@@ -58,6 +58,9 @@ Add a check with \`/factory-workflow\`. It writes the rubric, validates the conf
 `;
 
 const FACTORY = '.factory/bin/factory';
+
+const UNNAMED_MAIN_BUILD = 'The revert step was left out: name the workflow that builds the main branch, then run the install again.';
+const NO_MAIN_BUILD = 'The revert step was left out because no workflow builds the main branch. Add one, then run the install again.';
 
 const secretName = (env: string): string => `FACTORY_${env}`;
 
@@ -122,39 +125,59 @@ const githubJob = (condition: string, command: string): readonly string[] => [
   `      - run: ${FACTORY} ${command}`,
 ];
 
-const githubWorkflow = (answers: InstallAnswers): string => {
-  const { mainBranch, sourceControl, ci, watch } = answers;
-  return [
+export type FactoryWorkflowInput = {
+  readonly mainBranch: string;
+  readonly providerEnvs: readonly string[];
+  readonly tokenEnv?: string;
+  readonly mainBuild?: string;
+  readonly watchEnvironment?: string;
+};
+
+export type FactoryWorkflow = { readonly path: string; readonly text: string; readonly secrets: readonly string[] };
+
+export const factoryWorkflow = ({ mainBranch, providerEnvs: envs, tokenEnv, mainBuild, watchEnvironment }: FactoryWorkflowInput): FactoryWorkflow => ({
+  path: WORKFLOW_FILE,
+  secrets: envs.map(secretName),
+  text: [
     'name: Factory',
     'on:',
     '  push:',
     `    branches: [${mainBranch}]`,
-    ...(ci.workflow === undefined ? [] : ['  workflow_run:', `    workflows: [${JSON.stringify(ci.workflow)}]`, '    types: [completed]', `    branches: [${mainBranch}]`]),
-    ...(watch === undefined ? [] : ['  deployment_status:']),
+    ...(mainBuild === undefined ? [] : ['  workflow_run:', `    workflows: [${JSON.stringify(mainBuild)}]`, '    types: [completed]', `    branches: [${mainBranch}]`]),
+    ...(watchEnvironment === undefined ? [] : ['  deployment_status:']),
     'permissions:',
     '  contents: write',
     '  pull-requests: write',
     'env:',
-    ...providerEnvs(answers).map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
-    `  ${sourceControl.tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`,
+    ...envs.map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
+    ...(tokenEnv === undefined ? [] : [`  ${tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`]),
     'jobs:',
     '  record-merge:',
     ...githubJob("github.event_name == 'push'", 'record-merge --commit ${{ github.sha }}'),
-    ...(ci.workflow === undefined
+    ...(mainBuild === undefined
       ? []
       : ['  revert:', ...githubJob("github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'", 'revert --commit ${{ github.event.workflow_run.head_sha }}')]),
-    ...(watch === undefined
+    ...(watchEnvironment === undefined
       ? []
       : [
           '  watch:',
           ...githubJob(
-            `github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == '${watch.environment}'`,
+            `github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment.environment == '${watchEnvironment}'`,
             'watch --commit ${{ github.event.deployment.sha }}',
           ),
         ]),
     '',
-  ].join('\n');
-};
+  ].join('\n'),
+});
+
+const githubWorkflow = (answers: InstallAnswers): FactoryWorkflow =>
+  factoryWorkflow({
+    mainBranch: answers.mainBranch,
+    providerEnvs: providerEnvs(answers),
+    tokenEnv: answers.sourceControl.tokenEnv,
+    ...(answers.ci.workflow === undefined ? {} : { mainBuild: answers.ci.workflow }),
+    ...(answers.watch === undefined ? {} : { watchEnvironment: answers.watch.environment }),
+  });
 
 const bitbucketSteps = ({ mainBranch, watch }: InstallAnswers): readonly string[] => [
   `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
@@ -173,22 +196,23 @@ export const buildInstall = (answers: InstallAnswers): Install => {
   const parsedFactory = parseFactoryConfig(factory);
   const parsedAdapters = parseAdaptersConfig(adapters);
   const { system, workflow } = answers.ci;
-  const github = system === 'github-actions';
+  const github = system === 'github-actions' || (system === 'none' && answers.sourceControl.kind === 'github');
   return {
     files: {
       [FACTORY_YAML]: checked(FACTORY_YAML, factory, parsedFactory.ok ? undefined : parsedFactory.issues),
       [ADAPTERS_YAML]: checked(ADAPTERS_YAML, adapters, parsedAdapters.ok ? undefined : parsedAdapters.issues),
       '.factory/checks/README.md': RUBRICS_README,
       ...engineFiles(answers.engine),
-      ...(github ? { [WORKFLOW_FILE]: githubWorkflow(answers) } : {}),
+      ...(github ? { [WORKFLOW_FILE]: githubWorkflow(answers).text } : {}),
     },
     executable: [LAUNCHER_PATH],
     manual: [
       ...(system === 'bitbucket-pipelines' ? bitbucketSteps(answers) : []),
-      ...(system === 'none' ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
-      ...(github && workflow === undefined ? ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] : []),
+      ...(system === 'none' && !github ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
+      ...(github && system === 'none' ? [NO_MAIN_BUILD] : []),
+      ...(github && system !== 'none' && workflow === undefined ? [UNNAMED_MAIN_BUILD] : []),
     ],
-    secrets: system === 'none' ? [] : [...(github ? providerEnvs(answers).map(secretName) : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])])],
+    secrets: github ? githubWorkflow(answers).secrets : system === 'none' ? [] : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])],
   };
 };
 

@@ -120,7 +120,7 @@ describe('the install wizard', () => {
   it('lists the steps to make by hand in the pull request, and leaves out an empty secrets list', async () => {
     const { deps, opened } = getInit();
 
-    const result = await installFactory(deps, getAnswers({ ci: { system: 'none' } }), { ticket: 'PAY-1' });
+    const result = await installFactory(deps, getAnswers({ ci: { system: 'none' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }), { ticket: 'PAY-1' });
 
     expect(result).toMatchObject({ ok: true, secrets: [] });
     expect(opened[0]?.body.split('\n')).toEqual([
