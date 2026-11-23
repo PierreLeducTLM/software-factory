@@ -59,6 +59,8 @@ export type WorldOptions = {
   readonly changeFolders?: readonly ChangeFolder[];
   readonly archiveError?: string;
   readonly archivedFiles?: readonly string[];
+  readonly archiveThrows?: string;
+  readonly pushFailures?: number;
 };
 
 const specPath = (name: string): string => name.replaceAll('__', '/');
@@ -89,7 +91,8 @@ export const getWorld = async (options?: WorldOptions) => {
   const changedOnMain: string[] = [];
   const events: string[] = [];
   const archived: string[] = [];
-  const folders = options?.changeFolders ?? [{ name: 'billing-export', files: Object.keys({ ...SPEC_FILES, ...options?.specs }).map(specPath) }];
+  const failures = { push: options?.pushFailures ?? 0 };
+  const folders: ChangeFolder[] = [...(options?.changeFolders ?? [{ name: 'billing-export', files: Object.keys({ ...SPEC_FILES, ...options?.specs }).map(specPath), archived: false }])];
   const deps: LoopDeps = {
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
@@ -112,15 +115,23 @@ export const getWorld = async (options?: WorldOptions) => {
     changedFilesOnBranch: async () => [...(options?.changedFiles ?? ['src/billing/export.ts']), ...archived],
     linesChangedOnBranch: async () => options?.lines ?? 40,
     commitMessage: async (commit) => commits[commit] ?? `Commit ${commit}`,
-    changeFolders: async () => folders,
+    changeFolders: async () => [...folders],
     archiveChange: async (name) => {
       events.push(`archive ${name}`);
+      if (options?.archiveThrows !== undefined) throw new Error(options.archiveThrows);
       if (options?.archiveError !== undefined) return { ok: false, error: options.archiveError };
       archived.push(...(options?.archivedFiles ?? []));
+      const index = folders.findIndex((folder) => folder.name === name);
+      const moved = folders[index];
+      if (moved !== undefined) folders.splice(index, 1, { name: `2026-11-21-${name}`, files: moved.files, archived: true });
       return { ok: true };
     },
     pushBranch: async (branch) => {
       events.push(`push ${branch}`);
+      if (failures.push > 0) {
+        failures.push -= 1;
+        throw new Error('git push failed: could not reach origin');
+      }
       pushes.push(branch);
       git.push(branch, `commit-${pushes.length}`);
     },

@@ -36,7 +36,7 @@ export type LoopDeps = RefinementDeps & {
   readonly archiveChange: (name: string) => Promise<ArchiveResult>;
 };
 
-export type ChangeFolder = { readonly name: string; readonly files: readonly string[] };
+export type ChangeFolder = { readonly name: string; readonly files: readonly string[]; readonly archived: boolean };
 
 export type ArchiveResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
@@ -219,11 +219,19 @@ const markdownOf = (files: readonly string[]): readonly string[] => files.filter
 const sameFiles = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((file, index) => file === right[index]);
 
-const changeOf = async ({ deps, key }: Context): Promise<string | undefined> => {
+type Change = { readonly name: string; readonly archived: boolean };
+
+const onlyOne = (folders: readonly ChangeFolder[]): Change | undefined => {
+  const [folder] = folders;
+  return folders.length === 1 && folder !== undefined ? { name: folder.name, archived: folder.archived } : undefined;
+};
+
+const changeOf = async ({ deps, key }: Context): Promise<Change | undefined> => {
   const attached = (await deps.tickets.listAttachments(key)).map(({ name }) => name).filter((name) => !name.startsWith(FACTORY_PREFIX));
   const spec = markdownOf([...new Set(attached)].map((name) => name.replaceAll('__', '/')));
   const matching = (await deps.changeFolders()).filter((folder) => sameFiles(markdownOf(folder.files), spec));
-  return matching.length === 1 ? matching[0]?.name : undefined;
+  const open = matching.filter((folder) => !folder.archived);
+  return open.length > 0 ? onlyOne(open) : onlyOne(matching);
 };
 
 const notFound = (key: string): string =>
@@ -240,8 +248,9 @@ const deliver = async (context: Context, record: TicketRecord, raise: RiskRaise 
   if (change === undefined) {
     return failAttempt(context, withOutcomes(record, [{ id: ARCHIVE, station: REVIEW_STATION, status: 'failed', reason: notFound(key), durationSeconds: 0 }]));
   }
-  const archived = await deps.archiveChange(change);
-  if (!archived.ok) return sendBack(context, record, [archiveRefused(change, archived.error)]);
+  if (change.archived) return openPullRequest(context, record, raise);
+  const archived = await deps.archiveChange(change.name);
+  if (!archived.ok) return sendBack(context, record, [archiveRefused(change.name, archived.error)]);
   return openPullRequest(context, record, raise);
 };
 

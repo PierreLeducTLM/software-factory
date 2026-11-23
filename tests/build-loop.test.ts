@@ -720,14 +720,16 @@ describe('what advance needs to be told', () => {
 });
 
 const SPEC_PATHS = ['design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'];
+const active = (name: string, files: readonly string[] = SPEC_PATHS) => ({ name, files, archived: false });
+const archivedOnBranch = (name: string, files: readonly string[] = SPEC_PATHS) => ({ name, files, archived: true });
 const NOT_FOUND = 'The approved spec of PAY-142 is not in one folder under openspec/changes/. Pull it with factory pull PAY-142 --to openspec/changes/<name> and commit it.';
 const ARCHIVE_ERROR = 'billing MODIFIED failed for header "### Requirement: Bulk export" - not found\nAborted. No files were changed.';
 
 describe('archiving the change at delivery', () => {
   it('archives the folder that holds the approved spec, then pushes the branch and opens the pull request', async () => {
     const changeFolders = [
-      { name: 'other-change', files: ['proposal.md', 'tasks.md'] },
-      { name: 'billing-export', files: SPEC_PATHS },
+      active('other-change', ['proposal.md', 'tasks.md']),
+      active('billing-export'),
     ];
 
     const { world, pullRequest } = await deliverWith({ changeFolders });
@@ -786,17 +788,12 @@ describe('archiving the change at delivery', () => {
   });
 
   it.each([
-    ['no folder holds the approved spec', [{ name: 'other-change', files: ['proposal.md', 'tasks.md'] }]],
-    ['a folder holds the approved spec and one more spec file', [{ name: 'billing-export', files: [...SPEC_PATHS, 'specs/ledger/spec.md'] }]],
-    ['a folder holds only part of the approved spec', [{ name: 'billing-export', files: ['design.md', 'proposal.md', 'specs/billing/spec.md'] }]],
-    ['a folder holds another delta spec in place of the approved one', [{ name: 'billing-export', files: ['design.md', 'proposal.md', 'specs/ledger/spec.md', 'tasks.md'] }]],
-    [
-      'two folders hold the approved spec',
-      [
-        { name: 'billing-export', files: SPEC_PATHS },
-        { name: 'billing-export-copy', files: SPEC_PATHS },
-      ],
-    ],
+    ['no folder holds the approved spec', [active('other-change', ['proposal.md', 'tasks.md'])]],
+    ['a folder holds the approved spec and one more spec file', [active('billing-export', [...SPEC_PATHS, 'specs/ledger/spec.md'])]],
+    ['a folder holds only part of the approved spec', [active('billing-export', ['design.md', 'proposal.md', 'specs/billing/spec.md'])]],
+    ['a folder holds another delta spec in place of the approved one', [active('billing-export', ['design.md', 'proposal.md', 'specs/ledger/spec.md', 'tasks.md'])]],
+    ['two folders hold the approved spec', [active('billing-export'), active('billing-export-copy')]],
+    ['two archives of the approved spec were added on the branch', [archivedOnBranch('2026-11-20-billing-export'), archivedOnBranch('2026-11-21-billing-export')]],
   ])('fails the attempt without archiving or opening a pull request when %s', async (_, changeFolders) => {
     const world = await getWorld({ changeFolders });
     await reachReview(world);
@@ -825,15 +822,48 @@ describe('archiving the change at delivery', () => {
   it('compares the folder with the spec files of the ticket only, not its other attachments', async () => {
     const { world } = await deliverWith({
       specs: { 'mockup.png': 'png', 'factory-failure-report-run-1.md': '# Failure report' },
-      changeFolders: [{ name: 'billing-export', files: SPEC_PATHS }],
+      changeFolders: [active('billing-export')],
     });
 
     expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
   });
 
   it('matches the folder by its markdown files, whatever else it holds', async () => {
-    const { world } = await deliverWith({ changeFolders: [{ name: 'billing-export', files: [...SPEC_PATHS, '.openspec.yaml'] }] });
+    const { world } = await deliverWith({ changeFolders: [active('billing-export', [...SPEC_PATHS, '.openspec.yaml'])] });
 
     expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
+  });
+
+  it('opens the pull request without archiving again when a delivery is resumed after its archive landed', async () => {
+    const world = await getWorld({ pushFailures: 1 });
+    await reachReview(world);
+    const interrupted = await world.step({ verdicts: { reviewer: PASS } }).catch((error: unknown) => (error instanceof Error ? error.message : 'no error'));
+
+    const resumed = await world.step({ verdicts: { reviewer: PASS } });
+
+    expect(interrupted).toBe('git push failed: could not reach origin');
+    expect(resumed).toEqual({ ok: true, next: 'done', exit: 'pull_request', url: 'memory://pull/401' });
+    expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142', 'push factory/pay-142']);
+  });
+
+  it('archives the change folder rather than resuming when the branch holds both the change and an archive of it', async () => {
+    const { world } = await deliverWith({ changeFolders: [archivedOnBranch('2026-11-20-billing-export'), active('billing-export')] });
+
+    expect(world.events).toEqual(['archive billing-export', 'push factory/pay-142']);
+  });
+
+  it('stops with the error and keeps the run where it was when the openspec command cannot run at all', async () => {
+    const world = await getWorld({ archiveThrows: 'spawn openspec ENOENT' });
+    await reachReview(world);
+
+    const stopped = await world.step({ verdicts: { reviewer: PASS } }).catch((error: unknown) => (error instanceof Error ? error.message : 'no error'));
+
+    const record = await world.record();
+    expect(stopped).toBe('spawn openspec ENOENT');
+    expect(world.pushes).toEqual([]);
+    expect(await world.status()).toBe('In development');
+    expect(record.runs[0]?.status).toBe('running');
+    expect(record.runs[0]?.steps.at(-1)).toMatchObject({ name: 'review' });
+    expect(record.runs[0]?.steps.at(-1)?.endedAt).toBeUndefined();
   });
 });

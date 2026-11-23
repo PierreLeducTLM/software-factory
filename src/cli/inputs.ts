@@ -51,35 +51,50 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
   };
 };
 
-const OutputSchema = z.object({ stdout: z.string() });
+const RefusalSchema = z.object({ code: z.number(), stdout: z.string().default(''), stderr: z.string().default('') });
 
-const failureOf = (error: unknown): string => {
-  const output = OutputSchema.safeParse(error);
-  const printed = output.success ? output.data.stdout.trim() : '';
-  if (printed !== '') return printed;
-  return error instanceof Error ? error.message : String(error);
+const refusalOf = (error: unknown): string => {
+  const refusal = RefusalSchema.safeParse(error);
+  if (!refusal.success) throw error;
+  const printed = [refusal.data.stdout, refusal.data.stderr].map((output) => output.trim()).find((output) => output !== '');
+  return printed ?? (error instanceof Error ? error.message : String(error));
 };
 
-const foldersOf = (paths: readonly string[]): readonly ChangeFolder[] => {
-  const entries = paths.flatMap((path) => {
-    const [name = '', ...rest] = path.slice(CHANGES.length + 1).split('/');
-    return name === ARCHIVE_FOLDER || rest.length === 0 ? [] : [{ name, file: rest.join('/') }];
+type Entry = { readonly folder: string; readonly file: string };
+
+const entriesOf = (paths: readonly string[], prefix: string): readonly Entry[] =>
+  paths.flatMap((path) => {
+    const [folder = '', ...rest] = path.slice(prefix.length + 1).split('/');
+    return rest.length === 0 ? [] : [{ folder, file: rest.join('/') }];
   });
-  const names = [...new Set(entries.map(({ name }) => name))].toSorted();
-  return names.map((name) => ({ name, files: entries.filter((entry) => entry.name === name).map(({ file }) => file).toSorted() }));
-};
 
-export const createChangeArchive = ({ git, openspec }: { readonly git: CommandRunner; readonly openspec: CommandRunner }) => ({
-  changeFolders: async (): Promise<readonly ChangeFolder[]> => foldersOf(linesOf((await git(['ls-tree', '-r', '--name-only', 'HEAD', '--', CHANGES])).stdout)),
+const foldersOf = (entries: readonly Entry[], archived: boolean): readonly ChangeFolder[] =>
+  [...new Set(entries.map(({ folder }) => folder))]
+    .toSorted()
+    .map((name) => ({ name, files: entries.filter((entry) => entry.folder === name).map(({ file }) => file).toSorted(), archived }));
+
+type ArchiveOptions = { readonly git: CommandRunner; readonly openspec: CommandRunner; readonly mainBranch: string };
+
+export const createChangeArchive = ({ git, openspec, mainBranch }: ArchiveOptions) => ({
+  changeFolders: async (): Promise<readonly ChangeFolder[]> => {
+    const archive = `${CHANGES}/${ARCHIVE_FOLDER}`;
+    const listed = async (path: string): Promise<readonly string[]> => linesOf((await git(['ls-tree', '-r', '--name-only', 'HEAD', '--', path])).stdout);
+    await git(['fetch', '--quiet', 'origin', mainBranch]);
+    const added = linesOf((await git(['diff', '--name-only', '--no-renames', '--diff-filter=A', `origin/${mainBranch}...HEAD`, '--', archive])).stdout);
+    const archivedOnBranch = new Set(entriesOf(added, archive).map(({ folder }) => folder));
+    const open = entriesOf(await listed(CHANGES), CHANGES).filter(({ folder }) => folder !== ARCHIVE_FOLDER);
+    const archived = entriesOf(await listed(archive), archive).filter(({ folder }) => archivedOnBranch.has(folder));
+    return [...foldersOf(archived, true), ...foldersOf(open, false)];
+  },
   archiveChange: async (name: string): Promise<ArchiveResult> => {
     const folder = await mkdtemp(join(tmpdir(), 'factory-archive-'));
     await git(['worktree', 'add', '--quiet', '--detach', folder, 'HEAD']);
     try {
-      const archived = await openspec(['archive', name, '--yes'], { cwd: folder }).then(
+      const refused = await openspec(['archive', name, '--yes'], { cwd: folder }).then(
         () => undefined,
-        (error: unknown) => failureOf(error),
+        (error: unknown) => refusalOf(error),
       );
-      if (archived !== undefined) return { ok: false, error: archived };
+      if (refused !== undefined) return { ok: false, error: refused };
       await git(['-C', folder, 'add', '--all', '--', 'openspec']);
       await git(['-C', folder, 'commit', '--quiet', '-m', `chore: archive the ${name} OpenSpec change`]);
       const commit = (await git(['-C', folder, 'rev-parse', 'HEAD'])).stdout.trim();

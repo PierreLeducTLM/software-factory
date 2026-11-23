@@ -129,7 +129,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
   const runGit = createCommandRunner('git');
   const git = createGitInputs({ run: (args) => runGit(args, { cwd }), mainBranch: config.main_branch });
   const openspec = createCommandRunner('openspec');
-  const archive = createChangeArchive({ git: (args) => runGit(args, { cwd }), openspec });
+  const archive = createChangeArchive({ git: (args) => runGit(args, { cwd }), openspec, mainBranch: config.main_branch });
 
   return {
     tickets,

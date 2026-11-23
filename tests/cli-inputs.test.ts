@@ -457,7 +457,6 @@ const CHANGE_FILES = {
   'openspec/changes/billing-export/tasks.md': '# Tasks\n\n- [x] 1. Done. Verified by a test.\n',
   'openspec/changes/billing-export/specs/billing/spec.md': '# Spec Delta\n',
   'openspec/changes/billing-export/.openspec.yaml': 'schema: spec-driven\n',
-  'openspec/changes/archive/2026-11-01-old/proposal.md': '# Old\n',
   'openspec/changes/.gitkeep': '',
   'openspec/changes/ledger/proposal.md': '# Ledger\n',
 };
@@ -465,8 +464,10 @@ const CHANGE_FILES = {
 const ARCHIVE_FAILURE = 'Task status: 1/1 tasks\nbilling MODIFIED failed for header "### Requirement: Bulk export" - not found\nAborted. No files were changed.\n';
 
 const getRunBranch = () => {
-  const { clone } = getClone();
+  const { origin, clone } = getClone();
   git(clone, 'config', 'user.email', 'pierre@example.test');
+  commitFiles(origin, { 'openspec/changes/archive/2026-11-01-old/proposal.md': '# Old\n' }, 'archive an old change');
+  git(clone, 'pull', '-q', '--ff-only');
   git(clone, 'checkout', '-q', '-b', 'factory/pay-142');
   const reviewed = commitFiles(clone, { ...CHANGE_FILES, 'src/export.ts': 'export {}\n' }, 'PAY-142 add the exporter');
   return { clone, reviewed };
@@ -475,7 +476,7 @@ const getRunBranch = () => {
 const fakeOpenSpec = (calls: { args: readonly string[]; cwd: string }[], failure?: string): CommandRunner => async (args, options) => {
   const cwd = options?.cwd ?? '';
   calls.push({ args, cwd });
-  if (failure !== undefined) throw Object.assign(new Error('Command failed: openspec archive'), { stdout: failure });
+  if (failure !== undefined) throw Object.assign(new Error('Command failed: openspec archive'), { code: 1, stdout: failure, stderr: '' });
   const name = args[1] ?? '';
   mkdirSync(join(cwd, 'openspec/specs/billing'), { recursive: true });
   writeFileSync(join(cwd, 'openspec/specs/billing/spec.md'), '# Billing\n');
@@ -486,20 +487,34 @@ const fakeOpenSpec = (calls: { args: readonly string[]; cwd: string }[], failure
 
 const archiveFor = (cwd: string, openspec: CommandRunner) => {
   const run = createCommandRunner('git');
-  return createChangeArchive({ git: (args) => run(args, { cwd }), openspec });
+  return createChangeArchive({ git: (args) => run(args, { cwd }), openspec, mainBranch: 'main' });
 };
 
 describe('change archive', () => {
-  it('lists the committed change folders outside archive/, with their files relative to the folder', async () => {
+  it('lists the committed change folders outside archive/, with their files relative to the folder, whatever the files hold', async () => {
     const { clone } = getRunBranch();
     mkdirSync(join(clone, 'openspec/changes/uncommitted'), { recursive: true });
     writeFileSync(join(clone, 'openspec/changes/uncommitted/proposal.md'), '# Not committed');
 
     const folders = await archiveFor(clone, fakeOpenSpec([])).changeFolders();
 
+    expect(readFileSync(join(clone, 'openspec/changes/billing-export/tasks.md'), 'utf8')).toContain('- [x] 1.');
     expect(folders).toEqual([
-      { name: 'billing-export', files: ['.openspec.yaml', 'design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'] },
-      { name: 'ledger', files: ['proposal.md'] },
+      { name: 'billing-export', files: ['.openspec.yaml', 'design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'], archived: false },
+      { name: 'ledger', files: ['proposal.md'], archived: false },
+    ]);
+  });
+
+  it('lists a change archived on the run branch, but not the archives already on main', async () => {
+    const { clone } = getRunBranch();
+    const archive = archiveFor(clone, fakeOpenSpec([]));
+    await archive.archiveChange('billing-export');
+
+    const folders = await archive.changeFolders();
+
+    expect(folders).toEqual([
+      { name: '2026-11-23-billing-export', files: ['.openspec.yaml', 'design.md', 'proposal.md', 'specs/billing/spec.md', 'tasks.md'], archived: true },
+      { name: 'ledger', files: ['proposal.md'], archived: false },
     ]);
   });
 
@@ -546,24 +561,35 @@ describe('change archive', () => {
     expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
   });
 
-  it('gives the error message when the CLI cannot be started at all', async () => {
-    const { clone } = getRunBranch();
-    const missing: CommandRunner = async () => {
-      throw new Error('spawn openspec ENOENT');
-    };
-
-    expect(await archiveFor(clone, missing).archiveChange('billing-export')).toEqual({ ok: false, error: 'spawn openspec ENOENT' });
-  });
-
-  it('gives the error message when the CLI fails without output', async () => {
+  it('fails with the error, leaving the run branch as it was, when the CLI cannot be started at all', async () => {
     const { clone, reviewed } = getRunBranch();
     const missing: CommandRunner = async () => {
-      throw Object.assign(new Error('spawn openspec ENOENT'), { stdout: '' });
+      throw Object.assign(new Error('spawn openspec ENOENT'), { code: 'ENOENT', stdout: '', stderr: '' });
     };
 
-    const result = await archiveFor(clone, missing).archiveChange('billing-export');
-
-    expect(result).toEqual({ ok: false, error: 'spawn openspec ENOENT' });
+    await expect(archiveFor(clone, missing).archiveChange('billing-export')).rejects.toThrow('spawn openspec ENOENT');
     expect(git(clone, 'rev-parse', 'HEAD')).toBe(reviewed);
+    expect(git(clone, 'worktree', 'list').split('\n')).toHaveLength(1);
+  });
+
+  it('gives what the CLI printed on stderr when it fails with nothing on stdout', async () => {
+    const { clone, reviewed } = getRunBranch();
+    const refused: CommandRunner = async () => {
+      throw Object.assign(new Error('Command failed: openspec archive billing-export --yes'), { code: 1, stdout: '', stderr: "Change 'billing-export' not found.\n" });
+    };
+
+    const result = await archiveFor(clone, refused).archiveChange('billing-export');
+
+    expect(result).toEqual({ ok: false, error: "Change 'billing-export' not found." });
+    expect(git(clone, 'rev-parse', 'HEAD')).toBe(reviewed);
+  });
+
+  it('gives the error message when the CLI fails and prints nothing', async () => {
+    const { clone } = getRunBranch();
+    const silent: CommandRunner = async () => {
+      throw Object.assign(new Error('Command failed: openspec archive billing-export --yes'), { code: 1 });
+    };
+
+    expect(await archiveFor(clone, silent).archiveChange('billing-export')).toEqual({ ok: false, error: 'Command failed: openspec archive billing-export --yes' });
   });
 });
