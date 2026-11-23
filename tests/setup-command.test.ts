@@ -187,6 +187,12 @@ describe('factory migrate', () => {
     expect(errors).toEqual([`This project pins factory engine 9.0.0, newer than this engine (${ENGINE_VERSION}). Install engine 9.0.0 instead.`]);
   });
 
+  it('says which engine it installs when it brings stale engine files up to date', async () => {
+    const { out } = await getSetup({ ...HEALTHY, '.factory/bin/factory': '#!/bin/sh\necho old\n' }).run('migrate');
+
+    expect(out).toEqual([`Opened https://github.com/acme/billing-service/pull/77, which moves the project from engine ${ENGINE_VERSION} to ${ENGINE_VERSION}. Nothing changes until it is merged.`]);
+  });
+
   it('opens the pull request that adds a missing factory workflow, and says where it is', async () => {
     const setup = getSetup(Object.fromEntries(Object.entries(HEALTHY).filter(([path]) => path !== '.github/workflows/factory.yml')));
 

@@ -195,7 +195,7 @@ export const buildInstall = (answers: InstallAnswers): Install => {
   const parsedFactory = parseFactoryConfig(factory);
   const parsedAdapters = parseAdaptersConfig(adapters);
   const { system, workflow } = answers.ci;
-  const github = answers.sourceControl.kind === 'github';
+  const github = system === 'github-actions' || (system === 'none' && answers.sourceControl.kind === 'github');
   return {
     files: {
       [FACTORY_YAML]: checked(FACTORY_YAML, factory, parsedFactory.ok ? undefined : parsedFactory.issues),

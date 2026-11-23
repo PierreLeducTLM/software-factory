@@ -192,7 +192,7 @@ describe('adding the missing factory workflow', () => {
   it('opens a pull request that adds the workflow and lists the secrets to store, on a GitHub project otherwise up to date', async () => {
     const { result, published, opened } = await upgrade(CURRENT, { engine: '0.1.5' });
 
-    expect(result).toMatchObject({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41' });
+    expect(result).toMatchObject({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', workflowOnly: true });
     expect(Object.keys(published[0]?.files ?? {})).toEqual([WORKFLOW]);
     expect(await stepsOf(published[0]?.files[WORKFLOW])).toEqual(['record-merge']);
     expect(published[0]?.files[WORKFLOW]).toContain('  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n');
@@ -203,8 +203,9 @@ describe('adding the missing factory workflow', () => {
   });
 
   it('adds the workflow to the engine upgrade pull request too', async () => {
-    const { published, opened } = await upgrade(CURRENT, { engine: '0.2.0' });
+    const { result, published, opened } = await upgrade(CURRENT, { engine: '0.2.0' });
 
+    expect(result).not.toHaveProperty('workflowOnly');
     expect(opened[0]?.title).toBe('chore: upgrade the factory engine to 0.2.0');
     expect(Object.keys(published[0]?.files ?? {})).toContain(WORKFLOW);
     expect(opened[0]?.body.split('\n')).toEqual(expect.arrayContaining(['Before merging, store these secrets in the CI secret store:', '- FACTORY_JIRA_TOKEN', '- FACTORY_JIRA_EMAIL']));
@@ -246,7 +247,7 @@ describe('adding the missing factory workflow', () => {
   it('never overwrites a factory workflow that is there', async () => {
     const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.5' });
 
-    expect(result).toMatchObject({ ok: true, action: 'none' });
+    expect(result).toMatchObject({ ok: true, action: 'none', message: expect.stringMatching(/^Nothing to upgrade: /) });
     expect(published).toEqual([]);
   });
 

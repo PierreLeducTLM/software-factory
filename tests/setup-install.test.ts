@@ -84,7 +84,7 @@ describe('the files of an install', () => {
     expect(teamOnly.files['.factory/adapters.yaml']).not.toContain('project');
     expect(secrets).toEqual(['FACTORY_LINEAR_API_KEY']);
     expect(files['.github/workflows/factory.yml']).toContain('  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}');
-    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } })).secrets).toEqual(['LINEAR_API_KEY', 'BB_TOKEN']);
+    expect(buildInstall(getAnswers({ ...linear, ci: { system: 'bitbucket-pipelines' } })).secrets).toEqual(['LINEAR_API_KEY', 'GH_TOKEN']);
   });
 
   it('installs the engine in the project: its pin, a launcher that runs it, and a gitignore for its install', () => {
@@ -175,6 +175,18 @@ describe('the CI steps of an install elsewhere', () => {
     expect(watched.manual[2]).toBe('Add this step after the deployment to staging:\n- step:\n    name: Factory watch\n    script:\n      - .factory/bin/factory watch --commit $BITBUCKET_COMMIT');
     expect(install.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN', 'BB_USER']);
     expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
+  });
+
+  it('keeps the GitHub workflow for a Bitbucket repository whose CI is GitHub Actions, and the Bitbucket steps for a GitHub repository built by Bitbucket Pipelines', () => {
+    const actions = buildInstall(getAnswers({ sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
+    const pipelines = buildInstall(getAnswers({ ci: { system: 'bitbucket-pipelines' } }));
+
+    expect(Object.keys(actions.files)).toContain('.github/workflows/factory.yml');
+    expect(actions.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(actions.manual).toEqual([]);
+    expect(Object.keys(pipelines.files)).not.toContain('.github/workflows/factory.yml');
+    expect(pipelines.manual).toHaveLength(2);
+    expect(pipelines.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'GH_TOKEN']);
   });
 
   it('says what to run when a Bitbucket project has no CI', () => {

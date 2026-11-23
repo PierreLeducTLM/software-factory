@@ -21,7 +21,7 @@ type Version = { readonly engine: string; readonly schema: number };
 
 export type UpgradeResult =
   | { readonly ok: true; readonly action: 'none'; readonly message: string }
-  | { readonly ok: true; readonly action: 'opened'; readonly url: string; readonly from: Version; readonly to: Version; readonly applied: readonly string[] }
+  | { readonly ok: true; readonly action: 'opened'; readonly url: string; readonly from: Version; readonly to: Version; readonly applied: readonly string[]; readonly workflowOnly?: true }
   | { readonly ok: false; readonly reason: 'missing' | 'schema' | 'newer_engine'; readonly message: string };
 
 const FACTORY_YAML = '.factory/factory.yaml';
@@ -128,5 +128,5 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
         ])
       : body([...(workflowOnly ? [] : [installLine, '']), ...workflowLines, 'The project keeps its configuration and its engine pin. Nothing changes until this pull request is merged.']),
   });
-  return { ok: true, action: 'opened', url, from: { engine: pin.engine, schema: migrated.from }, to: { engine: target, schema: migrated.to }, applied: migrated.applied };
+  return { ok: true, action: 'opened', url, from: { engine: pin.engine, schema: migrated.from }, to: { engine: target, schema: migrated.to }, applied: migrated.applied, ...(workflowOnly ? { workflowOnly: true } : {}) };
 };
