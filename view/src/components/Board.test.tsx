@@ -6,15 +6,26 @@ import { textOf, getCard, getColumns, getDetail } from './fixtures';
 const noDetail = async () => undefined;
 
 describe('board', () => {
-  it('shows the seven columns with how many tickets each holds', async () => {
+  it('shows the nine columns, in pipeline order, with how many tickets each holds', async () => {
     const screen = await render(<BoardScreen columns={getColumns({ build: [getCard()], ready: [getCard({ key: 'PAY-151' }), getCard({ key: 'ENG-90' })] })} loadDetail={noDetail} />);
 
     await expect.element(screen.getByRole('heading', { name: 'Ready 2' })).toBeVisible();
     await expect.element(screen.getByRole('heading', { name: 'Build 1' })).toBeVisible();
-    for (const name of ['Revalidate 0', 'Review 0', 'Pull request 0', 'Needs you 0', 'Done 0']) {
+    for (const name of ['Available 0', 'Refining 0', 'Revalidate 0', 'Review 0', 'Pull request 0', 'Needs you 0', 'Done 0']) {
       await expect.element(screen.getByRole('heading', { name })).toBeVisible();
     }
-    expect(screen.getByText('Nothing here').elements()).toHaveLength(5);
+    expect(screen.getByRole('heading', { level: 2 }).elements().map((heading) => heading.textContent)).toEqual([
+      'Available 0',
+      'Refining 0',
+      'Ready 2',
+      'Revalidate 0',
+      'Build 1',
+      'Review 0',
+      'Pull request 0',
+      'Needs you 0',
+      'Done 0',
+    ]);
+    expect(screen.getByText('Nothing here').elements()).toHaveLength(7);
   });
 
   it('shows who claimed a run, its run and attempt, the risk, the time and a chip per gate', async () => {
@@ -52,24 +63,63 @@ describe('board', () => {
 
   it('marks each card by where it stands: not started, running, waiting on a person, failed or done', async () => {
     const columns = getColumns({
+      available: [getCard({ key: 'A-AVAILABLE', note: 'Available for refinement' })],
+      refining: [getCard({ key: 'A-REFINING', note: 'Refining' })],
       ready: [getCard({ key: 'A-READY' })],
       build: [getCard({ key: 'A-BUILD' }), getCard({ key: 'A-STALLED', interrupted: true })],
       pr: [getCard({ key: 'A-PR' })],
-      needs_you: [getCard({ key: 'A-BLOCKED', note: 'Blocked · environment' }), getCard({ key: 'A-SENT', note: 'Sent back · 1 question' })],
+      needs_you: [
+        getCard({ key: 'A-REVERT', note: 'Revert this change by hand: main failed at m1.', category: 'revert' }),
+        getCard({ key: 'A-BLOCKED', note: 'Failed 5 of 5 attempts. Diagnosis: environment.', category: 'blocked' }),
+        getCard({ key: 'A-LIMIT', note: 'Used 3 of 3 runs.', category: 'run_limit' }),
+        getCard({ key: 'A-SENT', note: 'Sent back with 1 question.', category: 'sent_back' }),
+        getCard({ key: 'A-APPROVE', note: 'The ready gate passed. Waiting for approval.', category: 'approve' }),
+      ],
       done: [getCard({ key: 'A-DONE' })],
     });
     const screen = await render(<BoardScreen columns={columns} loadDetail={noDetail} />);
     const markOf = (key: string): string | undefined => screen.getByRole('button', { name: new RegExp(`Open ${key}`) }).element().querySelector('.dot')?.className;
 
-    expect(['A-READY', 'A-BUILD', 'A-STALLED', 'A-PR', 'A-BLOCKED', 'A-SENT', 'A-DONE'].map(markOf)).toEqual([
+    expect(['A-AVAILABLE', 'A-REFINING', 'A-READY', 'A-BUILD', 'A-STALLED', 'A-PR', 'A-REVERT', 'A-BLOCKED', 'A-LIMIT', 'A-SENT', 'A-APPROVE', 'A-DONE'].map(markOf)).toEqual([
+      'dot dot--pending',
+      'dot dot--running',
       'dot dot--pending',
       'dot dot--running',
       'dot dot--waiting',
       'dot dot--waiting',
       'dot dot--fail',
+      'dot dot--fail',
+      'dot dot--fail',
+      'dot dot--waiting',
       'dot dot--waiting',
       'dot dot--pass',
     ]);
+  });
+
+  it('opens the card that was clicked when a ticket shows in its station and in Needs you', async () => {
+    const station = getCard({ key: 'PAY-170', note: 'Waiting for a developer', command: '/factory-run PAY-170' });
+    const needsYou = getCard({ key: 'PAY-170', note: 'Used 3 of 3 runs.', command: '/factory-run PAY-170 --over-limit', category: 'run_limit' });
+    const screen = await render(<BoardScreen columns={getColumns({ ready: [station], needs_you: [needsYou] })} loadDetail={async () => getDetail()} />);
+    const [inReady, inNeedsYou] = screen.getByRole('button', { name: /Open PAY-170/ }).all();
+
+    await inNeedsYou?.click();
+
+    await expect.element(screen.getByRole('complementary').getByText('/factory-run PAY-170 --over-limit')).toBeVisible();
+    expect([inReady?.element().getAttribute('aria-pressed'), inNeedsYou?.element().getAttribute('aria-pressed')]).toEqual(['false', 'true']);
+
+    await inReady?.click();
+
+    await expect.element(screen.getByRole('complementary').getByText('/factory-run PAY-170', { exact: true })).toBeVisible();
+    expect([inReady?.element().getAttribute('aria-pressed'), inNeedsYou?.element().getAttribute('aria-pressed')]).toEqual(['true', 'false']);
+  });
+
+  it('keeps the run detail open when a refresh moves the ticket to another column', async () => {
+    const screen = await render(<BoardScreen columns={getColumns({ ready: [getCard({ note: 'Waiting for a developer' })] })} loadDetail={async () => getDetail()} />);
+    await screen.getByRole('button', { name: /Open PAY-142/ }).click();
+
+    await screen.rerender(<BoardScreen columns={getColumns({ build: [getCard({ note: 'Building' })] })} loadDetail={async () => getDetail()} />);
+
+    await expect.element(screen.getByRole('complementary', { name: 'Run detail' }).getByText('Building')).toBeVisible();
   });
 
   it('tells the person to select the text when the browser refuses the clipboard', async () => {

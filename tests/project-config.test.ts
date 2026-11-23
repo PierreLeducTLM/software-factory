@@ -209,6 +209,24 @@ describe('factory.yaml', () => {
     expect(issuesOf(result).map((issue) => issue.path)).toEqual(['labels.auto']);
   });
 
+  it('marks tickets available for the factory with factory-available when the config names no available label', () => {
+    const result = parseFactoryConfig(sampleFactoryYaml());
+
+    expect(result.ok && result.value.labels).toEqual({ auto: 'factory-auto', no_automerge: 'factory:no-automerge', available: 'factory-available' });
+  });
+
+  it('lets a project name its own available label', () => {
+    const result = parseFactoryConfig(sampleFactoryYaml().replace('  auto: factory-auto\n', '  auto: factory-auto\n  available: let-it-in\n'));
+
+    expect(result.ok && result.value.labels.available).toBe('let-it-in');
+  });
+
+  it('rejects an empty available label', () => {
+    const result = parseFactoryConfig(sampleFactoryYaml().replace('  auto: factory-auto\n', '  auto: factory-auto\n  available: ""\n'));
+
+    expect(issuesOf(result).map((issue) => issue.path)).toEqual(['labels.available']);
+  });
+
   it('rejects a config with no no-automerge label', () => {
     const result = parseFactoryConfig(sampleFactoryYaml().replace('  no_automerge: "factory:no-automerge"\n', ''));
 

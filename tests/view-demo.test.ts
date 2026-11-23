@@ -22,12 +22,14 @@ it('fills every column and every kind of item with sample tickets, whatever the 
 
   expect(data.providers).toEqual(['Sample data']);
   expect(data.columns.map((column) => [column.id, column.cards.map((card) => card.key)])).toEqual([
+    ['available', ['PAY-160']],
+    ['refining', ['PAY-147', 'PAY-155', 'PAY-158']],
     ['ready', ['PAY-151', 'ENG-90']],
     ['revalidate', ['PAY-149']],
     ['build', ['PAY-142', 'ENG-87', 'ENG-95']],
     ['review', ['GH-231']],
     ['pr', ['PAY-138', 'ENG-88']],
-    ['needs_you', ['PAY-133', 'PAY-147']],
+    ['needs_you', ['ENG-85', 'PAY-133', 'ENG-95', 'PAY-147', 'PAY-138', 'ENG-88', 'PAY-155', 'PAY-151']],
     ['done', ['PAY-130', 'PAY-128', 'PAY-127', 'ENG-84', 'ENG-82', 'ENG-85']],
   ]);
   expect(data.needsYou.map((item) => [item.category, item.key])).toEqual([
@@ -41,6 +43,21 @@ it('fills every column and every kind of item with sample tickets, whatever the 
     ['not_started', 'PAY-151'],
   ]);
   expect(data.running).toBe(4);
+});
+
+it('shows a ticket available for refinement and every stage of refinement, but not the backlog left out of the factory', async () => {
+  const source = createDemoViewSource({ config: getConfig(), now: () => '2026-11-21T09:00:00Z' });
+
+  const data = await source.load();
+  const notesIn = (id: string) => data.columns.find((column) => column.id === id)?.cards.map((card) => [card.key, card.note, card.command]);
+
+  expect(notesIn('available')).toEqual([['PAY-160', 'Available for refinement', '/factory-refine PAY-160']]);
+  expect(notesIn('refining')).toEqual([
+    ['PAY-147', 'Sent back · 1 question', '/factory-refine PAY-147'],
+    ['PAY-155', 'Gate passed, waiting for approval', '/factory-refine PAY-155'],
+    ['PAY-158', 'Gate failed', '/factory-refine PAY-158'],
+  ]);
+  expect(data.columns.flatMap((column) => column.cards.map((card) => card.key))).not.toContain('PAY-161');
 });
 
 it('has merged work to show on Health: changes merged as is, one edited by a person and two reverted', async () => {

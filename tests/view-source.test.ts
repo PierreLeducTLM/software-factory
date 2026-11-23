@@ -77,12 +77,14 @@ describe('view source', () => {
     expect(data.repository).toBe('acme/billing-service');
     expect(data.providers).toEqual(['Jira']);
     expect(data.columns.map((column) => [column.id, column.cards.map((card) => card.key)])).toEqual([
+      ['available', []],
+      ['refining', []],
       ['ready', ['PAY-151']],
       ['revalidate', []],
       ['build', ['PAY-142', 'ENG-95']],
       ['review', []],
       ['pr', []],
-      ['needs_you', []],
+      ['needs_you', ['ENG-95', 'PAY-151']],
       ['done', []],
     ]);
     expect(data.needsYou.map((item) => [item.category, item.key])).toEqual([['interrupted', 'ENG-95'], ['not_started', 'PAY-151']]);
@@ -112,10 +114,10 @@ describe('view source', () => {
     const late = await source.load();
 
     expect(afterFirst).toBe(2);
-    expect(early.columns[0]?.cards.map((card) => card.key)).toEqual(['PAY-151']);
+    expect(early.columns.find((column) => column.id === 'ready')?.cards.map((card) => card.key)).toEqual(['PAY-151']);
     expect(early.loadedAt).toBe('2026-11-21T08:10:59Z');
     expect(searches.count).toBe(3);
-    expect(late.columns[0]?.cards).toEqual([]);
+    expect(late.columns.find((column) => column.id === 'ready')?.cards).toEqual([]);
     expect(late.refreshedAt).toBe('2026-11-21T08:11:00Z');
   });
 
@@ -127,7 +129,7 @@ describe('view source', () => {
 
     const data = await source.load();
 
-    expect(data.columns[0]?.cards.map((card) => card.key)).toEqual(['PAY-151']);
+    expect(data.columns.find((column) => column.id === 'ready')?.cards.map((card) => card.key)).toEqual(['PAY-151']);
     expect(data).toMatchObject({ refreshedAt: '2026-11-21T08:10:00Z', staleSince: '2026-11-21T08:10:00Z', problem: 'Jira is unreachable' });
   });
 

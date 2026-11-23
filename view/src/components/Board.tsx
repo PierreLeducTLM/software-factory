@@ -1,26 +1,30 @@
 import type { Card, Chip, Column } from '../../../src/view/model.js';
 import { duration } from '../format';
 
-type Props = { readonly columns: readonly Column[]; readonly selected?: string; readonly onSelect: (key: string) => void };
+export type Selected = { readonly column: Column['id']; readonly key: string };
+
+type Props = { readonly columns: readonly Column[]; readonly selected?: Selected; readonly onSelect: (selected: Selected) => void };
 
 const RISK_LABELS = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' } as const;
 const CHIP_NAMES = { pass: 'passed', fail: 'failed', running: 'running', pending: 'not started' } as const;
 const GATES = ['build', 'gate', 'verify', 'review'] as const;
+const FAILED_CATEGORIES: readonly (Card['category'] | undefined)[] = ['blocked', 'run_limit', 'revert'];
+const NOT_STARTED_COLUMNS: readonly Column['id'][] = ['available', 'ready'];
 
 const statusOf = (card: Card, columnId: Column['id']): Chip | 'waiting' => {
   if (card.interrupted || columnId === 'pr') return 'waiting';
   if (columnId === 'done') return 'pass';
-  if (columnId === 'needs_you') return card.note.startsWith('Blocked') ? 'fail' : 'waiting';
-  return columnId === 'ready' ? 'pending' : 'running';
+  if (columnId === 'needs_you') return FAILED_CATEGORIES.includes(card.category) ? 'fail' : 'waiting';
+  return NOT_STARTED_COLUMNS.includes(columnId) ? 'pending' : 'running';
 };
 
-function CardButton({ card, columnId, selected, onSelect }: { readonly card: Card; readonly columnId: Column['id']; readonly selected: boolean; readonly onSelect: (key: string) => void }) {
+function CardButton({ card, columnId, selected, onSelect }: { readonly card: Card; readonly columnId: Column['id']; readonly selected: boolean; readonly onSelect: (selected: Selected) => void }) {
   const meta = [
     card.attempt === undefined ? undefined : `attempt ${card.attempt.number}/${card.attempt.limit}`,
     card.seconds === undefined ? undefined : duration(card.seconds),
   ].filter((part) => part !== undefined);
   return (
-    <button type="button" className={`card${selected ? ' card--selected' : ''}`} aria-pressed={selected} aria-label={`Open ${card.key} ${card.title}`} onClick={() => onSelect(card.key)}>
+    <button type="button" className={`card${selected ? ' card--selected' : ''}`} aria-pressed={selected} aria-label={`Open ${card.key} ${card.title}`} onClick={() => onSelect({ column: columnId, key: card.key })}>
       <span className="card__top">
         <span className={`dot dot--${statusOf(card, columnId)}`} aria-hidden="true" />
         <span className="card__key">{card.key}</span>
@@ -65,7 +69,7 @@ export function Board({ columns, selected, onSelect }: Props) {
           </h2>
           {column.cards.length === 0 ? <p className="column__empty">Nothing here</p> : null}
           {column.cards.map((card) => (
-            <CardButton key={card.key} card={card} columnId={column.id} selected={card.key === selected} onSelect={onSelect} />
+            <CardButton key={card.key} card={card} columnId={column.id} selected={column.id === selected?.column && card.key === selected.key} onSelect={onSelect} />
           ))}
         </div>
       ))}

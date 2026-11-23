@@ -86,10 +86,12 @@ const built = (endedAt = '2026-11-21T08:10:00Z'): TicketRecord => endStep(buildi
 const building = (): TicketRecord => step(step(claimed(), 'revalidate', '2026-11-21T08:00:00Z', '2026-11-21T08:01:00Z'), 'build', '2026-11-21T08:01:00Z');
 
 describe('pipeline board', () => {
-  it('has the seven columns in pipeline order, even when empty', () => {
+  it('has the nine columns in pipeline order, even when empty', () => {
     const board = buildBoard([], getOptions());
 
     expect(board.map((column) => [column.id, column.name, column.cards.length])).toEqual([
+      ['available', 'Available', 0],
+      ['refining', 'Refining', 0],
       ['ready', 'Ready', 0],
       ['revalidate', 'Revalidate', 0],
       ['build', 'Build', 0],
@@ -126,7 +128,7 @@ describe('pipeline board', () => {
 
     const board = buildBoard(tickets, getOptions({ now: '2026-11-21T08:30:00Z' }));
 
-    expect(board.map((column) => column.cards.map((card) => card.key))).toEqual([[], ['A-1', 'A-2'], ['A-3', 'A-4', 'A-7'], ['A-5', 'A-6'], [], [], []]);
+    expect(board.map((column) => column.cards.map((card) => card.key))).toEqual([[], [], [], ['A-1', 'A-2'], ['A-3', 'A-4', 'A-7'], ['A-5', 'A-6'], [], [], []]);
     expect(board.flatMap((column) => column.cards.map((card) => card.note))).toEqual(['Checking drift', 'Checking drift', 'Building', 'Building', 'Building', 'Reviewing', 'Reviewing']);
   });
 
@@ -238,7 +240,7 @@ describe('pipeline board', () => {
     expect(notes).toEqual(['Merged', 'Delivered', 'Merged', 'Revert opened', 'Revert needed', 'Reverted']);
   });
 
-  it('puts blocked and sent-back tickets in Needs you, and merged ones in Done', () => {
+  it('puts a blocked ticket only in Needs you, a sent-back one in Refining and Needs you, and a merged one in Done', () => {
     const blocked = endRun(changeLatestRun(claimed(), (run) => ({ ...run, diagnosis: 'environment' as const })), { status: 'blocked', at: '2026-11-21T08:40:00Z', by: 'pierre' });
     const sentBack = recordSendBack(endRun(claimed(), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' }), {
       questions: [{ question: 'Q1?', recommended: 'A1' }, { question: 'Q2?', recommended: 'A2' }],
@@ -250,28 +252,29 @@ describe('pipeline board', () => {
 
     const board = buildBoard(tickets, getOptions());
 
-    expect(cardsIn(tickets, 'needs_you').map((card) => [card.key, card.note, card.command])).toEqual([
-      ['A-1', 'Blocked · environment', '/factory-run A-1'],
-      ['A-2', 'Sent back · 2 questions', '/factory-refine A-2'],
+    expect(board.map((column) => [column.id, column.cards.map((card) => card.key)])).toEqual([
+      ['available', []],
+      ['refining', ['A-2']],
+      ['ready', []],
+      ['revalidate', []],
+      ['build', []],
+      ['review', []],
+      ['pr', []],
+      ['needs_you', ['A-1', 'A-2']],
+      ['done', ['A-3']],
     ]);
+    expect(cardsIn(tickets, 'refining').map((card) => [card.key, card.note, card.command])).toEqual([['A-2', 'Sent back · 2 questions', '/factory-refine A-2']]);
     expect(board.at(-1)?.cards.map((card) => [card.key, card.note])).toEqual([['A-3', 'Merged']]);
   });
 
-  it('says "1 question" for a single one, and "no diagnosis" on a blocked ticket that has none', () => {
+  it('says "1 question" on a Refining card sent back with a single one', () => {
     const one = recordSendBack(endRun(claimed(), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' }), { questions: [{ question: 'Q1?', recommended: 'A1' }], at: '2026-11-21T08:40:00Z', by: 'pierre' });
-    const blocked = endRun(claimed(), { status: 'blocked', at: '2026-11-21T08:40:00Z', by: 'pierre' });
 
-    const notes = cardsIn([ticketWith(one, { key: 'A-1', status: 'Spec review' }), ticketWith(blocked, { key: 'A-2', status: 'Blocked' })], 'needs_you').map((card) => card.note);
-
-    expect(notes).toEqual(['Sent back · 1 question', 'Blocked · no diagnosis']);
+    expect(cardsIn([ticketWith(one, { status: 'Spec review' })], 'refining').map((card) => card.note)).toEqual(['Sent back · 1 question']);
   });
 
-  it('leaves out tickets still being refined, and tickets in a status the factory does not know', () => {
-    const tickets = [
-      ticketWith(undefined, { key: 'A-1', status: 'To refine' }),
-      ticketWith(approvedRecord(), { key: 'A-2', status: 'Spec review' }),
-      ticketWith(undefined, { key: 'A-3', status: 'Won\'t do' }),
-    ];
+  it('leaves out a "to refine" ticket without the available label, and tickets in a status the factory does not know', () => {
+    const tickets = [ticketWith(undefined, { key: 'PIE-20', status: 'To refine', labels: ['factory-auto'] }), ticketWith(undefined, { key: 'A-3', status: 'Won\'t do', labels: ['factory-available'] })];
 
     expect(buildBoard(tickets, getOptions()).flatMap((column) => column.cards)).toEqual([]);
   });
@@ -290,6 +293,133 @@ describe('pipeline board', () => {
     expect(card?.run).toEqual({ number: 1, limit: 3 });
     expect(card?.claimant).toBeUndefined();
     expect(card?.rows).toEqual([]);
+  });
+});
+
+describe('tickets on their way into the factory', () => {
+  const gated = (passed: boolean): TicketRecord =>
+    recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed, fingerprint: 'f1', findings: passed ? [] : ['x'], at: '2026-11-20T15:00:00Z', by: 'pierre' });
+
+  it('shows a "to refine" ticket carrying the available label in Available, with no record rows and the refine command', () => {
+    const cards = cardsIn([ticketWith(undefined, { key: 'PIE-21', status: 'To refine', labels: ['factory-available'], provider: 'Linear' })], 'available');
+
+    expect(cards).toEqual([
+      { key: 'PIE-21', title: 'Bulk invoice export', provider: 'Linear', note: 'Available for refinement', rows: [], earlierAttempts: 0, interrupted: false, recordEdited: false, onThisMachine: false, command: '/factory-refine PIE-21' },
+    ]);
+  });
+
+  it('shows no risk, run or attempt on an Available card, even when the ticket carries an old record', () => {
+    const [card] = cardsIn([ticketWith(inReviewWith(undefined), { status: 'To refine', labels: ['factory-available'] })], 'available');
+
+    expect(card).toMatchObject({ note: 'Available for refinement', rows: [], onThisMachine: false });
+    expect([card?.risk, card?.run, card?.attempt, card?.claimant, card?.seconds, card?.pullRequest]).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  it('reads the available label the project configured', () => {
+    const tickets = [ticketWith(undefined, { key: 'A-1', status: 'To refine', labels: ['let-it-in'] }), ticketWith(undefined, { key: 'A-2', status: 'To refine', labels: ['factory-available'] })];
+    const config = getConfig();
+    const options = getOptions({ config: { ...config, labels: { ...config.labels, available: 'let-it-in' } } });
+
+    expect(cardsIn(tickets, 'available', options).map((card) => card.key)).toEqual(['A-1']);
+  });
+
+  it('shows every "spec review" ticket in Refining with where its refinement stands and the refine command', () => {
+    const sentBack = recordSendBack(gated(true), { questions: [{ question: 'Q1?', recommended: 'A1' }, { question: 'Q2?', recommended: 'A2' }], at: '2026-11-21T08:40:00Z', by: 'pierre' });
+    const tickets = [
+      ticketWith(gated(true), { key: 'PIE-22', status: 'Spec review' }),
+      ticketWith(gated(false), { key: 'PIE-23', status: 'Spec review', labels: ['factory-available'] }),
+      ticketWith(createRecord({ repository: 'acme/billing-service' }), { key: 'PIE-24', status: 'Spec review' }),
+      ticketWith(sentBack, { key: 'PIE-25', status: 'Spec review' }),
+      ticketWith(undefined, { key: 'PIE-26', status: 'Spec review' }),
+    ];
+
+    expect(cardsIn(tickets, 'refining').map((card) => [card.key, card.note, card.command])).toEqual([
+      ['PIE-22', 'Gate passed, waiting for approval', '/factory-refine PIE-22'],
+      ['PIE-23', 'Gate failed', '/factory-refine PIE-23'],
+      ['PIE-24', 'Refining', '/factory-refine PIE-24'],
+      ['PIE-25', 'Sent back · 2 questions', '/factory-refine PIE-25'],
+      ['PIE-26', 'Refining', '/factory-refine PIE-26'],
+    ]);
+  });
+
+  it('shows a Refining card sent back after a run with its predicted risk and run count, not the old run\'s claimant', () => {
+    const sentBack = recordSendBack(endRun(claimed(approvedRecord('medium')), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' }), { questions: [{ question: 'Q?', recommended: 'A' }], at: '2026-11-21T08:40:00Z', by: 'pierre' });
+
+    const [card] = cardsIn([ticketWith(sentBack, { status: 'Spec review' })], 'refining');
+
+    expect(card).toMatchObject({ risk: 'medium', run: { number: 1, limit: 3 }, rows: [], onThisMachine: false });
+    expect(card?.claimant).toBeUndefined();
+    expect(card?.attempt).toBeUndefined();
+  });
+});
+
+describe('the Needs you column', () => {
+  const blockedRecord = (runs = 1): TicketRecord =>
+    Array.from({ length: runs }, (_, index) => index).reduce(
+      (record) =>
+        endRun(changeLatestRun(claimed(record), (run) => ({ ...run, attempt: 5, diagnosis: 'environment' as const, report: 'memory://report' })), { status: 'blocked', at: '2026-11-21T08:40:00Z', by: 'pierre' }),
+      approvedRecord(),
+    );
+
+  const everyKind = (): readonly ViewTicket[] => {
+    const sentBack = recordSendBack(endRun(claimed(), { status: 'sent_back', at: '2026-11-21T08:40:00Z', by: 'pierre' }), { questions: [{ question: 'Q1?', recommended: 'A1' }], at: '2026-11-21T08:40:00Z', by: 'pierre' });
+    const inReview = endRun(changeLatestRun(claimed(approvedRecord('medium')), (run) => ({ ...run, pullRequest: { number: 412, url: 'https://github.test/pull/412' } })), { status: 'in_review', at: '2026-11-21T08:40:00Z', by: 'pierre' });
+    const gated = recordReadyGate(createRecord({ repository: 'acme/billing-service' }), { passed: true, fingerprint: 'f1', findings: [], at: '2026-11-20T15:00:00Z', by: 'pierre' });
+    const reverting = changeLatestRun(endRun(claimed(), { status: 'merged', at: '2026-11-21T08:40:00Z', by: 'pierre' }), (run) => ({ ...run, revert: { at: '2026-11-21T08:50:00Z', by: 'main failed at m1', needed: true } }));
+    return [
+      ticketWith(approvedRecord(), { key: 'NOT-STARTED', status: 'Ready for Dev', statusSince: '2026-11-19T09:00:00Z' }),
+      ticketWith(gated, { key: 'APPROVE', status: 'Spec review' }),
+      ticketWith(inReview, { key: 'MERGE', status: 'In review' }),
+      ticketWith(sentBack, { key: 'SENT-BACK', status: 'Spec review' }),
+      ticketWith(step(claimed(approvedRecord(), 'sam-mbp', 'sam'), 'build', '2026-11-21T08:00:00Z', undefined, 1500), { key: 'INTERRUPTED' }),
+      ticketWith(blockedRecord(3), { key: 'LIMIT', status: 'Ready for Dev' }),
+      ticketWith(blockedRecord(), { key: 'BLOCKED', status: 'Blocked' }),
+      ticketWith(reverting, { key: 'REVERT', status: 'Done' }),
+      ticketWith(step(claimed(), 'build', '2026-11-21T08:50:00Z'), { key: 'RUNNING' }),
+    ];
+  };
+
+  it('holds one card per item of the Needs you page, in the page\'s order, with its reason and command', () => {
+    const tickets = everyKind();
+
+    const items = buildNeedsYou(tickets, getOptions());
+    const cards = cardsIn(tickets, 'needs_you');
+
+    expect(cards.map((card) => [card.key, card.note, card.command])).toEqual(items.map((item) => [item.key, item.why, item.command]));
+    expect(cards.map((card) => card.key)).toEqual(['REVERT', 'BLOCKED', 'LIMIT', 'INTERRUPTED', 'SENT-BACK', 'MERGE', 'APPROVE', 'NOT-STARTED']);
+    expect(cards.map((card) => card.category)).toEqual(['revert', 'blocked', 'run_limit', 'interrupted', 'sent_back', 'merge', 'approve', 'not_started']);
+  });
+
+  it('keeps each ticket in its station column as well, except a Blocked one, which has no station', () => {
+    const board = buildBoard(everyKind(), getOptions());
+    const keysIn = (id: string) => board.find((column) => column.id === id)?.cards.map((card) => card.key);
+
+    expect(keysIn('refining')).toEqual(['APPROVE', 'SENT-BACK']);
+    expect(keysIn('ready')).toEqual(['NOT-STARTED', 'LIMIT']);
+    expect(keysIn('build')).toEqual(['INTERRUPTED', 'RUNNING']);
+    expect(keysIn('pr')).toEqual(['MERGE']);
+    expect(keysIn('done')).toEqual(['REVERT']);
+    expect(board.filter((column) => column.id !== 'needs_you').flatMap((column) => column.cards.map((card) => card.key))).not.toContain('BLOCKED');
+    expect(board.flatMap((column) => column.cards.filter((card) => card.category !== undefined).map((card) => [column.id, card.key]))).toEqual(
+      buildNeedsYou(everyKind(), getOptions()).map((item) => ['needs_you', item.key]),
+    );
+  });
+
+  it('shows a Blocked ticket with the page\'s reason and the run command, and keeps its run on the card', () => {
+    const [card] = cardsIn([ticketWith(blockedRecord(), { key: 'PIE-31', status: 'Blocked' })], 'needs_you');
+
+    expect(card).toMatchObject({ key: 'PIE-31', note: 'Failed 5 of 5 attempts. Diagnosis: environment.', command: '/factory-run PIE-31', category: 'blocked', claimant: 'pierre', run: { number: 1, limit: 3 } });
+  });
+
+  it('shows a pull request waiting for a person in Pull request and in Needs you, with no command on either', () => {
+    const tickets = [ticketWith(inReviewWith(undefined), { key: 'PIE-30', status: 'In review' })];
+
+    expect(cardsIn(tickets, 'pr').map((card) => [card.key, card.note, card.command])).toEqual([['PIE-30', 'Merge by a person', undefined]]);
+    expect(cardsIn(tickets, 'needs_you').map((card) => [card.key, card.note, card.command, card.pullRequest])).toEqual([['PIE-30', 'Merge by a person.', undefined, 'https://github.test/pull/412']]);
+  });
+
+  it('is empty when nothing needs a person', () => {
+    expect(cardsIn([ticketWith(step(claimed(), 'build', '2026-11-21T08:50:00Z')), ticketWith(undefined, { status: 'To refine', labels: ['factory-available'] })], 'needs_you')).toEqual([]);
   });
 });
 

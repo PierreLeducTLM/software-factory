@@ -22,7 +22,7 @@ const InstallAnswersSchema = z.object({
   repository: NAME,
   mainBranch: NAME,
   states: z.object({ to_refine: NAME, spec_review: NAME, ready_for_dev: NAME, in_development: NAME, in_review: NAME, blocked: NAME, done: NAME }),
-  labels: z.object({ auto: NAME, no_automerge: NAME }).optional(),
+  labels: z.object({ auto: NAME, no_automerge: NAME, available: NAME.optional() }).optional(),
   checks: z.array(ChosenCheckSchema),
   sensitivePaths: z.array(NAME),
   ticketProvider: z.discriminatedUnion('kind', [
@@ -43,7 +43,7 @@ export type Connection = z.infer<typeof ConnectionSchema>;
 export type Install = { readonly files: Readonly<Record<string, string>>; readonly executable: readonly string[]; readonly manual: readonly string[]; readonly secrets: readonly string[] };
 
 const STATIONS: Readonly<Record<Category, string>> = { tests: 'quality', lint: 'quality', types: 'quality', format: 'quality', build: 'quality', security: 'review', e2e: 'review' };
-const DEFAULT_LABELS = { auto: 'factory-auto', no_automerge: 'factory:no-automerge' };
+const DEFAULT_LABELS = { auto: 'factory-auto', no_automerge: 'factory:no-automerge', available: 'factory-available' };
 const FACTORY_YAML = '.factory/factory.yaml';
 const ADAPTERS_YAML = '.factory/adapters.yaml';
 export const WORKFLOW_FILE = '.github/workflows/factory.yml';
@@ -70,7 +70,7 @@ const factoryYaml = ({ engine, mainBranch, states, labels, checks, sensitivePath
     engine,
     main_branch: mainBranch,
     states,
-    labels: labels ?? DEFAULT_LABELS,
+    labels: { ...DEFAULT_LABELS, ...labels },
     checks: checks.map(({ id, category, source, run, job, blocking, timeout }) => ({
       id,
       station: STATIONS[category],

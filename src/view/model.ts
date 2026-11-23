@@ -15,7 +15,9 @@ export type Chip = 'pass' | 'fail' | 'running' | 'pending';
 
 export type AttemptRow = { readonly number: number; readonly build: Chip; readonly gate: Chip; readonly verify: Chip; readonly review: Chip };
 
-export type ColumnId = 'ready' | 'revalidate' | 'build' | 'review' | 'pr' | 'needs_you' | 'done';
+export type ColumnId = 'available' | 'refining' | 'ready' | 'revalidate' | 'build' | 'review' | 'pr' | 'needs_you' | 'done';
+
+type StationId = Exclude<ColumnId, 'needs_you'>;
 
 export type Card = {
   readonly key: string;
@@ -34,6 +36,7 @@ export type Card = {
   readonly onThisMachine: boolean;
   readonly pullRequest?: string;
   readonly command?: string;
+  readonly category?: NeedsYouCategory;
 };
 
 export type Column = { readonly id: ColumnId; readonly name: string; readonly cards: readonly Card[] };
@@ -72,6 +75,8 @@ type Entry = {
 };
 
 const COLUMNS: readonly { readonly id: ColumnId; readonly name: string }[] = [
+  { id: 'available', name: 'Available' },
+  { id: 'refining', name: 'Refining' },
   { id: 'ready', name: 'Ready' },
   { id: 'revalidate', name: 'Revalidate' },
   { id: 'build', name: 'Build' },
@@ -82,7 +87,7 @@ const COLUMNS: readonly { readonly id: ColumnId; readonly name: string }[] = [
 ];
 
 const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
-const STEP_COLUMNS: Readonly<Record<string, ColumnId>> = { revalidate: 'revalidate', build: 'build', quality: 'build', verify: 'review', review: 'review', diagnose: 'build' };
+const STEP_COLUMNS: Readonly<Record<string, StationId>> = { revalidate: 'revalidate', build: 'build', quality: 'build', verify: 'review', review: 'review', diagnose: 'build' };
 const VERIFY = 'openspec-verify';
 const SHOWN_ATTEMPTS = 2;
 const MS_PER_HOUR = 3_600_000;
@@ -118,13 +123,13 @@ const describe = (ticket: ViewTicket, { config, now }: ViewOptions): Entry => {
 const entriesFor = (tickets: readonly ViewTicket[], options: ViewOptions): readonly Entry[] =>
   tickets.map((ticket) => describe(ticket, options)).filter((entry) => entry.record === undefined || entry.record.repository === options.repository);
 
-const columnOf = ({ state, run, record }: Entry): ColumnId | undefined => {
+const stationOf = ({ state, run, ticket }: Entry, config: FactoryConfig): StationId | undefined => {
+  if (state === 'to_refine') return ticket.labels.includes(config.labels.available) ? 'available' : undefined;
+  if (state === 'spec_review') return 'refining';
   if (state === 'ready_for_dev') return 'ready';
   if (state === 'in_development') return STEP_COLUMNS[openStepOf(run)?.name ?? 'revalidate'] ?? 'build';
   if (state === 'in_review') return 'pr';
-  if (state === 'blocked') return 'needs_you';
-  if (state === 'done') return 'done';
-  return state === 'spec_review' && record?.refinement.sendBack !== undefined ? 'needs_you' : undefined;
+  return state === 'done' ? 'done' : undefined;
 };
 
 const stepChip = (run: Run, attempt: number, name: string): Chip => {
@@ -168,36 +173,47 @@ const doneNote = (run: Run | undefined): string => {
   return run?.watch?.passed === true ? 'Delivered' : 'Merged';
 };
 
-const noteFor = (entry: Entry, column: ColumnId, config: FactoryConfig): string => {
+const refiningNote = ({ record, questions }: Entry): string => {
+  if (record?.refinement.sendBack !== undefined) return `Sent back · ${plural(questions.length, 'question')}`;
+  const gate = record?.refinement.readyGate;
+  if (gate === undefined) return 'Refining';
+  return gate.passed ? 'Gate passed, waiting for approval' : 'Gate failed';
+};
+
+const noteFor = (entry: Entry, column: StationId, config: FactoryConfig): string => {
   const { ticket, run } = entry;
   if (entry.interrupted) return 'Interrupted';
+  if (column === 'available') return 'Available for refinement';
+  if (column === 'refining') return refiningNote(entry);
   if (column === 'ready') return ticket.labels.includes(config.labels.auto) ? 'Eligible for /factory-next' : 'Waiting for a developer';
   if (column === 'revalidate') return 'Checking drift';
   if (column === 'build') return 'Building';
   if (column === 'review') return 'Reviewing';
   if (column === 'pr') return mergeNote(entry);
-  if (column === 'done') return doneNote(run);
-  return entry.state === 'blocked' ? `Blocked · ${run?.diagnosis ?? 'no diagnosis'}` : `Sent back · ${plural(entry.questions.length, 'question')}`;
+  return doneNote(run);
 };
 
-const commandFor = (entry: Entry, column: ColumnId, config: FactoryConfig): string | undefined => {
+const commandFor = (entry: Entry, column: StationId, config: FactoryConfig): string | undefined => {
   const { key } = entry.ticket;
+  if (column === 'available' || column === 'refining') return `/factory-refine ${key}`;
   if (column === 'ready') return entry.ticket.labels.includes(config.labels.auto) ? '/factory-next' : `/factory-run ${key}`;
-  if (entry.interrupted || entry.state === 'blocked') return `/factory-run ${key}`;
-  return entry.state === 'spec_review' ? `/factory-refine ${key}` : undefined;
+  return entry.interrupted ? `/factory-run ${key}` : undefined;
 };
 
-const cardFor = (entry: Entry, column: ColumnId, { config, machine }: ViewOptions): Card => {
-  const { ticket, record, run } = entry;
-  const claimed = run !== undefined && column !== 'ready';
+const UNCLAIMED_COLUMNS: readonly ColumnId[] = ['available', 'refining', 'ready'];
+
+const cardFor = (entry: Entry, column: ColumnId, { note, command }: { readonly note: string; readonly command: string | undefined }, { config, machine }: ViewOptions): Card => {
+  const { ticket } = entry;
+  const record = column === 'available' ? undefined : entry.record;
+  const run = record === undefined ? undefined : entry.run;
+  const claimed = run !== undefined && !UNCLAIMED_COLUMNS.includes(column);
   const rows = claimed ? rowsFor(run) : [];
   const risk = run?.risk?.level ?? record?.refinement.approval?.predictedRisk;
-  const command = commandFor(entry, column, config);
   return {
     key: ticket.key,
     title: ticket.title,
     provider: ticket.provider,
-    note: noteFor(entry, column, config),
+    note,
     rows: rows.slice(-SHOWN_ATTEMPTS),
     earlierAttempts: Math.max(rows.length - SHOWN_ATTEMPTS, 0),
     interrupted: entry.interrupted,
@@ -209,14 +225,6 @@ const cardFor = (entry: Entry, column: ColumnId, { config, machine }: ViewOption
     ...(run?.pullRequest === undefined ? {} : { pullRequest: run.pullRequest.url }),
     ...(command === undefined ? {} : { command }),
   };
-};
-
-export const buildBoard = (tickets: readonly ViewTicket[], options: ViewOptions): readonly Column[] => {
-  const placed = entriesFor(tickets, options).flatMap((entry) => {
-    const column = columnOf(entry);
-    return column === undefined ? [] : [{ column, card: cardFor(entry, column, options) }];
-  });
-  return COLUMNS.map(({ id, name }) => ({ id, name, cards: placed.filter(({ column }) => column === id).map(({ card }) => card) }));
 };
 
 type Reason = Omit<NeedsYouItem, 'key' | 'title' | 'provider' | 'questions'> & { readonly questions?: readonly SendBackQuestion[] };
@@ -265,14 +273,31 @@ const reasonFor = (entry: Entry, { config, now }: ViewOptions): Reason | undefin
   return undefined;
 };
 
-export const buildNeedsYou = (tickets: readonly ViewTicket[], options: ViewOptions): readonly NeedsYouItem[] =>
-  entriesFor(tickets, options)
+const needingYou = (entries: readonly Entry[], options: ViewOptions): readonly { readonly entry: Entry; readonly reason: Reason }[] =>
+  entries
     .flatMap((entry) => {
       const reason = reasonFor(entry, options);
-      const { key, title, provider } = entry.ticket;
-      return reason === undefined ? [] : [{ key, title, provider, questions: [], ...reason }];
+      return reason === undefined ? [] : [{ entry, reason }];
     })
-    .toSorted((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category) || Date.parse(a.since) - Date.parse(b.since));
+    .toSorted((a, b) => CATEGORY_ORDER.indexOf(a.reason.category) - CATEGORY_ORDER.indexOf(b.reason.category) || Date.parse(a.reason.since) - Date.parse(b.reason.since));
+
+export const buildNeedsYou = (tickets: readonly ViewTicket[], options: ViewOptions): readonly NeedsYouItem[] =>
+  needingYou(entriesFor(tickets, options), options).map(({ entry, reason }) => {
+    const { key, title, provider } = entry.ticket;
+    return { key, title, provider, questions: [], ...reason };
+  });
+
+export const buildBoard = (tickets: readonly ViewTicket[], options: ViewOptions): readonly Column[] => {
+  const entries = entriesFor(tickets, options);
+  const stations = entries.flatMap((entry) => {
+    const column = stationOf(entry, options.config);
+    if (column === undefined) return [];
+    const shown = { note: noteFor(entry, column, options.config), command: commandFor(entry, column, options.config) };
+    return [{ column, card: cardFor(entry, column, shown, options) }];
+  });
+  const needsYou = needingYou(entries, options).map(({ entry, reason }) => ({ ...cardFor(entry, 'needs_you', { note: reason.why, command: reason.command }, options), category: reason.category }));
+  return COLUMNS.map(({ id, name }) => ({ id, name, cards: id === 'needs_you' ? needsYou : stations.filter(({ column }) => column === id).map(({ card }) => card) }));
+};
 
 const outcomeLines = (outcomes: Attempt['outcomes']): readonly string[] =>
   outcomes.flatMap((outcome) => [
