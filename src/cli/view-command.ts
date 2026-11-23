@@ -15,6 +15,11 @@ const DEFAULT_PORT = '4790';
 const LOCAL_ONLY = '127.0.0.1';
 const USAGE_ERROR = 2;
 
+const missingDashboard = (serverEntry: string): string =>
+  /[\\/]node_modules[\\/]/.test(serverEntry)
+    ? `The factory dashboard is missing from the installed engine (${serverEntry}). Reinstall it: delete .factory/node_modules and run factory view again.`
+    : `The factory view is not built (${serverEntry} is missing). Run: pnpm build:view`;
+
 export const viewCommand = ({ argv, cwd, env, serverEntry, exists, spawn, write, writeError }: Options): Promise<number> => {
   const portAt = argv.indexOf('--port');
   const port = portAt === -1 ? DEFAULT_PORT : (argv[portAt + 1] ?? '');
@@ -23,7 +28,7 @@ export const viewCommand = ({ argv, cwd, env, serverEntry, exists, spawn, write,
     return Promise.resolve(USAGE_ERROR);
   }
   if (!exists(serverEntry)) {
-    writeError(`The factory view is not built (${serverEntry} is missing). Run: pnpm build:view`);
+    writeError(missingDashboard(serverEntry));
     return Promise.resolve(USAGE_ERROR);
   }
 

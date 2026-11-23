@@ -4,6 +4,7 @@ reports/
 .stryker-tmp/
 dist/
 .output/
+!view/.output/
 .tanstack/
 .nitro/
 .vitest/

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
@@ -12,6 +13,7 @@ const json = (path: string): unknown => JSON.parse(readFileSync(join(ROOT, path)
 const PackageSchema = z.object({ name: z.string(), version: z.string(), bin: z.object({ factory: z.string() }) });
 const PluginSchema = z.object({ name: z.string(), version: z.string(), description: z.string().min(1) });
 const MarketplaceSchema = z.object({ name: z.string(), owner: z.object({ name: z.string().min(1) }), plugins: z.array(z.object({ name: z.string(), source: z.string(), version: z.string() })) });
+const PackListSchema = z.array(z.object({ files: z.array(z.object({ path: z.string() })) }));
 const SkillSchema = z.object({ name: z.string(), description: z.string().min(1) });
 
 const skills = readdirSync(join(ROOT, 'skills'));
@@ -27,6 +29,13 @@ describe('the factory plugin', () => {
     expect([pkg.version, plugin.version, ...marketplace.plugins.map((entry) => entry.version)]).toEqual([ENGINE_VERSION, ENGINE_VERSION, ENGINE_VERSION]);
     expect(marketplace.plugins.map(({ name, source }) => ({ name, source }))).toEqual([{ name: plugin.name, source: './' }]);
     expect(existsSync(join(ROOT, 'src', 'cli', `${pkg.bin.factory.replace(/^dist\/cli\//, '').replace(/\.js$/, '')}.ts`))).toBe(true);
+  });
+
+  it('ships the built dashboard with the engine, so an installed project can run factory view', () => {
+    const packed = PackListSchema.parse(JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: ROOT, encoding: 'utf8' })));
+    const paths = packed.flatMap(({ files }) => files.map(({ path }) => path));
+
+    expect(paths).toEqual(expect.arrayContaining(['view/.output/server/index.mjs', 'view/.output/engine-version']));
   });
 
   it('ships the skills a project needs to set the factory up, run it and keep it healthy', () => {

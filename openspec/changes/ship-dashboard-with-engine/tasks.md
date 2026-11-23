@@ -1,0 +1,8 @@
+# Tasks
+
+- [ ] 1. `package.json` lists `view/.output` in `files` and the release commits the built dashboard into the tagged commit (D-001), so the engine package includes the built dashboard and `factory view` starts in an installed project. Verified by a test that the file list from `npm pack --dry-run` includes `view/.output/server/index.mjs` and `view/.output/engine-version`.
+- [ ] 2. A missing dashboard exits with code 2. In an installed engine (server entry under `node_modules/`), the message says to delete `.factory/node_modules` and run `factory view` again. In a checkout, it still says `pnpm build:view` (D-002). Verified by `tests/view-command.test.ts` tests of both messages and the exit code.
+- [ ] 3. The README section on `factory view` says an installed engine includes the dashboard, and keeps `pnpm build:view` for a checkout of the factory. Verified by reading the updated section in the pull request diff.
+- [ ] 4. `pnpm build:view` writes the version from `src/version.ts` to `view/.output/engine-version` (D-003). Verified by running `pnpm build:view` and a test that reads the stamp from the committed build and compares it with `src/version.ts`.
+- [ ] 5. A test in the engine's suite fails, saying to run `pnpm build:view` and commit `view/.output`, when the build or its stamp is missing or the stamp differs from `src/version.ts` (D-003). Verified by tests of the check against a missing build, a missing stamp, a stale stamp and a matching stamp.
+- [ ] 6. `.gitignore` stops ignoring `view/.output`, and the pull request commits a freshly built, stamped `view/.output` (D-003). Verified by `git ls-files view/.output` listing `server/index.mjs` and `engine-version`, and by the stamp test passing in CI.

@@ -2,7 +2,7 @@ import type { SpawnOptions } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { viewCommand } from '../src/cli/view-command.js';
 
-const getHarness = (options?: { readonly built?: boolean }) => {
+const getHarness = (options?: { readonly built?: boolean; readonly serverEntry?: string }) => {
   const spawned: { command: string; args: readonly string[]; options: SpawnOptions }[] = [];
   const out: string[] = [];
   const errors: string[] = [];
@@ -12,7 +12,7 @@ const getHarness = (options?: { readonly built?: boolean }) => {
       argv,
       cwd: '/work/billing-service',
       env: { JIRA_TOKEN: 'secret', PATH: '/usr/bin' },
-      serverEntry: '/pkg/view/.output/server/index.mjs',
+      serverEntry: options?.serverEntry ?? '/pkg/view/.output/server/index.mjs',
       exists: () => options?.built ?? true,
       spawn: (command, args, spawnOptions) => {
         spawned.push({ command, args, options: spawnOptions });
@@ -84,7 +84,27 @@ describe('factory view', () => {
     expect(spawned).toEqual([]);
   });
 
-  it('exits 2 and says how to build the view when it was not built', async () => {
+  it('exits 2 and says to reinstall the engine when an installed engine is missing its dashboard', async () => {
+    const serverEntry = '/work/billing-service/.factory/node_modules/software-factory/view/.output/server/index.mjs';
+    const { run, spawned, errors } = getHarness({ built: false, serverEntry });
+
+    expect(await run()).toBe(2);
+    expect(errors).toEqual([
+      `The factory dashboard is missing from the installed engine (${serverEntry}). Reinstall it: delete .factory/node_modules and run factory view again.`,
+    ]);
+    expect(spawned).toEqual([]);
+  });
+
+  it('recognises an installed engine on a Windows path', async () => {
+    const serverEntry = 'C:\\work\\.factory\\node_modules\\software-factory\\view\\.output\\server\\index.mjs';
+    const { run, errors } = getHarness({ built: false, serverEntry });
+
+    await run();
+
+    expect(errors[0]).toMatch(/^The factory dashboard is missing from the installed engine/);
+  });
+
+  it('exits 2 and says how to build the view when a checkout of the factory has not built it', async () => {
     const { run, spawned, errors } = getHarness({ built: false });
 
     expect(await run()).toBe(2);
