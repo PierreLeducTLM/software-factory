@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +7,7 @@ import { createSpecFolder } from './inputs.js';
 import { createRealDeps, createSetupDeps } from './real-deps.js';
 import { setupCommand } from './setup-command.js';
 import { viewCommand } from './view-command.js';
+import { isPortFree, startDashboard, untilStopped, waitUntilListening } from './view-server.js';
 
 const [command, ...rest] = process.argv.slice(2);
 const SETUP_COMMANDS = ['doctor', 'migrate', 'init', 'workflow'];
@@ -21,16 +21,20 @@ process.exitCode =
         writeError: (line) => console.error(line),
       })
     : command === 'view'
-    ? await viewCommand({
-        argv: rest,
-        cwd: process.cwd(),
-        env: process.env,
-        serverEntry: fileURLToPath(new URL('../../view/.output/server/index.mjs', import.meta.url)),
-        exists: existsSync,
-        spawn,
-        write: (line) => console.log(line),
-        writeError: (line) => console.error(line),
-      })
+    ? process.exit(
+        await viewCommand({
+          argv: rest,
+          cwd: process.cwd(),
+          serverEntry: fileURLToPath(new URL('../../view/.output/server/index.mjs', import.meta.url)),
+          exists: existsSync,
+          isPortFree,
+          startServer: startDashboard,
+          waitUntilListening,
+          untilStopped,
+          write: (line) => console.log(line),
+          writeError: (line) => console.error(line),
+        }),
+      )
     : await runCli({
   argv: process.argv.slice(2),
   deps: () => createRealDeps({ cwd: process.cwd(), env: process.env }),
