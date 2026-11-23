@@ -146,7 +146,7 @@ describe('the CI steps of an install on GitHub', () => {
 
     expect(install.files['.github/workflows/factory.yml']).not.toContain('revert');
     expect(install.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(install.manual).toEqual(['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.']);
+    expect(install.manual).toEqual(['The revert step was left out: name the workflow that builds the main branch, then run the install again.']);
   });
 
   it('adds the factory workflow with record-merge, and lists the tracker secrets, on a GitHub repository with no CI', async () => {

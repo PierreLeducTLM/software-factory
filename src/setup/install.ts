@@ -59,6 +59,7 @@ Add a check with \`/factory-workflow\`. It writes the rubric, validates the conf
 
 const FACTORY = '.factory/bin/factory';
 
+const UNNAMED_MAIN_BUILD = 'The revert step was left out: name the workflow that builds the main branch, then run the install again.';
 const NO_MAIN_BUILD = 'The revert step was left out because no workflow builds the main branch. Add one, then run the install again.';
 
 const secretName = (env: string): string => `FACTORY_${env}`;
@@ -208,7 +209,8 @@ export const buildInstall = (answers: InstallAnswers): Install => {
     manual: [
       ...(system === 'bitbucket-pipelines' ? bitbucketSteps(answers) : []),
       ...(system === 'none' && !github ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
-      ...(github && workflow === undefined ? [NO_MAIN_BUILD] : []),
+      ...(github && system === 'none' ? [NO_MAIN_BUILD] : []),
+      ...(github && system !== 'none' && workflow === undefined ? [UNNAMED_MAIN_BUILD] : []),
     ],
     secrets: github ? githubWorkflow(answers).secrets : system === 'none' ? [] : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])],
   };

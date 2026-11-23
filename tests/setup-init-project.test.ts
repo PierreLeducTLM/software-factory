@@ -336,7 +336,7 @@ describe('the CI of the project while setting up', () => {
     const result = await initProject(deps, LINEAR);
 
     expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.'] });
+    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] });
   });
 
   it('adds the factory workflow without revert to a GitHub project without CI, and says why revert is missing', async () => {
