@@ -84,7 +84,7 @@ const gateLine = (gate: Extract<StatusResult, { ok: true }>['gate']): string => 
 };
 
 const statusOutcome = (result: StatusResult): Outcome => {
-  if (!result.ok) return outcome(result, []);
+  if (!result.ok) return outcome(result, 'ticket' in result ? [result.ticket.title] : []);
   const { approval } = result;
   return outcome(result, [
     `Status: ${result.status}`,
@@ -154,7 +154,12 @@ const parse = (argv: readonly string[]): Command | undefined => {
     return async (deps) => watchOutcome(await watchRun(deps, change));
   }
   if (key === undefined) return undefined;
-  if (name === 'refine') return async (deps) => outcome(await startRefinement(deps, key), [`Refinement started on ${key}`]);
+  if (name === 'refine') {
+    return async (deps) => {
+      const started = await startRefinement(deps, key);
+      return outcome(started, started.ok ? [`Refinement started on ${key}`] : []);
+    };
+  }
   if (name === 'status') return async (deps) => statusOutcome(await refinementStatus(deps, key));
   if (name === 'ready-gate') return async (deps) => gateOutcome(await runReadyGate(deps, key), 'Ready gate passed', 'Ready gate failed');
   if (name === 'revalidate') return async (deps) => gateOutcome(await revalidate(deps, key), 'No drift since approval', 'Sent back to refinement');
@@ -245,7 +250,7 @@ export const runCli = async ({ argv, deps, folder, readFile, write, writeError }
   if (argv.includes('--json')) {
     write(JSON.stringify(result));
   } else if ('message' in result && typeof result.message === 'string') {
-    writeError(result.message);
+    [result.message, ...lines].forEach(writeError);
   } else {
     lines.forEach(write);
   }

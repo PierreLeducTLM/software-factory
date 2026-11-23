@@ -6,7 +6,7 @@ argument-hint: "[KEY]"
 
 # Factory refine
 
-Take one ticket from a draft spec to an approved spec in Ready for Dev. This is the only place where a person answers questions about the ticket. Once it is approved, the factory builds it without asking anything.
+Take one ticket from a draft spec to an approved spec in Ready for Dev, drafting the spec with the person first when the ticket has none. This is the only place where a person answers questions about the ticket. Once it is approved, the factory builds it without asking anything.
 
 **Input:** a ticket key, such as `PAY-142`. If none is given, ask for one.
 
@@ -22,9 +22,29 @@ Take one ticket from a draft spec to an approved spec in Ready for Dev. This is 
 factory status <KEY> --json
 ```
 
-- If it is refused with `no_spec`, the ticket has no OpenSpec files attached. Refinement starts from a draft, so do not write one from nothing. If the user has a draft change folder locally, offer to attach it with `factory push <KEY> --from <folder>`. Otherwise stop and say a draft spec is needed.
+- If it is refused with `no_spec`, the ticket has no OpenSpec files attached. Draft one with the person, as step 1a says. Never write a spec without the person.
 - If it is refused with `record_edited`, stop and tell the user the factory comment was edited by hand.
 - If `questions` is not empty, the factory sent this ticket back. Those questions come first, in step 4.
+
+### 1a. Draft a missing spec with the person
+
+Only for a `no_spec` refusal. Its `ticket` field holds the ticket's `title` and `description`; the `description` is `""` when the ticket has none. Do not run `factory refine` yet: the ticket's status and factory comment stay as they are until a draft is attached.
+
+1. **A local draft.** If the person already has a draft change folder for this ticket, offer to attach it. If they accept, attach it (step 4 below) and skip the rest.
+2. **Explore mode.** Otherwise open OpenSpec's explore mode: the `openspec-explore` skill, or the `/opsx:explore` command. Hand off to it rather than following its steps from memory. Start it with the ticket key, its title and its description, and say that the goal is a draft change for that ticket. Let the person drive the exploration, and capture it as an OpenSpec change folder under `openspec/changes/` once the person confirms.
+3. **Explore mode is not installed.** If neither the `openspec-explore` skill nor the `/opsx:explore` command is available, check for propose mode: the `openspec-propose` skill, or the `/opsx:propose` command. If propose mode is not available either, do not offer it: stop as step 5 says, and name `openspec config profile` followed by `openspec update` as the way to install the explore and propose workflows. If propose mode is available, say that explore mode is not, and in the same message:
+   - ask whether to draft the spec with OpenSpec's propose mode instead, starting from the same ticket key, title and description;
+   - say that explore mode can be installed by running `openspec config profile` to add the explore workflow, then `openspec update` in the project. Do not run either command yourself.
+
+   If the person accepts, run propose mode. If they decline, stop as step 5 below says.
+4. **Attach the draft.** Once explore or propose mode has written a change folder, attach that folder and continue at step 2:
+
+   ```bash
+   factory push <KEY> --from openspec/changes/<name>
+   ```
+
+   `<name>` is the folder the captured change was written to. Step 2 runs `factory refine <KEY>`, which moves the ticket to Spec review.
+5. **Stopping without a draft.** If the person stops before a change folder exists, declines propose mode, or neither mode is installed: attach nothing, do not run `factory refine`, and say that the ticket still has no draft spec and that one is needed before refinement can go on.
 
 ### 2. Start refinement and get the spec files
 
@@ -112,4 +132,5 @@ Say that the ticket is in Ready for Dev, list the decisions recorded in this ses
 - Never approve without the person's explicit yes in this session.
 - Never invent the answer to a question about observable behaviour. Recommend one, then ask.
 - If the person stops before the gate passes, push what is done so nothing is lost, and say which findings remain.
+- If the person stops while a missing spec is being drafted, before a change folder exists, attach nothing and leave the ticket as it is: its status and factory comment do not change. Say that the ticket still has no draft spec and that one is needed. The same holds when the person declines propose mode or neither explore nor propose mode is installed.
 - If a `factory` command exits with code 2, the project is not set up or the command was misused. Show its message and stop.

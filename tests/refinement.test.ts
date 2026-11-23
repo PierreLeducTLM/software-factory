@@ -637,10 +637,36 @@ describe('refinement status', () => {
     expect(await refinementStatus(depsFor(world), 'PAY-142')).toEqual({ ok: true, status: 'To refine', questions: [] });
   });
 
-  it('refuses a ticket with no spec files', async () => {
+  it('refuses a ticket with no spec files, showing its title and description so a draft can start from them', async () => {
     const world = await getWorld(toRefine(), {});
 
-    expect(await refinementStatus(depsFor(world), 'PAY-142')).toMatchObject({ ok: false, reason: 'no_spec' });
+    expect(await refinementStatus(depsFor(world), 'PAY-142')).toEqual({
+      ok: false,
+      reason: 'no_spec',
+      message: 'PAY-142 has no OpenSpec files attached. A draft spec is required',
+      ticket: { title: 'Bulk invoice export', description: '## Why\nExport invoices in bulk.' },
+    });
+  });
+
+  it('shows an empty description for a ticket with no spec files and nothing in its tracker description', async () => {
+    const { spec: _omitted, ...withoutDescription } = toRefine();
+    const world = await getWorld(withoutDescription, {});
+
+    expect(await refinementStatus(depsFor(world), 'PAY-142')).toMatchObject({
+      reason: 'no_spec',
+      ticket: { title: 'Bulk invoice export', description: '' },
+    });
+  });
+
+  it('keeps the refusal of every other command on a ticket with no spec files free of the ticket', async () => {
+    const world = await getWorld(inSpecReview(), {});
+    const deps = depsFor(world);
+    const refusal = { ok: false, reason: 'no_spec', message: 'PAY-142 has no OpenSpec files attached. A draft spec is required' };
+
+    expect(await pullSpecFiles(deps, 'PAY-142')).toEqual(refusal);
+    expect(await runReadyGate(deps, 'PAY-142')).toEqual(refusal);
+    expect(await approvalPreview(deps, 'PAY-142')).toEqual(refusal);
+    expect(await revalidate(deps, 'PAY-142')).toEqual(refusal);
   });
 });
 

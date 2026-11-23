@@ -7,7 +7,7 @@ Turns a ticket's draft spec into an approved, question-free contract before deve
 ## ADDED Requirements
 
 ### Requirement: Refinement starts from a draft spec in the ticket
-The refine skill SHALL start only from a ticket that already holds a draft OpenSpec change, and it SHALL read and write that spec in the ticket. It MUST NOT write a spec from nothing.
+The refine skill SHALL start only from a ticket that already holds a draft OpenSpec change, and it SHALL read and write that spec in the ticket. It MUST NOT write a spec without the person.
 
 The ticket's description holds the general spec for people. The official OpenSpec files are attached to the ticket. The attached files are the spec the factory loads, fingerprints and builds from.
 
@@ -17,7 +17,7 @@ The ticket's description holds the general spec for people. The official OpenSpe
 
 #### Scenario: Ticket has no spec
 - **WHEN** a person starts a refine session on a ticket with no OpenSpec files attached, even if its description is filled in
-- **THEN** the skill stops, explains that a draft spec is required, and leaves the ticket's status unchanged
+- **THEN** the skill opens OpenSpec explore mode, as the requirement "Refinement drafts a missing spec through OpenSpec explore mode" describes, and leaves the ticket's status unchanged until a draft is attached
 
 ### Requirement: Every open question becomes a recorded decision
 During refinement the skill SHALL turn each open question into an entry in the spec's Decisions section: the question, the answer, and its effect on the spec. A question only counts as closed once it has a recorded decision.
