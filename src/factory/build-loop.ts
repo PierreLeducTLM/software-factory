@@ -32,7 +32,13 @@ export type LoopDeps = RefinementDeps & {
   readonly linesChangedOnBranch: () => Promise<number>;
   readonly pushBranch: (branch: string) => Promise<void>;
   readonly commitMessage: (commit: string) => Promise<string>;
+  readonly changeFolders: () => Promise<readonly ChangeFolder[]>;
+  readonly archiveChange: (name: string) => Promise<ArchiveResult>;
 };
+
+export type ChangeFolder = { readonly name: string; readonly files: readonly string[]; readonly archived: boolean };
+
+export type ArchiveResult = { readonly ok: true } | { readonly ok: false; readonly error: string };
 
 export type Diagnosis = {
   readonly kind: 'code' | 'spec' | 'environment';
@@ -75,6 +81,9 @@ const REVIEW_STATION = 'review';
 const QUALITY_STATION = 'quality';
 const RISK_SCRIPT_TIMEOUT_SECONDS = 120;
 const PERSON_MERGES = 'A person merges this pull request.';
+const ARCHIVE = 'archive';
+const FACTORY_PREFIX = 'factory-';
+const CANONICAL_SPECS = 'openspec/specs/';
 const STEP_TIMEOUT_SECONDS = { revalidate: 120, build: 1800, verify: 600, review: 900, diagnose: 600 } as const;
 
 const refuse = (reason: Refusal, message: string): AdvanceResult => ({ ok: false, reason, message });
@@ -205,7 +214,47 @@ const pullRequestBody = ({ key, approval }: Context, record: TicketRecord, risk:
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const markdownOf = (files: readonly string[]): readonly string[] => files.filter((file) => file.endsWith('.md')).toSorted();
+
+const sameFiles = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((file, index) => file === right[index]);
+
+type Change = { readonly name: string; readonly archived: boolean };
+
+const onlyOne = (folders: readonly ChangeFolder[]): Change | undefined => {
+  const [folder] = folders;
+  return folders.length === 1 && folder !== undefined ? { name: folder.name, archived: folder.archived } : undefined;
+};
+
+const changeOf = async ({ deps, key }: Context): Promise<Change | undefined> => {
+  const attached = (await deps.tickets.listAttachments(key)).map(({ name }) => name).filter((name) => !name.startsWith(FACTORY_PREFIX));
+  const spec = markdownOf([...new Set(attached)].map((name) => name.replaceAll('__', '/')));
+  const matching = (await deps.changeFolders()).filter((folder) => sameFiles(markdownOf(folder.files), spec));
+  const open = matching.filter((folder) => !folder.archived);
+  return open.length > 0 ? onlyOne(open) : onlyOne(matching);
+};
+
+const notFound = (key: string): string =>
+  `The approved spec of ${key} is not in one folder under openspec/changes/. Pull it with factory pull ${key} --to openspec/changes/<name> and commit it.`;
+
+const archiveRefused = (name: string, error: string): SendBackQuestion => ({
+  question: `openspec archive ${name} failed:\n${error}\nHow should the delta spec change so that it applies to the canonical specs in ${CANONICAL_SPECS}?`,
+  recommended: `Fix the delta spec so that it applies to the canonical specs in ${CANONICAL_SPECS}, then run the ready gate again.`,
+});
+
 const deliver = async (context: Context, record: TicketRecord, raise: RiskRaise | undefined): Promise<AdvanceResult> => {
+  const { deps, key } = context;
+  const change = await changeOf(context);
+  if (change === undefined) {
+    return failAttempt(context, withOutcomes(record, [{ id: ARCHIVE, station: REVIEW_STATION, status: 'failed', reason: notFound(key), durationSeconds: 0 }]));
+  }
+  if (change.archived) return openPullRequest(context, record, raise);
+  const archived = await deps.archiveChange(change.name);
+  if (!archived.ok) return sendBack(context, record, [archiveRefused(change.name, archived.error)]);
+  return openPullRequest(context, record, raise);
+};
+
+const openPullRequest = async (context: Context, record: TicketRecord, raise: RiskRaise | undefined): Promise<AdvanceResult> => {
   const { deps, key, ticket, worktree, approval } = context;
   const risk = await assessRun(context, record, raise);
   const decision = decideMerge(deps.config.risk, risk.level, {

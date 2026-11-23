@@ -4,11 +4,20 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import type { CommandRunner } from '../adapters/orca-agent-runtime.js';
+import type { ArchiveResult, ChangeFolder } from '../factory/build-loop.js';
 import type { ScriptRun } from '../factory/checks.js';
 import type { SpecFile } from '../factory/refinement.js';
 import type { PublishedChange } from '../setup/project-files.js';
 
 type GitOptions = { readonly run: CommandRunner; readonly mainBranch: string };
+
+export type CanonicalSpec = { readonly path: string; readonly content: string };
+
+const CANONICAL_SPECS = 'openspec/specs';
+const CHANGES = 'openspec/changes';
+const ARCHIVE_FOLDER = 'archive';
+
+const linesOf = (text: string): readonly string[] => text.split('\n').filter((line) => line !== '');
 
 export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
   const remoteMain = `origin/${mainBranch}`;
@@ -33,8 +42,69 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
     },
+    canonicalSpecs: async (): Promise<readonly CanonicalSpec[]> => {
+      const paths = linesOf(await fetched(['ls-tree', '-r', '--name-only', remoteMain, '--', CANONICAL_SPECS]));
+      return Promise.all(
+        paths.map(async (path) => ({ path: path.slice(CANONICAL_SPECS.length + 1), content: (await run(['show', `${remoteMain}:${path}`])).stdout })),
+      );
+    },
   };
 };
+
+const RefusalSchema = z.object({ code: z.number(), stdout: z.string().default(''), stderr: z.string().default('') });
+
+const refusalOf = (error: unknown): string => {
+  const refusal = RefusalSchema.safeParse(error);
+  if (!refusal.success) throw error;
+  const printed = [refusal.data.stdout, refusal.data.stderr].map((output) => output.trim()).find((output) => output !== '');
+  return printed ?? (error instanceof Error ? error.message : String(error));
+};
+
+type Entry = { readonly folder: string; readonly file: string };
+
+const entriesOf = (paths: readonly string[], prefix: string): readonly Entry[] =>
+  paths.flatMap((path) => {
+    const [folder = '', ...rest] = path.slice(prefix.length + 1).split('/');
+    return rest.length === 0 ? [] : [{ folder, file: rest.join('/') }];
+  });
+
+const foldersOf = (entries: readonly Entry[], archived: boolean): readonly ChangeFolder[] =>
+  [...new Set(entries.map(({ folder }) => folder))]
+    .toSorted()
+    .map((name) => ({ name, files: entries.filter((entry) => entry.folder === name).map(({ file }) => file).toSorted(), archived }));
+
+type ArchiveOptions = { readonly git: CommandRunner; readonly openspec: CommandRunner; readonly mainBranch: string };
+
+export const createChangeArchive = ({ git, openspec, mainBranch }: ArchiveOptions) => ({
+  changeFolders: async (): Promise<readonly ChangeFolder[]> => {
+    const archive = `${CHANGES}/${ARCHIVE_FOLDER}`;
+    const listed = async (path: string): Promise<readonly string[]> => linesOf((await git(['ls-tree', '-r', '--name-only', 'HEAD', '--', path])).stdout);
+    await git(['fetch', '--quiet', 'origin', mainBranch]);
+    const added = linesOf((await git(['diff', '--name-only', '--no-renames', '--diff-filter=A', `origin/${mainBranch}...HEAD`, '--', archive])).stdout);
+    const archivedOnBranch = new Set(entriesOf(added, archive).map(({ folder }) => folder));
+    const open = entriesOf(await listed(CHANGES), CHANGES).filter(({ folder }) => folder !== ARCHIVE_FOLDER);
+    const archived = entriesOf(await listed(archive), archive).filter(({ folder }) => archivedOnBranch.has(folder));
+    return [...foldersOf(archived, true), ...foldersOf(open, false)];
+  },
+  archiveChange: async (name: string): Promise<ArchiveResult> => {
+    const folder = await mkdtemp(join(tmpdir(), 'factory-archive-'));
+    await git(['worktree', 'add', '--quiet', '--detach', folder, 'HEAD']);
+    try {
+      const refused = await openspec(['archive', name, '--yes'], { cwd: folder }).then(
+        () => undefined,
+        (error: unknown) => refusalOf(error),
+      );
+      if (refused !== undefined) return { ok: false, error: refused };
+      await git(['-C', folder, 'add', '--all', '--', 'openspec']);
+      await git(['-C', folder, 'commit', '--quiet', '-m', `chore: archive the ${name} OpenSpec change`]);
+      const commit = (await git(['-C', folder, 'rev-parse', 'HEAD'])).stdout.trim();
+      await git(['merge', '--ff-only', '--quiet', commit]);
+      return { ok: true };
+    } finally {
+      await git(['worktree', 'remove', '--force', folder]);
+    }
+  },
+});
 
 export const createFilePublisher =
   ({ run }: { readonly run: CommandRunner }) =>
@@ -142,15 +212,29 @@ export const createSpecFolder = (): SpecFolder => ({
   },
 });
 
+const outside = (path: string): boolean => path.startsWith('/') || path.split('/').includes('..');
+
+type ValidatorOptions = { readonly run: CommandRunner; readonly canonicalSpecs?: () => Promise<readonly CanonicalSpec[]> };
+
 export const createSpecValidator =
-  ({ run }: { readonly run: CommandRunner }) =>
+  ({ run, canonicalSpecs = async () => [] }: ValidatorOptions) =>
   async (files: readonly SpecFile[]): Promise<readonly string[]> => {
     const invalid = files.filter((file) => escapes(file.name));
     if (invalid.length > 0) return invalid.map((file) => `${file.name} is not a valid spec file name`);
+    const canonical = await canonicalSpecs();
+    const unsafe = canonical.find((spec) => outside(spec.path));
+    if (unsafe !== undefined) throw new Error(`${unsafe.path} is not a valid canonical spec path`);
 
     const root = await mkdtemp(join(tmpdir(), 'factory-spec-'));
     try {
       await mkdir(join(root, 'openspec', 'specs'), { recursive: true });
+      await Promise.all(
+        canonical.map(async (spec) => {
+          const target = join(root, CANONICAL_SPECS, spec.path);
+          await mkdir(dirname(target), { recursive: true });
+          await writeFile(target, spec.content);
+        }),
+      );
       await Promise.all(
         files.map(async (file) => {
           const target = join(root, 'openspec', 'changes', CHANGE, pathOf(file.name));

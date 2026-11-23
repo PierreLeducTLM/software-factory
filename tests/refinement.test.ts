@@ -1,5 +1,9 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createInMemoryAgentRuntime } from '../src/adapters/in-memory-agent-runtime.js';
+import type { CommandRunner } from '../src/adapters/orca-agent-runtime.js';
+import { createSpecValidator } from '../src/cli/inputs.js';
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
 import type { Ticket, TicketProvider } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig, type FactoryConfig } from '../src/config/project-config.js';
@@ -274,6 +278,21 @@ describe('ready gate', () => {
 
     expect(result).toEqual({ ok: true, passed: false, findings: ['specs/billing/spec.md: requirement "Bulk export" has no scenario'] });
     expect(seen).toEqual([['design.md', 'proposal.md', 'specs__billing__spec.md', 'tasks.md']]);
+  });
+
+  it('fails with the finding of a delta that would not apply to the canonical specs on main', async () => {
+    const world = await getWorld(inSpecReview());
+    const refusal = 'Archive would refuse this delta: billing MODIFIED failed for header "### Requirement: Bulk export" - not found';
+    const openspec: CommandRunner = async (_args, options) => {
+      const checksCanonical = existsSync(join(options?.cwd ?? '', 'openspec/specs/billing/spec.md'));
+      const issues = checksCanonical ? [{ level: 'INFO', path: 'billing/spec.md', message: refusal }] : [];
+      return { stdout: JSON.stringify({ items: [{ id: 'candidate', valid: true, issues }] }) };
+    };
+    const validateSpec = createSpecValidator({ run: openspec, canonicalSpecs: async () => [{ path: 'billing/spec.md', content: '# billing Specification\n' }] });
+
+    const result = await runReadyGate(depsFor(world, { validateSpec }), 'PAY-142');
+
+    expect(result).toEqual({ ok: true, passed: false, findings: [`billing/spec.md: ${refusal}`] });
   });
 
   it('reads the newest copy when a spec file was attached again', async () => {
