@@ -121,7 +121,7 @@ Three labels are optional: `factory-available` marks a ticket in "to refine" as 
 
 ## The dashboard
 
-`factory view` opens a read-only dashboard of the project's tickets at http://127.0.0.1:4790. `factory view --sample` shows it on sample data. The engine a project installs includes the built dashboard, so there is nothing to build. If it says the dashboard is missing from the installed engine, delete `.factory/node_modules` and run `factory view` again.
+`factory view` opens a read-only dashboard of the project's tickets at http://127.0.0.1:4790. `factory view --sample` shows it on sample data. When port 4790 is already in use, the dashboard starts on the next free port up to 4799, and the URL `factory view` prints names the port it uses. `factory view --port <number>` uses that port or stops with an error when it is taken. Stopping `factory view`, however it is stopped, also stops the dashboard. The engine a project installs includes the built dashboard, so there is nothing to build. If it says the dashboard is missing from the installed engine, delete `.factory/node_modules` and run `factory view` again.
 
 In a checkout of this repository, build the dashboard first with `pnpm build:view`.
 
