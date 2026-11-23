@@ -8,7 +8,8 @@
     "node": ">=22"
   },
   "files": [
-    "dist"
+    "dist",
+    "view/.output"
   ],
   "bin": {
     "factory": "dist/cli/bin.js"
@@ -21,7 +22,7 @@
     "mutation": "stryker run",
     "build": "tsc -p tsconfig.build.json",
     "test:view": "pnpm --filter @software-factory/view test",
-    "build:view": "pnpm --filter @software-factory/view build",
+    "build:view": "pnpm --filter @software-factory/view build && node scripts/stamp-view.ts",
     "prepare": "tsc -p tsconfig.build.json"
   },
   "dependencies": {

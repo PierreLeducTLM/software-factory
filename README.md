@@ -121,15 +121,9 @@ Three labels are optional: `factory-available` marks a ticket in "to refine" as 
 
 ## The dashboard
 
-`factory view` opens a read-only dashboard of the project's tickets at http://127.0.0.1:4790. `factory view --sample` shows it on sample data. It needs the dashboard built, which the project's copy of the engine does not include. Build it once from a checkout of this repository:
+`factory view` opens a read-only dashboard of the project's tickets at http://127.0.0.1:4790. `factory view --sample` shows it on sample data. The engine a project installs includes the built dashboard, so there is nothing to build. If it says the dashboard is missing from the installed engine, delete `.factory/node_modules` and run `factory view` again.
 
-```bash
-git clone https://github.com/PierreLeducTLM/software-factory.git
-cd software-factory
-pnpm install
-pnpm build:view
-npm link          # puts a `factory` command on your PATH that can open the dashboard
-```
+In a checkout of this repository, build the dashboard first with `pnpm build:view`.
 
 ## Developing the factory
 
@@ -141,7 +135,7 @@ pnpm mutation        # Stryker mutation testing
 pnpm test:view       # dashboard tests
 ```
 
-The design, the specs and the task list are in `openspec/changes/define-software-factory-v1/`. A release is a tag `vX.Y.Z` on `main`. The plugin, the package and `src/version.ts` carry the same version, and a project pins it in `.factory/package.json`.
+The design, the specs and the task list are in `openspec/changes/define-software-factory-v1/`. A release is a tag `vX.Y.Z` on `main`. The plugin, the package and `src/version.ts` carry the same version, and a project pins it in `.factory/package.json`. The built dashboard in `view/.output` is committed and ships with the engine. After bumping the version, run `pnpm build:view` and commit `view/.output`; the test suite fails until the build carries the new version.
 
 ## License
 
