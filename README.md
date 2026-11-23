@@ -75,7 +75,7 @@ The install pull request adds a `.factory/` folder, and on GitHub a workflow. No
 | `.factory/checks/` | Rubrics for agent checks |
 | `.github/workflows/factory.yml` | The CI steps that record each merge and revert a bad one, on GitHub. On Bitbucket, the pull request lists the steps to add by hand |
 
-Each project runs the engine it pins. To move a project to a newer engine, run `factory migrate`: it opens one pull request.
+Each project runs the engine it pins. To move a project to a newer engine, run `factory migrate`: it opens one pull request. On GitHub, it also adds `.github/workflows/factory.yml` when it is missing.
 
 ## The skills
 
