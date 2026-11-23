@@ -92,42 +92,42 @@ var public_assets_data_default = {
 	"/assets/CopyCommand-DArfV8xF.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"11707-aZo6DKmxDuYMfHalaCSFqtCDnmw\"",
-		"mtime": "2026-11-23T01:49:18.446Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 71431,
 		"path": "../public/assets/CopyCommand-DArfV8xF.js"
 	},
 	"/assets/health-BIkiHp00.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"1bc-37Neq7CM24fEVapBorI/JUNNSbs\"",
-		"mtime": "2026-11-23T01:49:18.447Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 444,
 		"path": "../public/assets/health-BIkiHp00.js"
 	},
 	"/assets/index-C_HdIz1q.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"44f25-loL5JAMFCyAPhp2F74Gx+9zWXas\"",
-		"mtime": "2026-11-23T01:49:18.446Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 282405,
 		"path": "../public/assets/index-C_HdIz1q.js"
 	},
 	"/assets/needs-you-dMF1FQwy.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"bc2-QNuaI0Sl/4jOYxNrl8TFCrc1jM0\"",
-		"mtime": "2026-11-23T01:49:18.447Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 3010,
 		"path": "../public/assets/needs-you-dMF1FQwy.js"
 	},
 	"/assets/routes-WjA5sk22.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"1abd-QkffJV1hNO+dZzcisIZiHSGAAyU\"",
-		"mtime": "2026-11-23T01:49:18.447Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 6845,
 		"path": "../public/assets/routes-WjA5sk22.js"
 	},
 	"/assets/styles-Dbkir6S_.css": {
 		"type": "text/css; charset=utf-8",
 		"etag": "\"1e5d-kAJBCB0qMCP2gbIrIAu5R+xDxlg\"",
-		"mtime": "2026-11-23T01:49:18.447Z",
+		"mtime": "2026-11-23T02:13:55.647Z",
 		"size": 7773,
 		"path": "../public/assets/styles-Dbkir6S_.css"
 	}
@@ -251,11 +251,11 @@ var findRouteRules = /* @__PURE__ */ (() => {
 		return r.reverse();
 	};
 })();
-var _lazy_ce3995b063f85116 = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
+var _lazy_e1bdd4fd37b95a78 = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
 var findRoute = /* @__PURE__ */ (() => {
 	const data = {
 		route: "/**",
-		handler: _lazy_ce3995b063f85116
+		handler: _lazy_e1bdd4fd37b95a78
 	};
 	return ((_m, p) => {
 		if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
