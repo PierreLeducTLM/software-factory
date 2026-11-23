@@ -187,6 +187,16 @@ describe('factory migrate', () => {
     expect(errors).toEqual([`This project pins factory engine 9.0.0, newer than this engine (${ENGINE_VERSION}). Install engine 9.0.0 instead.`]);
   });
 
+  it('opens the pull request that adds a missing factory workflow, and says where it is', async () => {
+    const setup = getSetup(Object.fromEntries(Object.entries(HEALTHY).filter(([path]) => path !== '.github/workflows/factory.yml')));
+
+    const { code, out, errors } = await setup.run('migrate');
+
+    expect({ code, errors }).toEqual({ code: 0, errors: [] });
+    expect(out).toEqual(['Opened https://github.com/acme/billing-service/pull/77. Nothing changes until it is merged.']);
+    expect(Object.keys(setup.published[0]?.files ?? {})).toEqual(['.github/workflows/factory.yml']);
+  });
+
   it('answers with the result as JSON', async () => {
     const { out } = await getSetup(OLD).run('migrate', '--json');
 
@@ -250,8 +260,9 @@ describe('factory init', () => {
       'Checks, all blocking: test',
       'Statuses: to_refine=To refine, spec_review=Spec review, ready_for_dev=Ready for Dev, in_development=In development, in_review=In review, blocked=Blocked, done=Done',
       'Every risk level starts in shadow mode, with no sensitive paths and no staging watch. Change them later with /factory-workflow.',
+      'Store these CI secrets: FACTORY_LINEAR_API_KEY',
       'By hand:',
-      expect.stringMatching(/^- No CI system was found\./),
+      '- The revert step was left out because no workflow builds the main branch. Add one, then run the install again.',
     ]);
     expect(setup.accessed).toEqual(['PAY-1']);
     expect(setup.opened).toEqual(['factory/install']);

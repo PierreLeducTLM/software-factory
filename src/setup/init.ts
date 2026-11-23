@@ -1,11 +1,10 @@
-import { parse } from 'yaml';
 import type { OpenPullRequest } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { TICKET_PROVIDER_NAMES, type AdaptersConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION } from '../version.js';
 import type { FactoryState } from '../record/ticket-record.js';
-import { detectProject, type Category, type Detection } from './detect.js';
+import { detectProject, mainBuildWorkflow, type Category, type Detection } from './detect.js';
 import { adaptersFor, buildInstall, type ChosenCheck, type Connection, type InstallAnswers } from './install.js';
 import { matchStatuses } from './match-statuses.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
@@ -96,7 +95,6 @@ export type InitResult =
 
 const TIMEOUTS: Readonly<Record<Category, string>> = { tests: '10m', lint: '5m', types: '5m', format: '2m', security: '10m', build: '10m', e2e: '15m' };
 const CI_TIMEOUT = '15m';
-const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
 
 const ticketProviderOf = (input: InitInput): Connection['ticketProvider'] | readonly string[] => {
   const { team, baseUrl, filter, project, tokenEnv, emailEnv } = input;
@@ -133,16 +131,6 @@ const checksOf = (detection: Detection, verification: readonly Verification[]): 
       timeout: measured?.timeout ?? (source === 'ci' ? CI_TIMEOUT : TIMEOUTS[category]),
     };
   });
-
-const workflowOf = async (deps: InitDeps, detection: Detection): Promise<string | undefined> => {
-  if (detection.ci.system !== 'github-actions') return undefined;
-  const others = detection.ci.files.filter((file) => file !== FACTORY_WORKFLOW);
-  const holding = detection.candidates.find((candidate) => candidate.source === 'ci')?.from;
-  const file = holding ?? (others.length === 1 ? others[0] : undefined);
-  if (file === undefined) return undefined;
-  const name: unknown = (parse((await deps.files.read(file)) ?? '') as { readonly name?: unknown } | null)?.name;
-  return typeof name === 'string' ? name : file;
-};
 
 const summaryOf = (answers: InstallAnswers, advisory: readonly string[]): readonly string[] => {
   const { ticketProvider: tracker, sourceControl, repository, mainBranch, checks, states } = answers;
@@ -189,7 +177,7 @@ export const initProject = async (deps: InitDeps, input: InitInput): Promise<Ini
   }
 
   const verification = input.verify ? await verifyChecks(deps, detection.candidates) : [];
-  const workflow = await workflowOf(deps, detection);
+  const workflow = await mainBuildWorkflow(deps.files, detection);
   const answers: InstallAnswers = {
     engine: ENGINE_VERSION,
     repository,

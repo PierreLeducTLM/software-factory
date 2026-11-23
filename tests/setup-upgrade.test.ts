@@ -1,4 +1,5 @@
 import { parse } from 'yaml';
+import { detectProject } from '../src/setup/detect.js';
 import { describe, expect, it } from 'vitest';
 import { engineFiles, enginePackage } from '../src/setup/engine-files.js';
 import type { Migration } from '../src/setup/migrate.js';
@@ -166,5 +167,93 @@ describe('upgrading a project to a newer engine', () => {
     expect(missing.result).toEqual({ ok: false, reason: 'missing', message: '.factory/factory.yaml is missing. Run /factory-init' });
     expect(ahead.result).toEqual({ ok: false, reason: 'schema', message: 'factory.yaml uses schema 3, newer than this engine understands (2). Upgrade the engine.' });
     expect([...missing.published, ...ahead.published]).toEqual([]);
+  });
+});
+
+const ADAPTERS = `
+repository: acme/billing-service
+ticket_providers:
+  - { kind: jira, base_url: "https://acme.atlassian.net", filter: project = PAY, token_env: JIRA_TOKEN, email_env: JIRA_EMAIL }
+source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN }
+agent_runtime: { kind: orca }
+`;
+
+const BITBUCKET_ADAPTERS = ADAPTERS.replace('source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN }', 'source_control: { kind: bitbucket, repo: acme/billing-service, token_env: BB_TOKEN, username_env: BB_USER }');
+
+const BUILD = 'name: CI\non: push\njobs:\n  test:\n    steps:\n      - run: pnpm run test\n';
+
+const CURRENT = { '.factory/factory.yaml': FACTORY, '.factory/adapters.yaml': ADAPTERS, ...engineFiles('0.1.0') };
+
+const WORKFLOW = '.github/workflows/factory.yml';
+
+const stepsOf = async (workflow: string | undefined) => (await detectProject({ files: createInMemoryProjectFiles({ [WORKFLOW]: workflow ?? '' }) })).ci.factorySteps;
+
+describe('adding the missing factory workflow', () => {
+  it('opens a pull request that adds the workflow and lists the secrets to store, on a GitHub project otherwise up to date', async () => {
+    const { result, published, opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+
+    expect(result).toMatchObject({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41' });
+    expect(Object.keys(published[0]?.files ?? {})).toEqual([WORKFLOW]);
+    expect(await stepsOf(published[0]?.files[WORKFLOW])).toEqual(['record-merge']);
+    expect(published[0]?.files[WORKFLOW]).toContain('  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n');
+    expect(published[0]?.message).toBe('chore: add the factory workflow');
+    expect(opened[0]?.title).toBe('chore: add the factory workflow');
+    expect(opened[0]?.branch).toBe(published[0]?.branch);
+    expect(opened[0]?.body.split('\n')).toEqual(expect.arrayContaining(['Before merging, store these secrets in the CI secret store:', '- FACTORY_JIRA_TOKEN', '- FACTORY_JIRA_EMAIL']));
+  });
+
+  it('adds the workflow to the engine upgrade pull request too', async () => {
+    const { published, opened } = await upgrade(CURRENT, { engine: '0.2.0' });
+
+    expect(opened[0]?.title).toBe('chore: upgrade the factory engine to 0.2.0');
+    expect(Object.keys(published[0]?.files ?? {})).toContain(WORKFLOW);
+    expect(opened[0]?.body.split('\n')).toEqual(expect.arrayContaining(['Before merging, store these secrets in the CI secret store:', '- FACTORY_JIRA_TOKEN', '- FACTORY_JIRA_EMAIL']));
+  });
+
+  it('adds the revert job, triggered by the workflow that builds main, chosen as init chooses it', async () => {
+    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': `${FACTORY}main_branch: trunk\n`, '.github/workflows/ci.yml': BUILD }, { engine: '0.1.5' });
+    const workflow = published[0]?.files[WORKFLOW];
+
+    expect(await stepsOf(workflow)).toEqual(['record-merge', 'revert']);
+    expect(workflow).toContain('  workflow_run:\n    workflows: ["CI"]\n    types: [completed]\n    branches: [trunk]\n');
+    expect(opened[0]?.body).not.toContain('revert step');
+  });
+
+  it('leaves the revert job out, and says why, when no workflow builds main', async () => {
+    const { published, opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+
+    expect(published[0]?.files[WORKFLOW]).not.toContain('workflow_run');
+    expect(opened[0]?.body.split('\n')).toContain('The revert step was left out because no workflow builds the main branch.');
+  });
+
+  it('leaves the watch job out, and says why, when the staging watch is on, without touching factory.yaml', async () => {
+    const watching = `${FACTORY}watch: { enabled: true, checks: [./smoke.sh] }\n`;
+
+    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': watching }, { engine: '0.1.5' });
+
+    expect(published[0]?.files[WORKFLOW]).not.toContain('watch');
+    expect(published[0]?.files[WORKFLOW]).not.toContain('deployment_status');
+    expect(Object.keys(published[0]?.files ?? {})).not.toContain('.factory/factory.yaml');
+    expect(opened[0]?.body.split('\n')).toContain('The watch step was left out: factory.yaml does not record the environment to watch. Add the watch job by hand.');
+  });
+
+  it('says nothing about the watch when it is off', async () => {
+    const { opened } = await upgrade(CURRENT, { engine: '0.1.5' });
+
+    expect(opened[0]?.body).not.toContain('watch');
+  });
+
+  it('never overwrites a factory workflow that is there', async () => {
+    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.5' });
+
+    expect(result).toMatchObject({ ok: true, action: 'none' });
+    expect(published).toEqual([]);
+  });
+
+  it('adds no workflow on Bitbucket', async () => {
+    const { result, published } = await upgrade({ ...CURRENT, '.factory/adapters.yaml': BITBUCKET_ADAPTERS }, { engine: '0.1.5' });
+
+    expect(result).toMatchObject({ ok: true, action: 'none' });
+    expect(published).toEqual([]);
   });
 });

@@ -44,6 +44,7 @@ const doctorReply = (report: DoctorReport): Reply => reply(report, report.ok ? [
 const upgradeReply = (result: UpgradeResult): Reply => {
   if (!result.ok) return reply(result, [], [result.message]);
   if (result.action === 'none') return reply(result, [result.message]);
+  if (result.from.engine === result.to.engine && result.from.schema === result.to.schema) return reply(result, [`Opened ${result.url}. Nothing changes until it is merged.`]);
   return reply(result, [`Opened ${result.url}, which moves the project from engine ${result.from.engine} to ${result.to.engine}. Nothing changes until it is merged.`]);
 };
 

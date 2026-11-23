@@ -131,12 +131,34 @@ describe('factory doctor', () => {
     const watching = { ...HEALTHY, '.factory/factory.yaml': `${FACTORY}watch: { enabled: true, checks: [./smoke.sh] }\n` };
 
     expect((await examine(noSteps)).messages).toEqual([
-      'ci_step: The CI pipeline does not run "factory record-merge"',
+      'ci_step: The CI pipeline does not run "factory record-merge". Run "factory migrate" and merge the pull request it opens',
       'ci_step: The CI pipeline does not run "factory revert"',
       'ci_secret: No CI file passes JIRA_TOKEN to the factory steps: the service account is not set up',
       'ci_secret: No CI file passes JIRA_EMAIL to the factory steps: the service account is not set up',
     ]);
     expect((await examine(watching)).messages).toEqual(['ci_step: The CI pipeline does not run "factory watch"']);
+  });
+
+  it('does not expect revert when only the factory workflow defines a job', async () => {
+    const onlyFactory = { ...without(HEALTHY, '.github/workflows/ci.yml'), '.github/workflows/factory.yml': FACTORY_CI.replace(/  revert:[\s\S]*$/, '') };
+
+    const { messages } = await examine(onlyFactory);
+
+    expect(messages.filter((message) => message.startsWith('ci_step'))).toEqual([]);
+  });
+
+  it('expects revert once another CI file defines a job', async () => {
+    const buildWithoutRevert = { ...HEALTHY, '.github/workflows/factory.yml': FACTORY_CI.replace(/  revert:[\s\S]*$/, '') };
+
+    expect((await examine(buildWithoutRevert)).messages).toEqual(['ci_step: The CI pipeline does not run "factory revert"']);
+  });
+
+  it('points to migrate only on GitHub, when the factory workflow is missing', async () => {
+    const bitbucket = { ...without(HEALTHY, '.github/workflows/factory.yml'), '.factory/adapters.yaml': ADAPTERS.replace('source_control: { kind: github, repo: acme/billing-service, token_env: GH_TOKEN }', 'source_control: { kind: bitbucket, repo: acme/billing-service, token_env: BB_TOKEN, username_env: BB_USER }') };
+    const elsewhere = { ...HEALTHY, '.github/workflows/factory.yml': FACTORY_CI.replace(/  record-merge:[\s\S]*?  revert:/, '  revert:') };
+
+    expect((await examine(bitbucket)).messages).toContain('ci_step: The CI pipeline does not run "factory record-merge"');
+    expect((await examine(elsewhere)).messages).toEqual(['ci_step: The CI pipeline does not run "factory record-merge"']);
   });
 
   it('does not ask for CI secrets in a project with no CI file, or with a provider that names none', async () => {
