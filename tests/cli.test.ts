@@ -766,7 +766,7 @@ describe('setting the command line up in a project', () => {
     [{ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML.replace('kind: orca', 'kind: other') }, '.factory/adapters.yaml: agent_runtime.kind: Invalid input: expected "orca"'],
     [
       { 'factory.yaml': FACTORY_YAML.replace('engine: 0.2.0', 'engine: 0.3.0'), 'adapters.yaml': ADAPTERS_YAML },
-      'This project pins factory engine 0.3.0 in .factory/factory.yaml, and this is engine 0.2.4. Install engine 0.3.0, or upgrade the project with /factory-doctor.',
+      'This project pins factory engine 0.3.0 in .factory/factory.yaml, and this is engine 0.2.5. Install engine 0.3.0, or upgrade the project with /factory-doctor.',
     ],
   ])('explains what is wrong with the project config (%#)', async (files, message) => {
     await expect(createRealDeps({ cwd: getProjectFolder(files), env: ENV })).rejects.toThrow(message);
