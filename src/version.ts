@@ -1,4 +1,4 @@
-export const ENGINE_VERSION = '0.2.3';
+export const ENGINE_VERSION = '0.2.4';
 
 const release = (version: string): string => version.split('.').slice(0, 2).join('.');
 
