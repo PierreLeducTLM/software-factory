@@ -45,7 +45,7 @@ Only for a `no_spec` refusal. Its `ticket` field holds the ticket's `title` and 
    ```
 
    `<name>` is the folder the captured change was written to. Step 2 runs `factory refine <KEY>`, which moves the ticket to Spec review.
-5. **Stopping without a draft.** If the person stops before a change folder exists, declines propose mode, or neither mode is installed: attach nothing, do not run `factory refine`, and say that the ticket still has no draft spec.
+5. **Stopping without a draft.** If the person stops before a change folder exists, declines propose mode, or neither mode is installed: attach nothing, do not run `factory refine`, and say that the ticket still has no draft spec and that one is needed before refinement can go on.
 
 ### 2. Start refinement and get the spec files
 
@@ -133,5 +133,5 @@ Say that the ticket is in Ready for Dev, list the decisions recorded in this ses
 - Never approve without the person's explicit yes in this session.
 - Never invent the answer to a question about observable behaviour. Recommend one, then ask.
 - If the person stops before the gate passes, push what is done so nothing is lost, and say which findings remain.
-- If the person stops while a missing spec is being drafted, before a change folder exists, attach nothing and leave the ticket as it is: its status and factory comment do not change. Say that the ticket still has no draft spec. The same holds when the person declines propose mode or neither explore nor propose mode is installed.
+- If the person stops while a missing spec is being drafted, before a change folder exists, attach nothing and leave the ticket as it is: its status and factory comment do not change. Say that the ticket still has no draft spec and that one is needed. The same holds when the person declines propose mode or neither explore nor propose mode is installed.
 - If a `factory` command exits with code 2, the project is not set up or the command was misused. Show its message and stop.
