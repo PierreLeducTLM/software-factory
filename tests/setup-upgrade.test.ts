@@ -177,6 +177,14 @@ describe('upgrading a project to a newer engine', () => {
     );
   });
 
+  it('brings a gitignore that ignores only node_modules up to date, so the engine lockfile stays out of git', async () => {
+    const { result, published, opened } = await upgrade({ ...PROJECT, '.factory/.gitignore': 'node_modules/\n' }, { engine: '0.1.5' });
+
+    expect(result).toMatchObject({ ok: true, action: 'opened' });
+    expect(published[0]?.files).toEqual({ '.factory/.gitignore': 'node_modules/\npackage-lock.json\n' });
+    expect(opened[0]?.title).toBe('chore: install the factory engine in the project');
+  });
+
   it('brings an outdated launcher up to date and marks it executable, without touching the pin', async () => {
     const { published } = await upgrade({ ...PROJECT, '.factory/bin/factory': '#!/bin/sh\necho old\n' }, { engine: '0.1.0' });
 

@@ -20,6 +20,7 @@ done
 echo "install $GIT_CONFIG_KEY_0=$GIT_CONFIG_VALUE_0" >> "$STUB_LOG"
 if [ -n "$STUB_FAIL" ]; then echo "npm failed" >&2; exit 1; fi
 mkdir -p "$prefix/node_modules/.bin"
+echo '{"lockfileVersion":3}' > "$prefix/package-lock.json"
 cat > "$prefix/node_modules/.bin/factory" <<'EOF'
 #!/bin/sh
 echo "engine $PWD $*"
@@ -42,11 +43,11 @@ const getProject = () => {
 };
 
 describe('the engine files a project commits', () => {
-  it('pins the engine to the release tag of the factory repository, and keeps its install out of git', () => {
+  it('pins the engine to the release tag of the factory repository, and keeps its install and its lockfile out of git', () => {
     const files = engineFiles('0.1.0');
 
     expect(JSON.parse(files['.factory/package.json'] ?? '')).toEqual({ private: true, dependencies: { 'software-factory': `${ENGINE_SOURCE}#v0.1.0` } });
-    expect(files['.factory/.gitignore']).toBe('node_modules/\n');
+    expect(files['.factory/.gitignore']).toBe('node_modules/\npackage-lock.json\n');
     expect(files['.factory/bin/factory']).toBe(ENGINE_LAUNCHER);
   });
 });
@@ -60,6 +61,19 @@ describe('the launcher in .factory/bin', () => {
     expect(result.stdout.trim()).toBe(`engine ${execFileSync('sh', ['-c', 'pwd -P'], { cwd: project, encoding: 'utf8' }).trim()} doctor --json`);
     expect(result.status).toBe(0);
     expect(installs()).toEqual(['install =']);
+  });
+
+  it('leaves no untracked file under .factory after its first run in a fresh checkout', () => {
+    const { run, project } = getProject();
+    const git = (args: readonly string[]) => execFileSync('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', ...args], { cwd: project, encoding: 'utf8' });
+    git(['init', '--quiet']);
+    git(['add', '.']);
+    git(['commit', '--quiet', '-m', 'install the factory']);
+
+    run(['doctor']);
+
+    expect(existsSync(join(project, '.factory', 'package-lock.json'))).toBe(true);
+    expect(git(['status', '--porcelain', '--untracked-files=all', '.factory'])).toBe('');
   });
 
   it('runs from any folder of the project and does not install again', () => {
