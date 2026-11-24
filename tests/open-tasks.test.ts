@@ -45,6 +45,35 @@ describe('reading tasks.md', () => {
     expect(parseTasks('- [ ] 1.1 Parent\n  - [x] 1.1.1 Child')).toEqual({ total: 2, open: [{ text: '1.1 Parent' }] });
   });
 
+  it.each([
+    ['1. [ ] 1.1 Ordered', { total: 1, open: [{ text: '1.1 Ordered' }] }],
+    ['10) [ ] 1.1 Ordered with a parenthesis', { total: 1, open: [{ text: '1.1 Ordered with a parenthesis' }] }],
+    ['+ [ ] 1.1 Plus bullet', { total: 1, open: [{ text: '1.1 Plus bullet' }] }],
+    ['-[ ] 1.1 No space after the bullet', { total: 1, open: [{ text: '1.1 No space after the bullet' }] }],
+    ['- [] 1.1 Empty box', { total: 1, open: [{ text: '1.1 Empty box' }] }],
+    ['- [  ] 1.1 Wide box', { total: 1, open: [{ text: '1.1 Wide box' }] }],
+    ['- [~] 1.1 Other marker', { total: 1, open: [{ text: '1.1 Other marker' }] }],
+    ['- [ x ] 1.1 Padded on both sides', { total: 1, open: [] }],
+    ['- [x]1.1 No space after the box', { total: 1, open: [] }],
+    ['- [ ]   1.1 Spaced out   ', { total: 1, open: [{ text: '1.1 Spaced out' }] }],
+    ['- [A](https://example.test) a link', { total: 0, open: [] }],
+    ['a. [ ] not a list item', { total: 0, open: [] }],
+    ['See - [ ] in prose', { total: 0, open: [] }],
+  ])('reads %j the way OpenSpec counts it', (line, expected) => {
+    expect(parseTasks(line)).toEqual(expected);
+  });
+
+  it('ends a note at a line that is not indented or holds only spaces', () => {
+    const tasks = parseTasks(['- [ ] 1.1 Open', ' Not done: one space is enough', 'Prose with spaces', '- [ ] 1.2 Open', '   ', '  - Not a note of 1.2'].join('\n'));
+
+    expect(tasks.open).toEqual([{ text: '1.1 Open', note: 'Not done: one space is enough' }, { text: '1.2 Open' }]);
+  });
+
+  it('removes only the list marker that starts a note line', () => {
+    expect(parseTasks('- [ ] 1.1 Open\n  -   Not done - see 4.1').open).toEqual([{ text: '1.1 Open', note: 'Not done - see 4.1' }]);
+    expect(parseTasks('- [ ] 1.1 Open\n  Not done - see 4.1').open).toEqual([{ text: '1.1 Open', note: 'Not done - see 4.1' }]);
+  });
+
   it('reads a CRLF file like any other', () => {
     expect(parseTasks('- [ ] 1.1 Open\r\n  - Not done: later\r\n- [x] 1.2 Done\r\n')).toEqual({ total: 2, open: [{ text: '1.1 Open', note: 'Not done: later' }] });
   });
@@ -66,6 +95,9 @@ describe('the tasks status', () => {
 
     expect(tasksStatus(getMockTasks({ accepted: [first, second] }))).toEqual({ state: 'success', description: 'All open tasks accepted by Pierre' });
     expect(tasksStatus(getMockTasks({ accepted: [first, { ...second, by: 'Maya' }] })).description).toBe('All open tasks accepted by Pierre and Maya');
+    expect(
+      tasksStatus(getMockTasks({ open: [...getMockTasks().open, { text: '4.3 Tell the team' }], accepted: [first, { ...second, by: 'Maya' }, { text: '4.3 Tell the team', by: 'Sam', at: 't' }] })).description,
+    ).toBe('All open tasks accepted by Pierre, Maya and Sam');
   });
 
   it('does not let an acceptance cover a reworded task', () => {
@@ -133,6 +165,20 @@ describe('the Open tasks section of the pull request body', () => {
     );
   });
 
+  it('lists the accepted tasks under each person who accepted them', () => {
+    const tasks = getMockTasks({
+      open: [...getMockTasks().open, { text: '4.3 Tell the team' }],
+      accepted: [
+        { text: '4.1 Run the end-to-end check', by: 'Pierre', at: 't' },
+        { text: '4.3 Tell the team', by: 'Maya', at: 't' },
+      ],
+    });
+
+    expect(withOpenTasksSection('Ticket: PIE-47', tasks)).toBe(
+      ['Ticket: PIE-47', '', '## Open tasks', '- 4.2 Update the docs', '', 'Accepted open by Pierre:', '- 4.1 Run the end-to-end check', '  Not done: needs the release', '', 'Accepted open by Maya:', '- 4.3 Tell the team'].join('\n'),
+    );
+  });
+
   it('removes the section once no open task is left unaccepted', () => {
     const listed = withOpenTasksSection(BODY, getMockTasks());
     const accepted = getMockTasks({ accepted: getMockTasks().open.map(({ text }) => ({ text, by: 'Pierre', at: 't' })) });
@@ -142,7 +188,7 @@ describe('the Open tasks section of the pull request body', () => {
   });
 
   it('adds the section at the end of a body with no section', () => {
-    expect(withOpenTasksSection('Ticket: PIE-47', getMockTasks({ open: [{ text: '4.2 Update the docs' }] }))).toBe('Ticket: PIE-47\n\n## Open tasks\n- 4.2 Update the docs');
+    expect(withOpenTasksSection('Ticket: PIE-47\n  ', getMockTasks({ open: [{ text: '4.2 Update the docs' }] }))).toBe('Ticket: PIE-47\n\n## Open tasks\n- 4.2 Update the docs');
   });
 
   it('removes a section that ends the body', () => {

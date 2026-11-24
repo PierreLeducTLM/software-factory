@@ -93,8 +93,7 @@ const itemLines = (task: OpenTask): readonly string[] => [`- ${task.text}`, ...(
 const sectionLines = (tasks: TaskState): readonly string[] => {
   const unaccepted = unacceptedTasks(tasks);
   if (unaccepted.length === 0) return [];
-  const accepted = tasks.open.filter((task) => acceptanceOf(tasks, task) !== undefined);
-  const groups = acceptorsOf(tasks).map((by) => ({ by, tasks: accepted.filter((task) => acceptanceOf(tasks, task)?.by === by) }));
+  const groups = acceptorsOf(tasks).map((by) => ({ by, tasks: tasks.open.filter((task) => acceptanceOf(tasks, task)?.by === by) }));
   return [SECTION, ...unaccepted.flatMap(itemLines), ...groups.flatMap((group) => ['', `Accepted open by ${group.by}:`, ...group.tasks.flatMap(itemLines)]), ''];
 };
 

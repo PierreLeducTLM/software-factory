@@ -153,15 +153,14 @@ describe('GitHub source control', () => {
     expect(await sourceControl.requiredChecks('main')).toEqual(['build', 'factory/tasks']);
   });
 
-  it('cannot tell the required checks when GitHub refuses to show the rulesets', async () => {
-    const sourceControl = getDirect(routes({ '/rules/branches/main': { status: 403, body: {} } }));
-
-    expect(await sourceControl.requiredChecks('main')).toBe('unreadable');
+  it.each([400, 403])('cannot tell the required checks when GitHub answers %i about the rulesets or the protection', async (status) => {
+    expect(await getDirect(routes({ '/rules/branches/main': { status, body: {} } })).requiredChecks('main')).toBe('unreadable');
+    expect(await getDirect(routes({ '/protection/required_status_checks': { status, body: {} }, '/rules/branches/main': { status: 200, body: [] } })).requiredChecks('main')).toBe('unreadable');
   });
 
-  it('fails with the status and path when GitHub refuses to show a file', async () => {
-    await expect(getDirect(answering(500, {})).readFileAt({ path: 'openspec/tasks.md', commit: 'c1' })).rejects.toThrow(
-      'GitHub answered 500 to GET /repos/acme/billing-service/contents/openspec/tasks.md?ref=c1',
+  it.each([400, 500])('fails with the status and path when GitHub answers %i about a file', async (status) => {
+    await expect(getDirect(answering(status, {})).readFileAt({ path: 'openspec/tasks.md', commit: 'c1' })).rejects.toThrow(
+      `GitHub answered ${status} to GET /repos/acme/billing-service/contents/openspec/tasks.md?ref=c1`,
     );
   });
 });

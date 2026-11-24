@@ -25,11 +25,11 @@
 
 ## 5. Setup
 
-- [ ] 5.1 Generate `.github/workflows/factory-tasks.yml` in `src/setup/install.ts` (D-009), add it to the install pull request with the required-check instruction, and add the Bitbucket pipeline and merge-check steps; verify in `tests/setup-install.test.ts` and `tests/setup-init-project.test.ts` with "GitHub install" and "Bitbucket install"
-- [ ] 5.2 Make `factory migrate` add the missing tasks workflow in `src/setup/upgrade.ts`; verify in `tests/setup-upgrade.test.ts` with "Installed on GitHub without the tasks workflow", "Tasks workflow already present" and "Bitbucket project"
-- [ ] 5.3 Add `check-tasks` to the factory steps in `src/setup/detect.ts` and `src/setup/doctor.ts`, and add the `required_check` finding and the "could not verify" note (D-002); verify in `tests/setup-doctor.test.ts` with "Check not required", "Check required by a ruleset", "Settings not readable" and "No CI step runs check-tasks"
-- [ ] 5.4 Mention the `required_check` finding and how to fix it in `skills/factory-doctor/SKILL.md`; verify by reading it, and verify `pnpm vitest run tests/packaging.test.ts` passes
-- [ ] 5.5 Add `.github/workflows/factory-tasks.yml` to this repository, as migrate would write it; verify with a test that reads the committed file and compares it with the generator's output for this repository's `.factory/factory.yaml` and `.factory/adapters.yaml`
+- [x] 5.1 Generate `.github/workflows/factory-tasks.yml` in `src/setup/install.ts` (D-009), add it to the install pull request with the required-check instruction, and add the Bitbucket pipeline and merge-check steps; verify in `tests/setup-install.test.ts` and `tests/setup-init-project.test.ts` with "GitHub install" and "Bitbucket install"
+- [x] 5.2 Make `factory migrate` add the missing tasks workflow in `src/setup/upgrade.ts`; verify in `tests/setup-upgrade.test.ts` with "Installed on GitHub without the tasks workflow", "Tasks workflow already present" and "Bitbucket project"
+- [x] 5.3 Add `check-tasks` to the factory steps in `src/setup/detect.ts` and `src/setup/doctor.ts`, and add the `required_check` finding and the "could not verify" note (D-002); verify in `tests/setup-doctor.test.ts` with "Check not required", "Check required by a ruleset", "Settings not readable" and "No CI step runs check-tasks"
+- [x] 5.4 Mention the `required_check` finding and how to fix it in `skills/factory-doctor/SKILL.md`; verify by reading it, and verify `pnpm vitest run tests/packaging.test.ts` passes
+- [x] 5.5 Add `.github/workflows/factory-tasks.yml` to this repository, as migrate would write it; verify with a test that reads the committed file and compares it with the generator's output for this repository's `.factory/factory.yaml` and `.factory/adapters.yaml`
 
 ## 6. Dashboard
 

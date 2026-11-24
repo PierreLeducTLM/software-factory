@@ -172,6 +172,16 @@ export const describeSourceControlContract = (
       expect(world.statusesOf('c2')).toEqual([]);
     });
 
+    it('keeps the statuses of each commit apart', async () => {
+      const { sourceControl, world } = setup();
+
+      await sourceControl.postStatus(getMockStatus());
+      await sourceControl.postStatus(getMockStatus({ commit: 'c2', state: 'success', description: 'All 9 tasks done' }));
+
+      expect(world.statusesOf('c1')).toEqual([getMockStatus()]);
+      expect(world.statusesOf('c2')).toEqual([getMockStatus({ commit: 'c2', state: 'success', description: 'All 9 tasks done' })]);
+    });
+
     it('reads a file as it is at a commit, and nothing for a file that is not there', async () => {
       const { sourceControl, world } = setup();
       world.putFile('c1', 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', '- [ ] 1.1 Open\n');

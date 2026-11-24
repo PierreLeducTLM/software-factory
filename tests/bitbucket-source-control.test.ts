@@ -233,4 +233,8 @@ describe('Bitbucket source control', () => {
 
     expect(await sourceControl.requiredChecks('main')).toEqual(required ? ['*'] : []);
   });
+
+  it.each([400, 403])('cannot tell the required checks when Bitbucket answers %i about the branch restrictions', async (status) => {
+    expect(await getDirect(answering(status, {})).requiredChecks('main')).toBe('unreadable');
+  });
 });
