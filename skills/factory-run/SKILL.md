@@ -40,7 +40,11 @@ These confirmations are the only questions you may ask. They come before the run
 factory pull <KEY> --to openspec/changes/<name>
 ```
 
-Use the change name from the proposal for `<name>`. This is the spec that was approved. Do not edit it.
+Use the change name from the proposal for `<name>`. This is the spec that was approved.
+
+When the run resumes and `openspec/changes/<name>` is already committed on the run branch, do not pull again: keep the committed `tasks.md` and the ticks it holds. Pull only when the change folder is not committed yet.
+
+`tasks.md` is the only spec file you change, and only its checkboxes and the notes under them. The proposal, the design and the delta specs stay as approved, and so do the spec files attached to the ticket.
 
 ## 3. Follow the loop
 
@@ -49,6 +53,15 @@ Call `factory advance <KEY> --json` and do what its `next` field says. Repeat un
 ### `next: build`
 
 Implement the change's tasks in this worktree, as the OpenSpec apply workflow does. If `feedback` is not empty, the previous attempt failed: fix exactly those failures first.
+
+Tick each task in `tasks.md` (`- [ ]` becomes `- [x]`) once it is done and verified the way the task says. A task that is not done, or only partly done, stays `- [ ]` with an indented note directly under it that says what was done and what is missing, or why it was not started:
+
+```markdown
+- [ ] 2.1 Run the end-to-end check after the release
+  - Not done: needs the released engine, which this run cannot publish.
+```
+
+You may hand in a build with unchecked tasks, as long as each one has such a note.
 
 When something in the spec is open, look for the answer in this order, and take the first one you find:
 
@@ -65,7 +78,7 @@ Note the id of each decision you applied, such as `D-002`.
 factory advance <KEY> --question "<the question>" --recommended "<your recommended answer>" --json
 ```
 
-When the build is done, commit the work on the branch, then report it in one line with the decisions you applied:
+When the build is done, commit the work on the branch, including the updated `tasks.md`, then report it in one line with the decisions you applied:
 
 ```bash
 factory advance <KEY> --changed "<what changed in this attempt>" --decision D-001 --decision D-004 --json
@@ -75,7 +88,7 @@ The quality gate runs inside that command. Do not run it yourself to decide whet
 
 ### `next: verify`
 
-Run the OpenSpec verify workflow on the change. Write its verdict to a file in the format below, then hand it in:
+Run the OpenSpec verify workflow on the change. An unchecked task in `tasks.md` with an indented note under it is a warning, not a finding: it does not fail the verdict. An unchecked task with no note is a finding that names the task. Write the verdict to a file in the format below, then hand it in:
 
 ```bash
 factory advance <KEY> --verdict openspec-verify=<file> --json
@@ -88,6 +101,7 @@ factory advance <KEY> --verdict openspec-verify=<file> --json
 For each check, start a fresh subagent that did not write the code. Give it the diff against main, the spec, and for an agent check its criteria file. Ask it for a verdict in the format below and nothing else.
 
 - The reviewer compares the diff with the spec: every requirement and scenario honoured, nothing built that the spec does not ask for.
+- The reviewer compares the ticks in `tasks.md` with the diff. A ticked task with no code or test in the diff behind it is a finding that names the task, and so is an unchecked task whose work is in the diff.
 - Ask the reviewer to raise the risk when the change is riskier than it looks, for example when it touches behaviour that many features depend on.
 - An agent check applies its criteria file, and attaches the evidence the check requires.
 
