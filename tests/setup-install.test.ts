@@ -227,11 +227,15 @@ describe('the CI steps of an install elsewhere', () => {
     expect(pipelines.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'GH_TOKEN']);
   });
 
-  it('says what to run when a Bitbucket project has no CI', () => {
+  it('says what to run when a Bitbucket project has no CI, with the check-tasks step and the merge check (Bitbucket install)', () => {
     const install = buildInstall(getAnswers({ ci: { system: 'none' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
 
     expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
-    expect(install.manual).toEqual(['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.']);
+    expect(install.manual).toEqual([
+      'No CI system was found. Run "factory record-merge" on every merge to the main branch, "factory revert" when the main build fails, and "factory check-tasks --pull-request <number>" on every pull request change, from whatever builds this project.',
+      "Add this step to bitbucket-pipelines.yml, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - .factory/bin/factory check-tasks --pull-request $BITBUCKET_PR_ID",
+      MERGE_CHECK,
+    ]);
     expect(install.secrets).toEqual([]);
   });
 });

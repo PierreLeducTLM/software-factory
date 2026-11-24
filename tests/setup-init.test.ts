@@ -127,14 +127,15 @@ describe('the install wizard', () => {
     const result = await installFactory(deps, getAnswers({ ci: { system: 'none' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }), { ticket: 'PAY-1' });
 
     expect(result).toMatchObject({ ok: true, secrets: [] });
-    expect(opened[0]?.body.split('\n')).toEqual([
-      'Installs the software factory in this project.',
-      '',
-      'Then, by hand:',
+    const lines = opened[0]?.body.split('\n') ?? [];
+    expect(lines.slice(0, 4)).toEqual(['Installs the software factory in this project.', '', 'Then, by hand:', expect.stringMatching(/^- No CI system was found\./)]);
+    expect(lines).toEqual(expect.arrayContaining([
       expect.stringMatching(/^- No CI system was found\./),
-      '',
-      'Every risk level starts in shadow mode: a person merges each factory pull request until the factory has earned auto-merge.',
-    ]);
+      expect.stringMatching(/^- Add this step to bitbucket-pipelines.yml, under pipelines > pull-requests/),
+      expect.stringMatching(/^- After this pull request is merged, turn on the merge check/),
+    ]));
+    expect(lines.slice(-2)).toEqual(['', 'Every risk level starts in shadow mode: a person merges each factory pull request until the factory has earned auto-merge.']);
+    expect(lines).not.toContain('Secrets:');
   });
 
   it.each([

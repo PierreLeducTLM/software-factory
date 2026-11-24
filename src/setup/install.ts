@@ -215,11 +215,15 @@ const githubWorkflow = (answers: InstallAnswers): FactoryWorkflow =>
     ...(answers.watch === undefined ? {} : { watchEnvironment: answers.watch.environment }),
   });
 
+const CHECK_TASKS_STEP = `Add this step to ${BITBUCKET_FILE}, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - ${FACTORY} check-tasks --pull-request $BITBUCKET_PR_ID`;
+
+const NO_CI = 'No CI system was found. Run "factory record-merge" on every merge to the main branch, "factory revert" when the main build fails, and "factory check-tasks --pull-request <number>" on every pull request change, from whatever builds this project.';
+
 const bitbucketSteps = ({ mainBranch, watch }: InstallAnswers): readonly string[] => [
   `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
   `Add this after-script to the step that builds ${mainBranch}:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then ${FACTORY} revert --commit $BITBUCKET_COMMIT; fi`,
   ...(watch === undefined ? [] : [`Add this step after the deployment to ${watch.environment}:\n- step:\n    name: Factory watch\n    script:\n      - ${FACTORY} watch --commit $BITBUCKET_COMMIT`]),
-  `Add this step to ${BITBUCKET_FILE}, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - ${FACTORY} check-tasks --pull-request $BITBUCKET_PR_ID`,
+  CHECK_TASKS_STEP,
 ];
 
 const checked = (path: string, text: string, issues: readonly { readonly path: string; readonly message: string }[] | undefined): string => {
@@ -245,10 +249,10 @@ export const buildInstall = (answers: InstallAnswers): Install => {
     executable: [LAUNCHER_PATH],
     manual: [
       ...(system === 'bitbucket-pipelines' ? bitbucketSteps(answers) : []),
-      ...(system === 'none' && !github ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
+      ...(system === 'none' && !github ? [NO_CI, CHECK_TASKS_STEP] : []),
       ...(github && system === 'none' ? [NO_MAIN_BUILD] : []),
       ...(github && system !== 'none' && workflow === undefined ? [UNNAMED_MAIN_BUILD] : []),
-      ...(github || system === 'bitbucket-pipelines' ? [requiredStep(answers)] : []),
+      requiredStep(answers),
     ],
     secrets: github ? githubWorkflow(answers).secrets : system === 'none' ? [] : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])],
   };
