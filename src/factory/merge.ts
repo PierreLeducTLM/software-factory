@@ -1,9 +1,10 @@
 import type { PullRequest } from '../adapters/source-control.js';
 import type { Ticket } from '../adapters/ticket-provider.js';
 import { loadRecord, saveRecord } from '../record/record-store.js';
-import { appendEvent, parseComment, setState, type Run, type TicketRecord } from '../record/ticket-record.js';
+import { appendEvent, parseComment, setState, type Run, type RunTasks, type TicketRecord } from '../record/ticket-record.js';
 import type { LoopDeps } from './build-loop.js';
 import { timeoutSecondsOf } from './checks.js';
+import { nextTasks, parseTasks, sameTasks, TASKS_CONTEXT, tasksCommitStatus, tasksStatus, unacceptedTasks, withOpenTasksSection } from './open-tasks.js';
 import type { RiskLevel } from './risk.js';
 import type { FactoryDeps } from './run-lifecycle.js';
 
@@ -182,4 +183,98 @@ export const watchRun = async (deps: LoopDeps, { commit, pullRequest: given }: M
   const action = reverting?.action ?? (found.run.revert?.needed === true ? 'needed' : 'opened');
   await save(deps, found.key, watched, action === 'opened' ? 'Revert opened: the staging watch failed' : 'Revert needed: the staging watch failed');
   return { ok: true, action: 'failed', key: found.key, check: failure.check, revert: action, url: reverting?.url ?? found.run.revert?.pullRequest ?? found.pullRequest.url };
+};
+
+export type CheckTasksResult =
+  | { readonly ok: true; readonly action: 'no_ticket' }
+  | { readonly ok: true; readonly action: 'checked'; readonly key: string; readonly state: 'success' | 'failure'; readonly description: string; readonly saved: boolean }
+  | { readonly ok: false; readonly reason: 'unreadable'; readonly message: string };
+
+export type AcceptTasksResult =
+  | { readonly ok: true; readonly key: string; readonly accepted: readonly string[]; readonly description: string }
+  | { readonly ok: false; readonly reason: 'no_run' | 'no_pull_request' | 'merged' | 'closed' | 'unreadable' | 'nothing_open'; readonly message: string };
+
+type Unreadable = { readonly ok: false; readonly message: string };
+
+type ReadTasksAt = { readonly ok: true; readonly tasks: RunTasks } | Unreadable;
+
+const readRecord = (deps: LoopDeps, key: string): Promise<TicketRecord | undefined> =>
+  loadRecord(deps.tickets, key).then(
+    (loaded) => (loaded.status === 'ok' ? loaded.record : undefined),
+    () => undefined,
+  );
+
+const readTasksAt = async (deps: LoopDeps, key: string, run: Run, pullRequest: PullRequest): Promise<ReadTasksAt> => {
+  const unreadable: Unreadable = { ok: false, message: `tasks.md of ${key} could not be read at ${pullRequest.headCommit}` };
+  const path = run.tasks?.path;
+  if (path === undefined) return unreadable;
+  const text = await deps.sourceControl.readFileAt({ path, commit: pullRequest.headCommit }).catch(() => undefined);
+  return text === undefined ? unreadable : { ok: true, tasks: nextTasks(run.tasks, parseTasks(text), { path, commit: pullRequest.headCommit }) };
+};
+
+const saveTasks = async (deps: LoopDeps, key: string, record: TicketRecord, index: number, tasks: RunTasks, event: { readonly type: string; readonly detail: string }): Promise<void> => {
+  const changed = appendEvent(changeRun(record, index, (run) => ({ ...run, tasks })), { at: deps.now(), by: deps.user, ...event });
+  const number = record.runs[index]?.pullRequest?.number;
+  await save(deps, key, changed, `Pull request #${String(number)} · ${tasksStatus(tasks).description}`);
+};
+
+type Linked = { readonly ok: true; readonly record: TicketRecord; readonly index: number; readonly run: Run };
+
+const linkedRun = async (deps: LoopDeps, key: string, pullRequest: PullRequest): Promise<Linked | Unreadable> => {
+  const record = await readRecord(deps, key);
+  if (record === undefined) return { ok: false, message: `The factory record of ${key} could not be read` };
+  const index = record.runs.findIndex((run) => run.pullRequest?.number === pullRequest.number);
+  const run = record.runs[index];
+  return run === undefined ? { ok: false, message: `No run of ${key} is linked to pull request ${pullRequest.number}` } : { ok: true, record, index, run };
+};
+
+export const checkTasks = async (deps: LoopDeps, { pullRequest: number }: { readonly pullRequest: number }): Promise<CheckTasksResult> => {
+  const pullRequest = await deps.sourceControl.getPullRequest(number);
+  if (pullRequest === undefined) return { ok: false, reason: 'unreadable', message: `Pull request ${number} could not be read` };
+  const post = (state: 'success' | 'failure', description: string): Promise<void> =>
+    deps.sourceControl.postStatus({ context: TASKS_CONTEXT, state, description, link: pullRequest.url, commit: pullRequest.headCommit });
+  const fail = async (message: string): Promise<CheckTasksResult> => {
+    await post('failure', message);
+    return { ok: false, reason: 'unreadable', message };
+  };
+
+  const key = TICKET_LINE.exec(pullRequest.body)?.[1];
+  if (key === undefined) {
+    await post('success', 'No factory ticket');
+    return { ok: true, action: 'no_ticket' };
+  }
+  const linked = await linkedRun(deps, key, pullRequest);
+  if (!linked.ok) return fail(linked.message);
+  const read = await readTasksAt(deps, key, linked.run, pullRequest);
+  if (!read.ok) return fail(read.message);
+
+  const status = tasksCommitStatus(read.tasks, pullRequest);
+  await deps.sourceControl.postStatus(status);
+  const saved = !sameTasks(linked.run.tasks, read.tasks);
+  if (saved) {
+    await saveTasks(deps, key, linked.record, linked.index, read.tasks, { type: 'tasks', detail: status.description });
+    await deps.sourceControl.updatePullRequestBody({ number, body: withOpenTasksSection(pullRequest.body, read.tasks) });
+  }
+  return { ok: true, action: 'checked', key, state: status.state, description: status.description, saved };
+};
+
+export const acceptTasks = async (deps: LoopDeps, key: string): Promise<AcceptTasksResult> => {
+  const record = await readRecord(deps, key);
+  const run = record?.runs.at(-1);
+  if (record === undefined || run === undefined) return { ok: false, reason: 'no_run', message: `${key} has no factory run` };
+  const pullRequest = run.pullRequest === undefined ? undefined : await deps.sourceControl.getPullRequest(run.pullRequest.number);
+  if (pullRequest === undefined) return { ok: false, reason: 'no_pull_request', message: `The latest run of ${key} has no pull request` };
+  if (pullRequest.state !== 'open') return { ok: false, reason: pullRequest.state, message: `The pull request of ${key} is ${pullRequest.state}` };
+  const read = await readTasksAt(deps, key, run, pullRequest);
+  if (!read.ok) return { ok: false, reason: 'unreadable', message: read.message };
+  const open = unacceptedTasks(read.tasks);
+  if (open.length === 0) return { ok: false, reason: 'nothing_open', message: `No task of ${key} is open and not accepted` };
+
+  const at = deps.now();
+  const accepted: RunTasks = { ...read.tasks, accepted: [...read.tasks.accepted, ...open.map(({ text }) => ({ text, by: deps.user, at }))] };
+  const status = tasksCommitStatus(accepted, pullRequest);
+  await deps.sourceControl.postStatus(status);
+  await saveTasks(deps, key, record, record.runs.length - 1, accepted, { type: 'tasks_accepted', detail: open.map(({ text }) => text).join('; ') });
+  await deps.sourceControl.updatePullRequestBody({ number: pullRequest.number, body: withOpenTasksSection(pullRequest.body, accepted) });
+  return { ok: true, key, accepted: open.map(({ text }) => text), description: status.description };
 };

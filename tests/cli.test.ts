@@ -62,6 +62,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
   const broken: { reason?: string; git?: string; revert?: string } = {};
   const scripts: ScriptRun[] = [];
   const verdictFiles: Record<string, string> = {};
+  const branchFiles: Record<string, string> = {};
   const { sourceControl: memory, world: git } = createInMemorySourceControl({ now: () => '2026-11-21T08:00:00Z' });
   const sourceControl: SourceControl = {
     ...memory,
@@ -83,7 +84,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     pushBranch: async (branch) => git.push(branch, 'c1'),
     changeFolders: async () => [{ name: 'billing-export', files: Object.keys(files).map((name) => name.replaceAll('__', '/')), archived: false }],
     archiveChange: async () => ({ ok: true }),
-    readFileOnBranch: async () => undefined,
+    readFileOnBranch: async (path) => branchFiles[path],
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
     config: config.value,
@@ -114,7 +115,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
       write: (line) => void out.push(line), writeError: (line) => void errors.push(line) });
     return { code, out, errors };
   };
-  return { run, tickets, changedOnMain, scripts, verdictFiles, commits, git, sourceControl, broken };
+  return { run, tickets, changedOnMain, scripts, verdictFiles, branchFiles, commits, git, sourceControl, broken };
 };
 
 const statusOf = async (cli: Awaited<ReturnType<typeof getCli>>): Promise<string | undefined> => (await cli.tickets.getTicket('PAY-142'))?.status;
@@ -463,11 +464,11 @@ describe('factory command line', () => {
       expect(code).toBe(2);
       expect(errors[0]).toBe('Usage: factory <command> <KEY> [options]');
       expect(
-        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', 'init --ticket', 'workflow --title', '--json'].filter(
+        ['refine <KEY>', 'status <KEY>', 'pull <KEY> --to <folder>', 'push <KEY> --from <folder>', 'ready-gate <KEY>', 'approve <KEY> [--preview] [--ceiling human]', 'run <KEY> [--confirm-takeover] [--accept-edited-record]', 'revalidate <KEY>', 'accept-tasks <KEY>', 'check-tasks --pull-request <n>', 'next', 'doctor [--run-checks] [--ticket <KEY>]', 'migrate ', 'init --ticket', 'workflow --title', '--json'].filter(
           (text) => !errors.some((line) => line.includes(text)),
         ),
       ).toEqual([]);
-      expect(errors).toHaveLength(23);
+      expect(errors).toHaveLength(25);
       expect(calls.deps).toBe(0);
       expect(await statusOf(cli)).toBe('Spec review');
     },
@@ -540,8 +541,12 @@ const hasOpenspec = (() => {
 
 const AUTO_YAML = `${FACTORY_YAML}  shadow: false\nwatch: { enabled: true, checks: [./smoke.sh], duration: 1m, interval: 1m }\n`;
 
-const getDeliveredCli = async (yaml: string = FACTORY_YAML) => {
+const TASKS_PATH = 'openspec/changes/billing-export/tasks.md';
+
+const getDeliveredCli = async (yaml: string = FACTORY_YAML, tasks = '- [x] 1.1 Add the exporter\n') => {
   const cli = await getCli(getMockTicket({ status: 'Spec review' }), SPEC_FILES, yaml);
+  cli.branchFiles[TASKS_PATH] = tasks;
+  cli.git.putFile('c1', TASKS_PATH, tasks);
   cli.verdictFiles['v.json'] = JSON.stringify({ verdict: 'pass', findings: [], evidence: [] });
   await cli.run('approve', 'PAY-142');
   await cli.run('run', 'PAY-142');
@@ -656,12 +661,80 @@ describe('factory steps run from CI', () => {
     expect(await cli.run('watch', '--commit', 'm1')).toEqual({ code: 0, out: ['The watch is off'], errors: [] });
   });
 
+  it('checks the tasks of a pull request, and exits 1 when they cannot be read', async () => {
+    const cli = await getDeliveredCli(FACTORY_YAML, '- [x] 1.1 Add the exporter\n- [ ] 1.2 Run the end-to-end check\n');
+
+    const open = await cli.run('check-tasks', '--pull-request', '401');
+    const asJson = await cli.run('check-tasks', '--pull-request', '401', '--json');
+    cli.git.push('factory/pay-142', 'c2');
+    const unreadable = await cli.run('check-tasks', '--pull-request', '401');
+
+    expect(open).toEqual({ code: 0, out: ['PAY-142: 1 of 2 tasks open'], errors: [] });
+    expect(asJson.out.map((line) => JSON.parse(line))).toEqual([{ ok: true, action: 'checked', key: 'PAY-142', state: 'failure', description: '1 of 2 tasks open', saved: false }]);
+    expect(unreadable).toEqual({ code: 1, out: [], errors: ['tasks.md of PAY-142 could not be read at c2'] });
+  });
+
+  it('passes a pull request with no factory ticket', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.push('docs/typo', 'd1');
+    const other = await cli.sourceControl.openPullRequest({ branch: 'docs/typo', base: 'main', title: 'Typo', body: 'Fixes a typo' });
+
+    expect(await cli.run('check-tasks', '--pull-request', String(other.number))).toEqual({ code: 0, out: ['No factory ticket'], errors: [] });
+  });
+
+  it('skips check-tasks without failing the build when the service account is missing', async () => {
+    const cli = await getDeliveredCli();
+    cli.broken.reason = 'Set the LINEAR_API_KEY environment variable';
+
+    expect(await cli.run('check-tasks', '--pull-request', '401')).toEqual({
+      code: 0,
+      out: [],
+      errors: ['Set the LINEAR_API_KEY environment variable', 'The factory step was skipped. The build is not affected.'],
+    });
+  });
+
+  it('needs the pull request number to check the tasks', async () => {
+    const cli = await getDeliveredCli();
+
+    expect((await cli.run('check-tasks')).code).toBe(2);
+    expect((await cli.run('check-tasks', '--pull-request', 'abc')).code).toBe(2);
+  });
+
   it.each([['record-merge'], ['revert'], ['watch']])('rejects a pull request number that is not a number for %s', async (command) => {
     const cli = await getDeliveredCli();
 
     const codes = await Promise.all(['abc', '401abc', 'abc401'].map(async (number) => (await cli.run(command, '--pull-request', number)).code));
 
     expect(codes).toEqual([2, 2, 2]);
+  });
+});
+
+describe('accepting open tasks from the command line', () => {
+  it('accepts the open tasks of a ticket, then refuses when nothing is left to accept', async () => {
+    const cli = await getDeliveredCli(FACTORY_YAML, '- [ ] 1.1 Add the exporter\n  - Not done: later\n- [ ] 1.2 Run the end-to-end check\n');
+
+    const accepted = await cli.run('accept-tasks', 'PAY-142');
+    const again = await cli.run('accept-tasks', 'PAY-142', '--json');
+
+    expect(accepted).toEqual({
+      code: 0,
+      out: ['Accepted 2 open tasks of PAY-142: 1.1 Add the exporter; 1.2 Run the end-to-end check', 'All open tasks accepted by pierre'],
+      errors: [],
+    });
+    expect(again).toEqual({ code: 1, out: [JSON.stringify({ ok: false, reason: 'nothing_open', message: 'No task of PAY-142 is open and not accepted' })], errors: [] });
+  });
+
+  it('refuses once the pull request is merged', async () => {
+    const cli = await getDeliveredCli(FACTORY_YAML, '- [ ] 1.1 Add the exporter\n');
+    cli.git.merge(401, 'sam');
+
+    expect(await cli.run('accept-tasks', 'PAY-142')).toEqual({ code: 1, out: [], errors: ['The pull request of PAY-142 is merged'] });
+  });
+
+  it('needs a ticket key', async () => {
+    const cli = await getDeliveredCli();
+
+    expect((await cli.run('accept-tasks')).code).toBe(2);
   });
 });
 

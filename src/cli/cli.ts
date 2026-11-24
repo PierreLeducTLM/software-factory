@@ -12,7 +12,18 @@ import {
   type StatusResult,
 } from '../factory/refinement.js';
 import { advance, type AdvanceInput, type AdvanceResult, type LoopDeps } from '../factory/build-loop.js';
-import { recordMerge, revertMerge, watchRun, type RecordMergeResult, type RevertResult, type WatchResult } from '../factory/merge.js';
+import {
+  acceptTasks,
+  checkTasks,
+  recordMerge,
+  revertMerge,
+  watchRun,
+  type AcceptTasksResult,
+  type CheckTasksResult,
+  type RecordMergeResult,
+  type RevertResult,
+  type WatchResult,
+} from '../factory/merge.js';
 import { nextTicket, runTicket, type RunResult } from '../factory/run-lifecycle.js';
 import type { SpecFolder } from './inputs.js';
 
@@ -41,6 +52,7 @@ const USAGE = [
   '  advance <KEY> [--changed <text>] [--decision <id>] [--question <text> --recommended <text>]',
   '                [--verdict <id>=<file>] [--diagnosis code|spec|environment] [--next-step <text>]',
   '  revalidate <KEY>                check the spec and main for drift',
+  '  accept-tasks <KEY>              accept the tasks still open on the pull request',
   '  next                            claim the next eligible ticket',
   '  view [--sample] [--port <n>]    open the read-only dashboard',
   'Setting the project up:',
@@ -52,13 +64,14 @@ const USAGE = [
   '  record-merge [--commit <sha>] [--pull-request <n>]   on every merge to main',
   '  revert [--commit <sha>] [--pull-request <n>]         when main fails after an auto-merge',
   '  watch [--commit <sha>] [--pull-request <n>]          after a deploy to staging',
+  '  check-tasks --pull-request <n>                       on every pull request change',
   'Add --json to any command for one line of JSON.',
 ];
 
 const OK = 0;
 const REFUSED = 1;
 const USAGE_ERROR = 2;
-const CI_COMMANDS = ['record-merge', 'revert', 'watch'];
+const CI_COMMANDS = ['record-merge', 'revert', 'watch', 'check-tasks'];
 const SKIPPED = 'The factory step was skipped. The build is not affected.';
 const VALUED = ['--commit', '--pull-request', '--ceiling', '--to', '--from', '--changed', '--decision', '--question', '--recommended', '--verdict', '--diagnosis', '--next-step'];
 const DIAGNOSES = ['code', 'spec', 'environment'] as const;
@@ -134,6 +147,16 @@ const watchOutcome = (result: WatchResult): Outcome => {
   return outcome(result, [`The staging watch failed for ${result.key} on ${result.check}. ${revert}`], false);
 };
 
+const checkTasksOutcome = (result: CheckTasksResult): Outcome => {
+  if (!result.ok) return outcome(result, []);
+  return outcome(result, [result.action === 'no_ticket' ? 'No factory ticket' : `${result.key}: ${result.description}`]);
+};
+
+const acceptTasksOutcome = (result: AcceptTasksResult): Outcome => {
+  if (!result.ok) return outcome(result, []);
+  return outcome(result, [`Accepted ${result.accepted.length} open tasks of ${result.key}: ${result.accepted.join('; ')}`, result.description]);
+};
+
 const parse = (argv: readonly string[]): Command | undefined => {
   const [name, ...rest] = argv;
   const valuesOf = (flag: string): readonly string[] => rest.flatMap((argument, index) => (argument === flag ? [rest[index + 1] ?? ''] : []));
@@ -148,6 +171,7 @@ const parse = (argv: readonly string[]): Command | undefined => {
   if (CI_COMMANDS.includes(name ?? '')) {
     const given = valueOf('--pull-request');
     if (given !== undefined && !/^\d+$/.test(given)) return undefined;
+    if (name === 'check-tasks') return given === undefined ? undefined : async (deps) => checkTasksOutcome(await checkTasks(deps, { pullRequest: Number(given) }));
     const change = { commit: valueOf('--commit') ?? 'HEAD', ...(given === undefined ? {} : { pullRequest: Number(given) }) };
     if (name === 'record-merge') return async (deps) => mergeOutcome(await recordMerge(deps, change));
     if (name === 'revert') return async (deps) => revertOutcome(await revertMerge(deps, change));
@@ -161,6 +185,7 @@ const parse = (argv: readonly string[]): Command | undefined => {
     };
   }
   if (name === 'status') return async (deps) => statusOutcome(await refinementStatus(deps, key));
+  if (name === 'accept-tasks') return async (deps) => acceptTasksOutcome(await acceptTasks(deps, key));
   if (name === 'ready-gate') return async (deps) => gateOutcome(await runReadyGate(deps, key), 'Ready gate passed', 'Ready gate failed');
   if (name === 'revalidate') return async (deps) => gateOutcome(await revalidate(deps, key), 'No drift since approval', 'Sent back to refinement');
   if (name === 'run') {
