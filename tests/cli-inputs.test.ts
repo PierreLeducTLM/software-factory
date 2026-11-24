@@ -95,6 +95,16 @@ describe('git inputs', () => {
     expect(await inputsFor(clone).commitMessage('HEAD')).toBe('Revert "Bulk export"\n\nThis reverts commit abc1234.');
   });
 
+  it('reads a file as it is committed on the current branch, and nothing for a file that is not committed', async () => {
+    const { clone } = getClone();
+    mkdirSync(join(clone, 'openspec'));
+    commit(clone, 'openspec/tasks.md', '- [x] 1.1 Done\n');
+    writeFileSync(join(clone, 'openspec/tasks.md'), '- [ ] 1.1 Not committed\n');
+
+    expect(await inputsFor(clone).readFileOnBranch('openspec/tasks.md')).toBe('- [x] 1.1 Done\n');
+    expect(await inputsFor(clone).readFileOnBranch('openspec/missing.md')).toBeUndefined();
+  });
+
   it('gives an empty user name when git has none', async () => {
     const { clone } = getClone();
     git(clone, 'config', 'user.name', '');

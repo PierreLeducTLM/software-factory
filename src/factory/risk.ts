@@ -79,9 +79,14 @@ export const assessSpec = (risk: RiskConfig, files: readonly SpecFile[]): RiskRe
 export const raisedRisk = (level: RiskLevel, raise: RiskRaise | undefined): RiskLevel =>
   raise === undefined || raise.reason.trim() === '' ? level : higherRisk(level, raise.to);
 
-type MergeContext = { readonly ceiling?: 'human'; readonly noAutomergeLabel: boolean; readonly suspended: boolean };
+type OpenTasks = { readonly open: number; readonly total: number };
 
-export const decideMerge = (risk: RiskConfig, level: RiskLevel, { ceiling, noAutomergeLabel, suspended }: MergeContext): MergeDecision => {
+type MergeContext = { readonly ceiling?: 'human'; readonly noAutomergeLabel: boolean; readonly suspended: boolean; readonly openTasks?: OpenTasks };
+
+export const decideMerge = (risk: RiskConfig, level: RiskLevel, { ceiling, noAutomergeLabel, suspended, openTasks }: MergeContext): MergeDecision => {
+  if (openTasks !== undefined && openTasks.open > 0) {
+    return { route: 'human', wouldAutoMerge: false, reason: `${openTasks.open} of ${openTasks.total} tasks were open at delivery` };
+  }
   const policy = risk[level];
   if (policy.merge === 'human') return { route: 'human', wouldAutoMerge: false, reason: `${level} risk is merged by a person` };
   if (ceiling === 'human') return { route: 'human', wouldAutoMerge: false, reason: 'a human merge was required at approval' };

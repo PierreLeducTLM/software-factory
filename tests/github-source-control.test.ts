@@ -124,4 +124,59 @@ describe('GitHub source control', () => {
     await expect(sourceControl.enableAutoMerge(999)).rejects.toThrow('Pull request 999 does not exist');
     await expect(sourceControl.openRevertPullRequest(999)).rejects.toThrow('Pull request 999 does not exist');
   });
+
+  it('posts a commit status with its context, description and link', async () => {
+    const { github, sourceControl } = getSetup();
+
+    await sourceControl.postStatus({ context: 'factory/tasks', state: 'failure', description: `2 of 9 tasks open ${'x'.repeat(200)}`, link: 'https://github.test/pull/7', commit: 'c1' });
+
+    const request = github.requests[0];
+    const sent: unknown = JSON.parse(request?.body ?? '{}');
+    expect([request?.method, request?.url]).toEqual(['POST', `${API_URL}/repos/acme/billing-service/statuses/c1`]);
+    expect(sent).toMatchObject({ state: 'failure', context: 'factory/tasks', target_url: 'https://github.test/pull/7' });
+    expect(sent).toHaveProperty('description', `2 of 9 tasks open ${'x'.repeat(122)}`);
+  });
+
+  const routes = (answers: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>): Http => async (request) => {
+    const answer = Object.entries(answers).find(([path]) => request.url.endsWith(path))?.[1] ?? { status: 404, body: {} };
+    return { status: answer.status, headers: {}, body: JSON.stringify(answer.body) };
+  };
+
+  it('counts a check required by a ruleset on the branch, alongside branch protection', async () => {
+    const sourceControl = getDirect(
+      routes({
+        '/branches/main/protection/required_status_checks': { status: 200, body: { contexts: ['build'], checks: [{ context: 'build' }] } },
+        '/rules/branches/main': { status: 200, body: [{ type: 'pull_request' }, { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'factory/tasks' }] } }] },
+      }),
+    );
+
+    expect(await sourceControl.requiredChecks('main')).toEqual(['build', 'factory/tasks']);
+  });
+
+  it.each([400, 403])('cannot tell the required checks when GitHub answers %i about the rulesets or the protection', async (status) => {
+    expect(await getDirect(routes({ '/rules/branches/main': { status, body: {} } })).requiredChecks('main')).toBe('unreadable');
+    expect(await getDirect(routes({ '/protection/required_status_checks': { status, body: {} }, '/rules/branches/main': { status: 200, body: [] } })).requiredChecks('main')).toBe('unreadable');
+  });
+
+  it.each([400, 500])('fails with the status and path when GitHub answers %i about a file', async (status) => {
+    await expect(getDirect(answering(status, {})).readFileAt({ path: 'openspec/tasks.md', commit: 'c1' })).rejects.toThrow(
+      `GitHub answered ${status} to GET /repos/acme/billing-service/contents/openspec/tasks.md?ref=c1`,
+    );
+  });
+
+  it('lists the files of a pull request page by page, leaving out the ones it removes', async () => {
+    const requested: string[] = [];
+    const http: Http = async (request) => {
+      requested.push(request.url);
+      const page = Number(new URL(request.url).searchParams.get('page'));
+      const files = page === 1 ? Array.from({ length: 100 }, (_, index) => ({ filename: `src/f${index}.ts`, status: 'modified' })) : [{ filename: 'old.ts', status: 'removed' }, { filename: 'tasks.md', status: 'added' }];
+      return { status: 200, headers: {}, body: JSON.stringify(files) };
+    };
+
+    const files = await getDirect(http).changedFiles(7);
+
+    expect(files).toHaveLength(101);
+    expect(files.at(-1)).toBe('tasks.md');
+    expect(requested).toEqual([`${API_URL}/repos/acme/billing-service/pulls/7/files?per_page=100&page=1`, `${API_URL}/repos/acme/billing-service/pulls/7/files?per_page=100&page=2`]);
+  });
 });

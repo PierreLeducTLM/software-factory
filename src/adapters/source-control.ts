@@ -20,6 +20,20 @@ export type OpenPullRequest = {
   readonly body: string;
 };
 
+export type CommitStatus = {
+  readonly context: string;
+  readonly state: 'success' | 'failure';
+  readonly description: string;
+  readonly link: string;
+  readonly commit: string;
+};
+
+export type RequiredChecks = readonly string[] | 'unreadable';
+
+export const EVERY_CHECK = '*';
+
+export const requiresCheck = (required: readonly string[], context: string): boolean => required.includes(context) || required.includes(EVERY_CHECK);
+
 export interface SourceControl {
   openPullRequest(request: OpenPullRequest): Promise<PullRequest>;
   getPullRequest(number: number): Promise<PullRequest | undefined>;
@@ -28,4 +42,8 @@ export interface SourceControl {
   enableAutoMerge(number: number): Promise<void>;
   openRevertPullRequest(number: number): Promise<PullRequest>;
   wasMergedAsIs(request: { readonly number: number; readonly commit: string }): Promise<boolean>;
+  postStatus(status: CommitStatus): Promise<void>;
+  readFileAt(request: { readonly path: string; readonly commit: string }): Promise<string | undefined>;
+  requiredChecks(branch: string): Promise<RequiredChecks>;
+  changedFiles(number: number): Promise<readonly string[]>;
 }

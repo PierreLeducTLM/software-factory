@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Http, HttpResponse } from './http.js';
-import type { CiResult, PullRequest, SourceControl } from './source-control.js';
+import type { CiResult, PullRequest, RequiredChecks, SourceControl } from './source-control.js';
 
 type Options = {
   readonly apiUrl: string;
@@ -31,11 +31,29 @@ const GraphQlSchema = z.object({
   data: z.unknown().optional(),
 });
 
+const ContentSchema = z.object({ content: z.string(), encoding: z.literal('base64') });
+
+const ProtectionChecksSchema = z.object({
+  contexts: z.array(z.string()).default([]),
+  checks: z.array(z.object({ context: z.string() })).default([]),
+});
+
+const BranchRulesSchema = z.array(
+  z.object({
+    type: z.string(),
+    parameters: z.object({ required_status_checks: z.array(z.object({ context: z.string() })).optional() }).optional(),
+  }),
+);
+
+const PullFilesSchema = z.array(z.object({ filename: z.string(), status: z.string() }));
+
 const RevertedSchema = z.object({ revertPullRequest: z.object({ revertPullRequest: z.object({ number: z.number() }) }) });
 
 type Pull = z.infer<typeof PullSchema>;
 
 const NOT_FOUND = 404;
+const DESCRIPTION_LIMIT = 140;
+const FILES_PER_PAGE = 100;
 const REVERTS = /Reverts \S*#(\d+)/;
 
 const ENABLE_AUTO_MERGE = 'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }';
@@ -59,6 +77,8 @@ const toPullRequest = (pull: Pull): PullRequest => {
     ...(reverts === undefined ? {} : { reverts: Number(reverts) }),
   };
 };
+
+const pathIn = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
 
 const toCiResult = (run: { readonly status: string; readonly conclusion: string | null } | undefined): CiResult => {
   if (run === undefined) return 'missing';
@@ -103,6 +123,31 @@ export const createGitHubSourceControl = ({ apiUrl, repository, token, http }: O
     return result.data;
   };
 
+  const readable = async <T>(path: string, read: (body: string) => readonly T[]): Promise<readonly T[] | 'unreadable'> => {
+    const response = await send('GET', path);
+    if (response.status === NOT_FOUND) return [];
+    return response.status >= 400 ? 'unreadable' : read(response.body);
+  };
+
+  const requiredChecks = async (branch: string): Promise<RequiredChecks> => {
+    const name = encodeURIComponent(branch);
+    const protection = await readable(`/repos/${repository}/branches/${name}/protection/required_status_checks`, (body) => {
+      const checks = ProtectionChecksSchema.parse(JSON.parse(body));
+      return [...checks.contexts, ...checks.checks.map(({ context }) => context)];
+    });
+    const rules = await readable(`/repos/${repository}/rules/branches/${name}`, (body) =>
+      BranchRulesSchema.parse(JSON.parse(body)).flatMap((rule) => rule.parameters?.required_status_checks?.map(({ context }) => context) ?? []),
+    );
+    if (protection === 'unreadable' || rules === 'unreadable') return 'unreadable';
+    return [...new Set([...protection, ...rules])];
+  };
+
+  const changedFiles = async (number: number, page = 1): Promise<readonly string[]> => {
+    const files = PullFilesSchema.parse(JSON.parse((await call('GET', `${pullPath(number)}/files?per_page=${FILES_PER_PAGE}&page=${page}`)).body));
+    const rest = files.length < FILES_PER_PAGE ? [] : await changedFiles(number, page + 1);
+    return [...files.filter((file) => file.status !== 'removed').map((file) => file.filename), ...rest];
+  };
+
   return {
     openPullRequest: async ({ branch, base, title, body }) =>
       toPullRequest(PullSchema.parse(JSON.parse((await call('POST', `/repos/${repository}/pulls`, { head: branch, base, title, body })).body))),
@@ -134,5 +179,26 @@ export const createGitHubSourceControl = ({ apiUrl, repository, token, http }: O
       const pull = await readPull(number);
       return pull !== undefined && pull.merged && pull.head.sha === commit;
     },
+
+    postStatus: async ({ context, state, description, link, commit }) => {
+      await call('POST', `/repos/${repository}/statuses/${encodeURIComponent(commit)}`, {
+        state,
+        context,
+        description: description.slice(0, DESCRIPTION_LIMIT),
+        target_url: link,
+      });
+    },
+
+    readFileAt: async ({ path, commit }) => {
+      const location = `/repos/${repository}/contents/${pathIn(path)}?ref=${encodeURIComponent(commit)}`;
+      const response = await send('GET', location);
+      if (response.status === NOT_FOUND) return undefined;
+      if (response.status >= 400) throw new Error(`GitHub answered ${response.status} to GET ${location}`);
+      return Buffer.from(ContentSchema.parse(JSON.parse(response.body)).content, 'base64').toString('utf8');
+    },
+
+    requiredChecks,
+
+    changedFiles: (number) => changedFiles(number),
   };
 };

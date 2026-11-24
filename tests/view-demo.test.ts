@@ -28,8 +28,8 @@ it('fills every column and every kind of item with sample tickets, whatever the 
     ['revalidate', ['PAY-149']],
     ['build', ['PAY-142', 'ENG-87', 'ENG-95']],
     ['review', ['GH-231']],
-    ['pr', ['PAY-138', 'ENG-88']],
-    ['needs_you', ['ENG-85', 'PAY-133', 'ENG-95', 'PAY-147', 'PAY-138', 'ENG-88', 'PAY-155', 'PAY-151']],
+    ['pr', ['PAY-138', 'ENG-88', 'PAY-144']],
+    ['needs_you', ['ENG-85', 'PAY-133', 'ENG-95', 'PAY-147', 'PAY-144', 'PAY-138', 'ENG-88', 'PAY-155', 'PAY-151']],
     ['done', ['PAY-130', 'PAY-128', 'PAY-127', 'ENG-84', 'ENG-82', 'ENG-85']],
   ]);
   expect(data.needsYou.map((item) => [item.category, item.key])).toEqual([
@@ -37,6 +37,7 @@ it('fills every column and every kind of item with sample tickets, whatever the 
     ['blocked', 'PAY-133'],
     ['interrupted', 'ENG-95'],
     ['sent_back', 'PAY-147'],
+    ['open_tasks', 'PAY-144'],
     ['merge', 'PAY-138'],
     ['merge', 'ENG-88'],
     ['approve', 'PAY-155'],
@@ -94,6 +95,31 @@ it('shows a run with a failed first attempt and a second one being built', async
   ]);
   expect(card?.onThisMachine).toBe(true);
   expect(detail?.sections.map((section) => section.title)).toEqual(['Refinement', 'Run 1 of 3', 'Attempt 1 of 5', 'Attempt 2 of 5']);
+});
+
+it('shows a pull request with open tasks, one of them accepted, on its card, in Needs you and in its run detail', async () => {
+  const source = createDemoViewSource({ config: getConfig(), now: () => '2026-11-21T09:00:00Z' });
+  const data = await source.load();
+
+  const card = data.columns.find((column) => column.id === 'pr')?.cards.find((candidate) => candidate.key === 'PAY-144');
+  const item = data.needsYou.find((candidate) => candidate.key === 'PAY-144');
+  const detail = await source.detail('PAY-144');
+
+  expect(card?.note).toBe('2 of 9 tasks open · 1 task accepted open by maya · Merge by a person');
+  expect(item).toMatchObject({
+    category: 'open_tasks',
+    why: '2 of 9 tasks open. Tick them in a push, or accept them as open.',
+    command: 'factory accept-tasks PAY-144',
+    link: 'https://example.test/pull/416',
+  });
+  expect(detail?.sections.find((section) => section.title.startsWith('Tasks'))).toEqual({
+    title: 'Tasks: 6 of 9 done',
+    steps: [
+      { label: '4.1 Attach the PDF to the reminder email', status: 'fail', statusName: 'open', lines: ['Not done: the mail provider sandbox was down'], links: [] },
+      { label: '4.2 Check the attachment size limit', status: 'fail', statusName: 'open', lines: [], links: [] },
+      { label: '4.3 Try it on a live mailbox', status: 'pass', statusName: 'accepted open', lines: ['Accepted by maya on 2026-11-21'], links: [] },
+    ],
+  });
 });
 
 it('says that a sample run has no Orca session to open', async () => {

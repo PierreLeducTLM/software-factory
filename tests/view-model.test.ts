@@ -791,3 +791,143 @@ describe('run detail', () => {
     expect(buildRunDetail(ticketWith(undefined, { status: 'Ready for Dev' }), getOptions())).toBeUndefined();
   });
 });
+
+describe('open tasks', () => {
+  const NOTE = 'Not done: the board was not opened against live Linear';
+  type Acceptance = { readonly text: string; readonly by: string; readonly at?: string };
+  const tasksOf = (open: readonly { readonly text: string; readonly note?: string }[], accepted: readonly Acceptance[] = [], total = 9): NonNullable<Run['tasks']> => ({
+    total,
+    path: 'openspec/changes/x/tasks.md',
+    commit: 'c0ffee1',
+    open: open.map((task) => ({ ...task })),
+    accepted: accepted.map(({ text, by, at }) => ({ text, by, at: at ?? '2026-11-24T10:00:00Z' })),
+  });
+  const twoOpen = (accepted: readonly Acceptance[] = []) => tasksOf([{ text: '4.1 Open the board against live Linear', note: NOTE }, { text: '4.2 Record a demo' }], accepted);
+  const byPierre: readonly Acceptance[] = [
+    { text: '4.1 Open the board against live Linear', by: 'Pierre' },
+    { text: '4.2 Record a demo', by: 'Pierre' },
+  ];
+  const reviewWithTasks = (tasks: Run['tasks'], merge?: Run['merge']): TicketRecord => changeLatestRun(inReviewWith(merge), (run) => ({ ...run, ...(tasks === undefined ? {} : { tasks }) }));
+  const inReviewTicket = (key: string, tasks: Run['tasks'], merge?: Run['merge'], statusSince?: string): ViewTicket =>
+    ticketWith(reviewWithTasks(tasks, merge), { key, status: 'In review', ...(statusSince === undefined ? {} : { statusSince }) });
+  const blockedRecord = (): TicketRecord =>
+    endRun(changeLatestRun(claimed(), (run) => ({ ...run, attempt: 5, diagnosis: 'environment' as const })), { status: 'blocked', at: '2026-11-21T08:40:00Z', by: 'pierre' });
+
+  describe('on the Pull request card', () => {
+    it('says how many tasks are open out of all of them', () => {
+      expect(cardsIn([inReviewTicket('PIE-60', twoOpen())], 'pr').map((card) => card.note)).toEqual(['2 of 9 tasks open · Merge by a person']);
+    });
+
+    it('says who accepted the open tasks, and not that tasks are open', () => {
+      const [card] = cardsIn([inReviewTicket('PIE-61', twoOpen(byPierre))], 'pr');
+
+      expect(card?.note).toBe('2 tasks accepted open by Pierre · Merge by a person');
+      expect(card?.note).not.toContain('tasks open');
+    });
+
+    it('shows both notes when only some open tasks are accepted, with every person who accepted', () => {
+      const someAccepted = tasksOf([{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd' }], [{ text: 'b', by: 'Pierre' }, { text: 'c', by: 'Maya' }, { text: 'd', by: 'Pierre' }]);
+      const oneAccepted = tasksOf([{ text: 'a' }, { text: 'b' }], [{ text: 'b', by: 'Pierre' }]);
+
+      expect(cardsIn([inReviewTicket('A-1', someAccepted), inReviewTicket('A-2', oneAccepted)], 'pr').map((card) => card.note)).toEqual([
+        '1 of 9 tasks open · 3 tasks accepted open by Pierre and Maya · Merge by a person',
+        '1 of 9 tasks open · 1 task accepted open by Pierre · Merge by a person',
+      ]);
+    });
+
+    it('mentions no tasks when every task is done, or the run recorded none', () => {
+      expect(cardsIn([inReviewTicket('PIE-62', tasksOf([])), inReviewTicket('A-2', undefined)], 'pr').map((card) => card.note)).toEqual(['Merge by a person', 'Merge by a person']);
+    });
+  });
+
+  describe('on the Needs you page', () => {
+    it('lists a pull request with open tasks once, with the accept command and a link to the pull request', () => {
+      expect(buildNeedsYou([inReviewTicket('PIE-63', twoOpen())], getOptions())).toEqual([
+        {
+          category: 'open_tasks',
+          key: 'PIE-63',
+          title: 'Bulk invoice export',
+          provider: 'Jira',
+          since: '2026-11-20T10:00:00Z',
+          why: '2 of 9 tasks open. Tick them in a push, or accept them as open.',
+          command: 'factory accept-tasks PIE-63',
+          link: 'https://github.test/pull/412',
+          questions: [],
+        },
+      ]);
+    });
+
+    it('lists it even when the pull request would merge by itself', () => {
+      const automatic = inReviewTicket('A-1', twoOpen(), { route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' });
+
+      expect(buildNeedsYou([automatic], getOptions()).map((item) => [item.category, item.key])).toEqual([['open_tasks', 'A-1']]);
+    });
+
+    it('ranks pull requests with open tasks just above the ones waiting for a merge', () => {
+      const tickets = [
+        ticketWith(blockedRecord(), { key: 'BLOCKED', status: 'Blocked' }),
+        inReviewTicket('PIE-64', undefined, undefined, '2026-11-19T09:00:00Z'),
+        inReviewTicket('PIE-65', twoOpen(), undefined, '2026-11-21T08:00:00Z'),
+      ];
+
+      expect(buildNeedsYou(tickets, getOptions()).map((item) => [item.category, item.key])).toEqual([
+        ['blocked', 'BLOCKED'],
+        ['open_tasks', 'PIE-65'],
+        ['merge', 'PIE-64'],
+      ]);
+    });
+
+    it('gives back the merge item once every open task is accepted, saying who accepted them', () => {
+      const refused = inReviewTicket('A-1', twoOpen(byPierre), { route: 'auto', wouldAutoMerge: true, reason: 'x', refused: 'a build has not passed' });
+
+      expect(buildNeedsYou([inReviewTicket('PIE-66', twoOpen(byPierre))], getOptions())).toMatchObject([
+        { category: 'merge', key: 'PIE-66', why: 'Merge by a person. 2 tasks accepted open by Pierre.', link: 'https://github.test/pull/412' },
+      ]);
+      expect(buildNeedsYou([refused], getOptions())[0]?.why).toBe('Auto-merge refused: a build has not passed. 2 tasks accepted open by Pierre.');
+    });
+
+    it('shows the open tasks item in the Needs you column with the accept command', () => {
+      expect(cardsIn([inReviewTicket('PIE-63', twoOpen())], 'needs_you').map((card) => [card.key, card.category, card.note, card.command, card.pullRequest])).toEqual([
+        ['PIE-63', 'open_tasks', '2 of 9 tasks open. Tick them in a push, or accept them as open.', 'factory accept-tasks PIE-63', 'https://github.test/pull/412'],
+      ]);
+    });
+  });
+
+  describe('in the run detail', () => {
+    const tasksSection = (tasks: Run['tasks']) => buildRunDetail(inReviewTicket('PIE-67', tasks), getOptions())?.sections.find((section) => section.title.startsWith('Tasks'));
+
+    it('lists each open task with its note under how many tasks are done', () => {
+      expect(tasksSection(twoOpen())).toEqual({
+        title: 'Tasks: 7 of 9 done',
+        steps: [
+          { label: '4.1 Open the board against live Linear', status: 'fail', statusName: 'open', lines: [NOTE], links: [] },
+          { label: '4.2 Record a demo', status: 'fail', statusName: 'open', lines: [], links: [] },
+        ],
+      });
+    });
+
+    it('says who accepted a task and on which day', () => {
+      const accepted = twoOpen([{ text: '4.1 Open the board against live Linear', by: 'Pierre', at: '2026-11-24T10:15:00Z' }]);
+
+      expect(tasksSection(accepted)?.steps).toEqual([
+        { label: '4.1 Open the board against live Linear', status: 'pass', statusName: 'accepted open', lines: [NOTE, 'Accepted by Pierre on 2026-11-24'], links: [] },
+        { label: '4.2 Record a demo', status: 'fail', statusName: 'open', lines: [], links: [] },
+      ]);
+    });
+
+    it('shows a note written over several lines line by line', () => {
+      expect(tasksSection(tasksOf([{ text: '4.1 x', note: 'first\nsecond' }]))?.steps[0]?.lines).toEqual(['first', 'second']);
+    });
+
+    it('places the tasks after the attempts and before the outcome', () => {
+      const detail = buildRunDetail(inReviewTicket('PIE-67', twoOpen()), getOptions());
+
+      expect(detail?.sections.map((section) => section.title)).toEqual(['Refinement', 'Run 1 of 3', 'Tasks: 7 of 9 done', 'Outcome']);
+    });
+
+    it('has no Tasks section when every task is done, or the run recorded none', () => {
+      expect(tasksSection(tasksOf([]))).toBeUndefined();
+      expect(tasksSection(undefined)).toBeUndefined();
+    });
+  });
+});

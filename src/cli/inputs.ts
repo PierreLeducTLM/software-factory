@@ -39,6 +39,7 @@ export const createGitInputs = ({ run, mainBranch }: GitOptions) => {
         .flatMap((line) => line.split('\t').slice(0, 2))
         .reduce((total, count) => total + (Number(count) || 0), 0),
     commitMessage: async (commit: string): Promise<string> => (await run(['log', '-1', '--format=%B', commit])).stdout.trim(),
+    readFileOnBranch: (path: string): Promise<string | undefined> => run(['show', `HEAD:${path}`]).then(({ stdout }) => stdout, () => undefined),
     pushBranch: async (branch: string): Promise<void> => {
       await run(['push', '--quiet', '--set-upstream', 'origin', branch]);
     },

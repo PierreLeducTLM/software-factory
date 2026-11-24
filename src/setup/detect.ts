@@ -68,7 +68,7 @@ const COMMAND_HINTS: readonly (readonly [Category, RegExp])[] = [
   ['build', /\b(build|compile)\b/i],
 ];
 
-const FACTORY_STEPS = ['record-merge', 'revert', 'watch'];
+const FACTORY_STEPS = ['record-merge', 'revert', 'watch', 'check-tasks'];
 const LOCK_FILES: readonly (readonly [string, string])[] = [['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn'], ['bun.lockb', 'bun'], ['bun.lock', 'bun']];
 const FRAMEWORKS: readonly (readonly [string, string])[] = [['next', 'Next.js'], ['@tanstack/react-start', 'TanStack Start'], ['react', 'React']];
 const REMOTE = /(github\.com|bitbucket\.org)[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/;
@@ -231,12 +231,12 @@ export const detectProject = async ({ files, remoteUrl, mainBranch }: Options): 
   };
 };
 
-const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
+export const FACTORY_WORKFLOWS: readonly string[] = ['.github/workflows/factory.yml', '.github/workflows/factory-tasks.yml'];
 const NamedSchema = z.object({ name: z.string() });
 
 export const mainBuildWorkflow = async (files: ProjectFiles, detection: Detection): Promise<string | undefined> => {
   if (detection.ci.system !== 'github-actions') return undefined;
-  const others = detection.ci.files.filter((file) => file !== FACTORY_WORKFLOW);
+  const others = detection.ci.files.filter((file) => !FACTORY_WORKFLOWS.includes(file));
   const holding = detection.candidates.find((candidate) => candidate.source === 'ci')?.from;
   const file = holding ?? (others.length === 1 ? others[0] : undefined);
   if (file === undefined) return undefined;

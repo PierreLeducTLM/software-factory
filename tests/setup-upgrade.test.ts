@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'yaml';
 import { detectProject } from '../src/setup/detect.js';
 import { describe, expect, it } from 'vitest';
@@ -218,6 +220,8 @@ const CURRENT = { '.factory/factory.yaml': FACTORY, '.factory/adapters.yaml': AD
 
 const WORKFLOW = '.github/workflows/factory.yml';
 
+const TASKS_WORKFLOW = '.github/workflows/factory-tasks.yml';
+
 const stepsOf = async (workflow: string | undefined) => (await detectProject({ files: createInMemoryProjectFiles({ [WORKFLOW]: workflow ?? '' }) })).ci.factorySteps;
 
 describe('adding the missing factory workflow', () => {
@@ -225,7 +229,7 @@ describe('adding the missing factory workflow', () => {
     const { result, published, opened } = await upgrade(CURRENT, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'opened', url: 'https://github.com/acme/billing-service/pull/41', workflowOnly: true });
-    expect(Object.keys(published[0]?.files ?? {})).toEqual([WORKFLOW]);
+    expect(Object.keys(published[0]?.files ?? {})).toEqual([WORKFLOW, TASKS_WORKFLOW]);
     expect(await stepsOf(published[0]?.files[WORKFLOW])).toEqual(['record-merge']);
     expect(published[0]?.files[WORKFLOW]).toContain('  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n');
     expect(published[0]?.message).toBe('chore: add the factory workflow');
@@ -277,7 +281,7 @@ describe('adding the missing factory workflow', () => {
   });
 
   it('never overwrites a factory workflow that is there', async () => {
-    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.0' });
+    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n', [TASKS_WORKFLOW]: 'name: My tasks\n' }, { engine: '0.1.0' });
 
     expect(result).toMatchObject({ ok: true, action: 'none', message: expect.stringMatching(/^Nothing to upgrade: /) });
     expect(published).toEqual([]);
@@ -288,5 +292,59 @@ describe('adding the missing factory workflow', () => {
 
     expect(result).toMatchObject({ ok: true, action: 'none' });
     expect(published).toEqual([]);
+  });
+});
+
+const REQUIRED_CHECK = 'After this pull request is merged, mark factory/tasks as a required status check on main, in its branch protection or a ruleset, so open tasks block the merge.';
+
+describe('adding the missing tasks workflow', () => {
+  it('Installed on GitHub without the tasks workflow: opens a pull request that adds it, and says to make factory/tasks a required status check', async () => {
+    const { result, published, opened } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n' }, { engine: '0.1.0' });
+    const workflow = published[0]?.files[TASKS_WORKFLOW];
+
+    expect(result).toMatchObject({ ok: true, action: 'opened', workflowOnly: true });
+    expect(Object.keys(published[0]?.files ?? {})).toEqual([TASKS_WORKFLOW]);
+    expect(await stepsOf(workflow)).toEqual(['check-tasks']);
+    expect(parse(workflow ?? '').on).toEqual({ pull_request: { types: ['opened', 'synchronize', 'reopened'] } });
+    expect(workflow).toContain('  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n');
+    expect(opened[0]?.body.split('\n')).toEqual([
+      'Adds .github/workflows/factory-tasks.yml, which runs "factory check-tasks" on every pull request, so open tasks fail the factory/tasks status.',
+      REQUIRED_CHECK,
+      '',
+      'The project keeps its configuration and its engine pin. Nothing changes until this pull request is merged.',
+    ]);
+  });
+
+  it('adds both workflows in one pull request, on the main branch of the project', async () => {
+    const { published, opened } = await upgrade({ ...CURRENT, '.factory/factory.yaml': `${FACTORY}main_branch: trunk\n` }, { engine: '0.2.0' });
+
+    expect(published).toHaveLength(1);
+    expect(Object.keys(published[0]?.files ?? {})).toEqual(expect.arrayContaining([WORKFLOW, TASKS_WORKFLOW]));
+    expect(opened[0]?.body.split('\n')).toContain(REQUIRED_CHECK.replace('on main', 'on trunk'));
+  });
+
+  it('Tasks workflow already present: changes neither workflow', async () => {
+    const { result, published } = await upgrade({ ...CURRENT, [WORKFLOW]: 'name: Mine\n', [TASKS_WORKFLOW]: 'name: My tasks\n' }, { engine: '0.1.0' });
+
+    expect(result).toMatchObject({ ok: true, action: 'none' });
+    expect(published).toEqual([]);
+  });
+
+  it('Bitbucket project: adds no tasks workflow', async () => {
+    const { result, published } = await upgrade({ ...CURRENT, '.factory/adapters.yaml': BITBUCKET_ADAPTERS }, { engine: '0.2.0' });
+
+    expect(result).toMatchObject({ ok: true, action: 'opened' });
+    expect(Object.keys(published[0]?.files ?? {})).not.toContain(TASKS_WORKFLOW);
+  });
+});
+
+describe("this repository's tasks workflow", () => {
+  const ROOT = join(import.meta.dirname, '..');
+  const committed = (path: string): string => readFileSync(join(ROOT, path), 'utf8');
+
+  it('is the workflow migrate writes for its factory.yaml and adapters.yaml', async () => {
+    const { published } = await upgrade({ '.factory/factory.yaml': committed('.factory/factory.yaml'), '.factory/adapters.yaml': committed('.factory/adapters.yaml') }, {});
+
+    expect(published[0]?.files[TASKS_WORKFLOW]).toBe(committed(TASKS_WORKFLOW));
   });
 });

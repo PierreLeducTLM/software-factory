@@ -103,6 +103,9 @@ const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], htt
   });
 };
 
+export const createRealSourceControl = async ({ cwd, env }: Options): Promise<SourceControl> =>
+  createSourceControl(await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig), env, withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES }));
+
 export const createSampleViewSource = (): ViewSource => createDemoViewSource({ config: sampleFactoryConfig(), now });
 
 export const createProjectViewSource = async ({ cwd, env }: Options): Promise<ViewSource> => {
@@ -154,6 +157,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     commitMessage: git.commitMessage,
     changeFolders: archive.changeFolders,
     archiveChange: archive.archiveChange,
+    readFileOnBranch: git.readFileOnBranch,
   };
 };
 
@@ -169,6 +173,7 @@ export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
     now,
     checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
     canReenter: async (request) => createTicketProvider(await adapters(), env, http).canReenter(request),
+    requiredChecks: async (branch) => createSourceControl(await adapters(), env, http).requiredChecks(branch),
     publishFiles: createFilePublisher({ run: git }),
     readFile: (path) => readFile(join(cwd, path), 'utf8'),
     remoteUrl: repository.remoteUrl,

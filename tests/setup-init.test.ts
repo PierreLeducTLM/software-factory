@@ -95,9 +95,10 @@ describe('the install wizard', () => {
 
     const result = await installFactory(deps, getAnswers({ mainBranch: 'develop' }), { ticket: 'PAY-1' });
 
-    expect(result).toEqual({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'], manual: [] });
+    const required = 'After this pull request is merged, mark factory/tasks as a required status check on develop, in its branch protection or a ruleset, so open tasks block the merge.';
+    expect(result).toEqual({ ok: true, url: 'https://github.com/acme/billing-service/pull/1', secrets: ['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL'], manual: [required] });
     expect(published.map(({ branch, base, message }) => ({ branch, base, message }))).toEqual([{ branch: 'factory/install', base: 'develop', message: 'chore: install the software factory' }]);
-    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/factory.yaml', '.factory/adapters.yaml', '.factory/checks/README.md', '.factory/package.json', '.factory/bin/factory', '.factory/.gitignore', '.github/workflows/factory.yml']);
+    expect(Object.keys(published[0]?.files ?? {})).toEqual(['.factory/factory.yaml', '.factory/adapters.yaml', '.factory/checks/README.md', '.factory/package.json', '.factory/bin/factory', '.factory/.gitignore', '.github/workflows/factory.yml', '.github/workflows/factory-tasks.yml']);
     expect(published[0]?.executable).toEqual(['.factory/bin/factory']);
     expect(opened).toEqual([
       {
@@ -111,6 +112,9 @@ describe('the install wizard', () => {
           '- FACTORY_JIRA_TOKEN',
           '- FACTORY_JIRA_EMAIL',
           '',
+          'Then, by hand:',
+          `- ${required}`,
+          '',
           'Every risk level starts in shadow mode: a person merges each factory pull request until the factory has earned auto-merge.',
         ].join('\n'),
       },
@@ -123,14 +127,15 @@ describe('the install wizard', () => {
     const result = await installFactory(deps, getAnswers({ ci: { system: 'none' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }), { ticket: 'PAY-1' });
 
     expect(result).toMatchObject({ ok: true, secrets: [] });
-    expect(opened[0]?.body.split('\n')).toEqual([
-      'Installs the software factory in this project.',
-      '',
-      'Then, by hand:',
+    const lines = opened[0]?.body.split('\n') ?? [];
+    expect(lines.slice(0, 4)).toEqual(['Installs the software factory in this project.', '', 'Then, by hand:', expect.stringMatching(/^- No CI system was found\./)]);
+    expect(lines).toEqual(expect.arrayContaining([
       expect.stringMatching(/^- No CI system was found\./),
-      '',
-      'Every risk level starts in shadow mode: a person merges each factory pull request until the factory has earned auto-merge.',
-    ]);
+      expect.stringMatching(/^- Add this step to bitbucket-pipelines.yml, under pipelines > pull-requests/),
+      expect.stringMatching(/^- After this pull request is merged, turn on the merge check/),
+    ]));
+    expect(lines.slice(-2)).toEqual(['', 'Every risk level starts in shadow mode: a person merges each factory pull request until the factory has earned auto-merge.']);
+    expect(lines).not.toContain('Secrets:');
   });
 
   it.each([

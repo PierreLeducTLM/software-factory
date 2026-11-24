@@ -1,0 +1,22 @@
+name: Factory tasks
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+env:
+  LINEAR_API_KEY: ${{ secrets.FACTORY_LINEAR_API_KEY }}
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  check-tasks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: .factory/bin/factory check-tasks --pull-request ${{ github.event.pull_request.number }}

@@ -890,3 +890,100 @@ describe('archiving the change at delivery', () => {
     expect(record.runs[0]?.steps.at(-1)?.endedAt).toBeUndefined();
   });
 });
+
+const tasksFile = (lines: readonly string[]): string => ['# Tasks', '', ...lines, ''].join('\n');
+
+const TWO_OPEN = tasksFile([
+  '- [x] 1.1 Add the field',
+  '- [x] 1.2 Add the parser',
+  '- [x] 2.1 Record the tasks',
+  '- [x] 2.2 List them in the body',
+  '- [x] 3.1 Post the status',
+  '- [x] 3.2 Check on every push',
+  '- [x] 3.3 Accept tasks',
+  '- [ ] 4.1 Run the end-to-end check',
+  '  - Not done: needs the released engine.',
+  '- [ ] 4.2 Open the board against live Linear',
+  '  - Not done: no Linear key in this run.',
+]);
+
+const ALL_SIX_DONE = tasksFile(['- [x] 1.1 One', '- [x] 1.2 Two', '- [x] 1.3 Three', '- [x] 2.1 Four', '- [x] 2.2 Five', '- [x] 2.3 Six']);
+
+const ARCHIVED_TASKS = 'openspec/changes/archive/2026-11-21-billing-export/tasks.md';
+
+describe('tasks at delivery', () => {
+  it('records the tasks of the archived change, each open one with its note (two tasks left open)', async () => {
+    const { run, body } = await deliverWith({ branchTasks: TWO_OPEN });
+
+    expect(run?.tasks).toEqual({
+      total: 9,
+      path: ARCHIVED_TASKS,
+      commit: 'commit-1',
+      open: [
+        { text: '4.1 Run the end-to-end check', note: 'Not done: needs the released engine.' },
+        { text: '4.2 Open the board against live Linear', note: 'Not done: no Linear key in this run.' },
+      ],
+      accepted: [],
+    });
+    expect(body).toContain(
+      ['## Open tasks', '- 4.1 Run the end-to-end check', '  Not done: needs the released engine.', '- 4.2 Open the board against live Linear', '  Not done: no Linear key in this run.', '', '## Decisions applied'].join('\n'),
+    );
+  });
+
+  it('records every task as done and lists no open task (every task ticked)', async () => {
+    const { run, body } = await deliverWith({ branchTasks: ALL_SIX_DONE });
+
+    expect(run?.tasks).toEqual({ total: 6, path: ARCHIVED_TASKS, commit: 'commit-1', open: [], accepted: [] });
+    expect(body).not.toContain('## Open tasks');
+  });
+
+  it('leaves the merge to a person and never enables auto-merge when tasks are open (low risk with open tasks)', async () => {
+    const enabled: number[] = [];
+    const world = await getWorld({ risk: SHADOW_OFF, branchTasks: TWO_OPEN });
+    const deps = { ...world.deps, sourceControl: { ...world.sourceControl, enableAutoMerge: async (number: number) => void enabled.push(number) } };
+    await reachReview(world);
+
+    await advance(deps, 'PAY-142', { verdicts: { reviewer: PASS } });
+
+    const run = (await world.record()).runs[0];
+    expect(run?.merge).toStrictEqual({ route: 'human', wouldAutoMerge: false, reason: '2 of 9 tasks were open at delivery' });
+    expect(enabled).toEqual([]);
+    expect((await world.sourceControl.getPullRequest(401))?.body).toContain('## Merge\nMerged by a person: 2 of 9 tasks were open at delivery');
+  });
+
+  it('auto-merges as before when every task is ticked (no open tasks)', async () => {
+    const { run, pullRequest } = await deliverWith({ risk: SHADOW_OFF, branchTasks: ALL_SIX_DONE });
+
+    expect(run?.merge).toStrictEqual({ route: 'auto', wouldAutoMerge: true, reason: 'low risk merges automatically' });
+    expect(pullRequest?.autoMerge).toBe(true);
+  });
+
+  it('posts a failing tasks status on the head commit (delivered with open tasks)', async () => {
+    const { world } = await deliverWith({ branchTasks: TWO_OPEN });
+
+    expect(world.git.statusesOf('commit-1')).toEqual([
+      { context: 'factory/tasks', state: 'failure', description: '2 of 9 tasks open', link: 'memory://pull/401', commit: 'commit-1' },
+    ]);
+  });
+
+  it('posts a passing tasks status on the head commit (delivered with every task done)', async () => {
+    const { world } = await deliverWith({ branchTasks: ALL_SIX_DONE });
+
+    expect(world.git.statusesOf('commit-1')).toEqual([
+      { context: 'factory/tasks', state: 'success', description: 'All 6 tasks done', link: 'memory://pull/401', commit: 'commit-1' },
+    ]);
+  });
+
+  it('records no tasks and posts no status when tasks.md cannot be read on the run branch', async () => {
+    const world = await getWorld({ risk: SHADOW_OFF });
+    await reachReview(world);
+
+    await advance({ ...world.deps, readFileOnBranch: async () => undefined }, 'PAY-142', { verdicts: { reviewer: PASS } });
+
+    const run = (await world.record()).runs[0];
+    expect(run?.tasks).toBeUndefined();
+    expect(run?.merge?.route).toBe('auto');
+    expect(run?.status).toBe('in_review');
+    expect(world.git.statusesOf('commit-1')).toEqual([]);
+  });
+});

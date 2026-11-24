@@ -6,6 +6,8 @@ type Options = { readonly apiUrl: string; readonly repository: string; readonly 
 
 const json = (status: number, body: unknown): HttpResponse => ({ status, headers: {}, body: JSON.stringify(body) });
 
+const STATUS_STATES = { SUCCESSFUL: 'success', FAILED: 'failure' } as const;
+
 const BUILD_STATES = { pending: 'INPROGRESS', passed: 'SUCCESSFUL', failed: 'FAILED' } as const;
 
 export const createFakeBitbucket = ({ apiUrl, repository, now }: Options) => {
@@ -46,6 +48,16 @@ export const createFakeBitbucket = ({ apiUrl, repository, now }: Options) => {
       }
     }
 
+    const diffstat = new RegExp(`^${pulls}/(\\d+)/diffstat\\?pagelen=(\\d+)(?:&page=(\\d+))?$`).exec(path);
+    if (diffstat !== null && request.method === 'GET') {
+      const all = await backend.changedFiles(Number(diffstat[1]));
+      const size = Number(diffstat[2]);
+      const page = Number(diffstat[3] ?? '1');
+      const values = all.slice((page - 1) * size, page * size).map((path) => ({ status: 'added', old: null, new: { path } }));
+      const next = page * size < all.length ? { next: `${apiUrl}${pulls}/${diffstat[1]}/diffstat?pagelen=${size}&page=${page + 1}` } : {};
+      return json(200, { values, ...next });
+    }
+
     const pull = new RegExp(`^${pulls}/(\\d+)(/merge)?$`).exec(path);
     if (pull !== null) {
       const number = Number(pull[1]);
@@ -69,6 +81,26 @@ export const createFakeBitbucket = ({ apiUrl, repository, now }: Options) => {
     if (branch !== undefined && request.method === 'GET') {
       const hash = branches.get(branch);
       return hash === undefined ? json(404, {}) : json(200, { type: 'branch', name: branch, target: { hash } });
+    }
+
+    const posted = new RegExp(`^${base}/commit/([^/]+)/statuses/build$`).exec(path);
+    if (posted !== null && request.method === 'POST') {
+      const sent = body as { key: string; state: keyof typeof STATUS_STATES; description: string; url: string };
+      await backend.postStatus({ context: sent.key, state: STATUS_STATES[sent.state], description: sent.description, link: sent.url, commit: decodeURIComponent(posted[1] ?? '') });
+      return json(201, { type: 'build', key: sent.key, state: sent.state });
+    }
+
+    const source = new RegExp(`^${base}/src/([^/]+)/(.+)$`).exec(path);
+    if (source !== null && request.method === 'GET') {
+      const file = await backend.readFileAt({ commit: decodeURIComponent(source[1] ?? ''), path: (source[2] ?? '').split('/').map(decodeURIComponent).join('/') });
+      return file === undefined ? json(404, { error: { message: 'No such file' } }) : { status: 200, headers: {}, body: file };
+    }
+
+    if (path === `${base}/branch-restrictions?kind=require_passing_builds_to_merge` && request.method === 'GET') {
+      const required = await backend.requiredChecks('main');
+      if (required === 'unreadable') return json(403, { error: { message: 'Access denied' } });
+      const values = required.length === 0 ? [] : [{ kind: 'require_passing_builds_to_merge', pattern: 'main', branch_match_kind: 'glob', value: 1 }];
+      return json(200, { values });
     }
 
     const status = new RegExp(`^${base}/commit/([^/]+)/statuses/build/(.+)$`).exec(path);

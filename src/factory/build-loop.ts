@@ -20,6 +20,7 @@ import {
 } from '../record/ticket-record.js';
 import { gatePassed, inScope, jsonIn, judgeAgentCheck, riskRaiseOf, runScriptChecks, timeoutSecondsOf, type CheckOutcome, type ScriptRun } from './checks.js';
 import { autoMergeSuspended } from './merge.js';
+import { nextTasks, parseTasks, tasksCommitStatus, withOpenTasksSection, type TaskList } from './open-tasks.js';
 import { revalidate, type RefinementDeps } from './refinement.js';
 import { assessDiff, capabilitiesIn, decideMerge, higherRisk, raisedRisk, type MergeDecision, type RiskRaise, type RiskSignal } from './risk.js';
 import { summaryOf } from './run-lifecycle.js';
@@ -34,6 +35,7 @@ export type LoopDeps = RefinementDeps & {
   readonly commitMessage: (commit: string) => Promise<string>;
   readonly changeFolders: () => Promise<readonly ChangeFolder[]>;
   readonly archiveChange: (name: string) => Promise<ArchiveResult>;
+  readonly readFileOnBranch: (path: string) => Promise<string | undefined>;
 };
 
 export type ChangeFolder = { readonly name: string; readonly files: readonly string[]; readonly archived: boolean };
@@ -254,32 +256,53 @@ const deliver = async (context: Context, record: TicketRecord, raise: RiskRaise 
   return openPullRequest(context, record, raise);
 };
 
+type ReadTasks = { readonly path: string; readonly list: TaskList };
+
+const tasksPathOf = (change: Change): string => `openspec/changes/${change.archived ? `${ARCHIVE}/` : ''}${change.name}/tasks.md`;
+
+const readTasks = async (context: Context): Promise<ReadTasks | undefined> => {
+  const change = await changeOf(context);
+  if (change === undefined) return undefined;
+  const path = tasksPathOf(change);
+  const text = await context.deps.readFileOnBranch(path);
+  return text === undefined ? undefined : { path, list: parseTasks(text) };
+};
+
 const openPullRequest = async (context: Context, record: TicketRecord, raise: RiskRaise | undefined): Promise<AdvanceResult> => {
   const { deps, key, ticket, worktree, approval } = context;
   const risk = await assessRun(context, record, raise);
+  const read = await readTasks(context);
   const decision = decideMerge(deps.config.risk, risk.level, {
     ...(approval.mergeCeiling === undefined ? {} : { ceiling: approval.mergeCeiling }),
     noAutomergeLabel: ticket.labels.includes(deps.config.labels.no_automerge),
     suspended: deps.config.risk[risk.level].merge === 'auto' && (await autoMergeSuspended(deps, risk.level)),
+    ...(read === undefined ? {} : { openTasks: { open: read.list.open.length, total: read.list.total } }),
   });
+  const bodyWith = (merge: string): string => {
+    const body = pullRequestBody(context, record, risk, merge);
+    return read === undefined ? body : withOpenTasksSection(body, { ...read.list, accepted: [] });
+  };
   await deps.pushBranch(worktree.branch);
   const pullRequest = await deps.sourceControl.openPullRequest({
     branch: worktree.branch,
     base: deps.config.main_branch,
     title: `${key} ${ticket.title}`,
-    body: pullRequestBody(context, record, risk, mergeLine(decision)),
+    body: bodyWith(mergeLine(decision)),
   });
   const refused = decision.route === 'auto' ? await deps.sourceControl.enableAutoMerge(pullRequest.number).then(() => undefined, messageOf) : undefined;
   if (refused !== undefined) {
-    await deps.sourceControl.updatePullRequestBody({ number: pullRequest.number, body: pullRequestBody(context, record, risk, mergeLine(decision, refused)) });
+    await deps.sourceControl.updatePullRequestBody({ number: pullRequest.number, body: bodyWith(mergeLine(decision, refused)) });
   }
+  const tasks = read === undefined ? undefined : nextTasks(undefined, read.list, { path: read.path, commit: pullRequest.headCommit });
   const linked = changeLatestRun(record, (run) => ({
     ...run,
     pullRequest: { number: pullRequest.number, url: pullRequest.url, headCommit: pullRequest.headCommit },
     risk,
     merge: { ...decision, ...(refused === undefined ? {} : { refused }) },
+    ...(tasks === undefined ? {} : { tasks }),
   }));
   await leave(context, linked, 'in_review', 'in_review', 'pull request opened');
+  if (tasks !== undefined) await deps.sourceControl.postStatus(tasksCommitStatus(tasks, pullRequest));
   return { ok: true, next: 'done', exit: 'pull_request', url: pullRequest.url };
 };
 

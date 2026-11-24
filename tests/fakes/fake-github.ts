@@ -44,6 +44,14 @@ export const createFakeGitHub = ({ apiUrl, repository, now }: Options) => {
       }
     }
 
+    const files = new RegExp(`^${pulls}/(\\d+)/files\\?per_page=(\\d+)&page=(\\d+)$`).exec(path);
+    if (files !== null && request.method === 'GET') {
+      const all = await backend.changedFiles(Number(files[1]));
+      const size = Number(files[2]);
+      const page = Number(files[3]);
+      return json(200, all.slice((page - 1) * size, page * size).map((filename) => ({ filename, status: 'added' })));
+    }
+
     const number = Number(path.startsWith(`${pulls}/`) ? path.slice(pulls.length + 1) : Number.NaN);
     if (Number.isInteger(number)) {
       if (!['GET', 'PATCH'].includes(request.method)) return json(405, {});
@@ -57,6 +65,28 @@ export const createFakeGitHub = ({ apiUrl, repository, now }: Options) => {
       const run = CHECK_RUNS[await backend.getCiResult({ ref: decodeURIComponent(checks[1] ?? ''), job: decodeURIComponent(checks[2] ?? '') })];
       return json(200, { check_runs: run === undefined ? [] : [run] });
     }
+
+    const status = new RegExp(`^/repos/${repository}/statuses/([^/]+)$`).exec(path);
+    if (status !== null && request.method === 'POST') {
+      const sent = body as { state: 'success' | 'failure'; context: string; description: string; target_url: string };
+      await backend.postStatus({ context: sent.context, state: sent.state, description: sent.description, link: sent.target_url, commit: decodeURIComponent(status[1] ?? '') });
+      return json(201, { state: sent.state, context: sent.context });
+    }
+
+    const content = new RegExp(`^/repos/${repository}/contents/(.+)\\?ref=(.+)$`).exec(path);
+    if (content !== null && request.method === 'GET') {
+      const file = await backend.readFileAt({ path: (content[1] ?? '').split('/').map(decodeURIComponent).join('/'), commit: decodeURIComponent(content[2] ?? '') });
+      return file === undefined ? json(404, { message: 'Not Found' }) : json(200, { type: 'file', encoding: 'base64', content: Buffer.from(file).toString('base64') });
+    }
+
+    const protection = new RegExp(`^/repos/${repository}/branches/([^/]+)/protection/required_status_checks$`).exec(path);
+    if (protection !== null && request.method === 'GET') {
+      const required = await backend.requiredChecks(decodeURIComponent(protection[1] ?? ''));
+      if (required === 'unreadable') return json(403, { message: 'Resource not accessible by integration' });
+      return required.length === 0 ? json(404, { message: 'Branch not protected' }) : json(200, { strict: false, contexts: required, checks: required.map((context) => ({ context, app_id: null })) });
+    }
+
+    if (new RegExp(`^/repos/${repository}/rules/branches/[^/]+$`).test(path) && request.method === 'GET') return json(200, []);
 
     if (path === '/graphql' && request.method === 'POST') {
       const { query, variables } = body as { query: string; variables: { id: string } };

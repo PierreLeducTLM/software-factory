@@ -1,6 +1,7 @@
 import type { Ticket } from '../adapters/ticket-provider.js';
 import type { FactoryConfig } from '../config/project-config.js';
-import { parseComment, type Attempt, type FactoryState, type Run, type SendBackQuestion, type TicketRecord } from '../record/ticket-record.js';
+import { acceptanceOf, acceptorsOf, peopleList, unacceptedTasks, type OpenTask } from '../factory/open-tasks.js';
+import { parseComment, type Attempt, type FactoryState, type Run, type RunTasks, type SendBackQuestion, type TicketRecord } from '../record/ticket-record.js';
 
 export type ViewTicket = Ticket & { readonly provider: string };
 
@@ -41,7 +42,7 @@ export type Card = {
 
 export type Column = { readonly id: ColumnId; readonly name: string; readonly cards: readonly Card[] };
 
-export type NeedsYouCategory = 'revert' | 'blocked' | 'run_limit' | 'interrupted' | 'record_edited' | 'sent_back' | 'merge' | 'approve' | 'not_started';
+export type NeedsYouCategory = 'revert' | 'blocked' | 'run_limit' | 'interrupted' | 'record_edited' | 'sent_back' | 'open_tasks' | 'merge' | 'approve' | 'not_started';
 
 export type NeedsYouItem = {
   readonly category: NeedsYouCategory;
@@ -55,7 +56,7 @@ export type NeedsYouItem = {
   readonly questions: readonly SendBackQuestion[];
 };
 
-export type DetailStep = { readonly label: string; readonly status: Chip; readonly lines: readonly string[]; readonly links: readonly string[] };
+export type DetailStep = { readonly label: string; readonly status: Chip; readonly statusName?: string; readonly lines: readonly string[]; readonly links: readonly string[] };
 
 export type RunDetail = {
   readonly key: string;
@@ -86,7 +87,7 @@ const COLUMNS: readonly { readonly id: ColumnId; readonly name: string }[] = [
   { id: 'done', name: 'Done' },
 ];
 
-const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'merge', 'approve', 'not_started'];
+const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'open_tasks', 'merge', 'approve', 'not_started'];
 const STEP_COLUMNS: Readonly<Record<string, StationId>> = { revalidate: 'revalidate', build: 'build', quality: 'build', verify: 'review', review: 'review', diagnose: 'build' };
 const VERIFY = 'openspec-verify';
 const SHOWN_ATTEMPTS = 2;
@@ -166,6 +167,21 @@ const mergeNote = ({ run }: Entry): string => {
   return merge.route === 'auto' ? AUTO_MERGE_ON : 'Would have auto-merged';
 };
 
+const openTasksNote = (tasks: RunTasks): string | undefined => {
+  const open = unacceptedTasks(tasks).length;
+  return open === 0 ? undefined : `${open} of ${tasks.total} tasks open`;
+};
+
+const acceptedNote = (tasks: RunTasks): string | undefined => {
+  const accepted = tasks.open.length - unacceptedTasks(tasks).length;
+  return accepted === 0 ? undefined : `${plural(accepted, 'task')} accepted open by ${peopleList(acceptorsOf(tasks))}`;
+};
+
+const tasksNotes = ({ run }: Entry): readonly string[] =>
+  run?.tasks === undefined ? [] : [openTasksNote(run.tasks), acceptedNote(run.tasks)].filter((note) => note !== undefined);
+
+const pullRequestNote = (entry: Entry): string => [...tasksNotes(entry), mergeNote(entry)].join(' · ');
+
 const doneNote = (run: Run | undefined): string => {
   const revert = run?.revert;
   if (revert?.merged === true) return 'Reverted';
@@ -189,7 +205,7 @@ const noteFor = (entry: Entry, column: StationId, config: FactoryConfig): string
   if (column === 'revalidate') return 'Checking drift';
   if (column === 'build') return 'Building';
   if (column === 'review') return 'Reviewing';
-  if (column === 'pr') return mergeNote(entry);
+  if (column === 'pr') return pullRequestNote(entry);
   return doneNote(run);
 };
 
@@ -258,10 +274,15 @@ const reasonFor = (entry: Entry, { config, now }: ViewOptions): Reason | undefin
     return { category: 'sent_back', since, why: `Sent back with ${plural(questions.length, 'question')}.`, command: `/factory-refine ${key}`, questions };
   }
   if (state === 'in_review') {
+    const link = run?.pullRequest === undefined ? {} : { link: run.pullRequest.url };
+    const open = run?.tasks === undefined ? undefined : openTasksNote(run.tasks);
+    if (open !== undefined) return { category: 'open_tasks', since, why: `${open}. Tick them in a push, or accept them as open.`, command: `factory accept-tasks ${key}`, ...link };
     const note = mergeNote(entry);
     if (note === AUTO_MERGE_ON) return undefined;
     const refused = run?.merge?.refused;
-    return { category: 'merge', since, why: refused === undefined ? `${note}.` : `${note}: ${refused}.`, ...(run?.pullRequest === undefined ? {} : { link: run.pullRequest.url }) };
+    const accepted = run?.tasks === undefined ? undefined : acceptedNote(run.tasks);
+    const why = [refused === undefined ? `${note}.` : `${note}: ${refused}.`, ...(accepted === undefined ? [] : [`${accepted}.`])].join(' ');
+    return { category: 'merge', since, why, ...link };
   }
   if (state === 'spec_review' && record?.refinement.readyGate?.passed === true) {
     return { category: 'approve', since, why: 'The ready gate passed. Waiting for approval.', command: `/factory-refine ${key}` };
@@ -346,6 +367,18 @@ const outcomeSteps = (record: TicketRecord, run: Run): readonly DetailStep[] => 
   return [{ label: 'Sent back', status: 'fail', lines: questions.flatMap(({ question, recommended }) => [question, `Recommended: ${recommended}`]), links: [] }];
 };
 
+const taskStep = (tasks: RunTasks, task: OpenTask): DetailStep => {
+  const acceptance = acceptanceOf(tasks, task);
+  const note = task.note === undefined ? [] : task.note.split('\n');
+  if (acceptance === undefined) return { label: task.text, status: 'fail', statusName: 'open', lines: note, links: [] };
+  return { label: task.text, status: 'pass', statusName: 'accepted open', lines: [...note, `Accepted by ${acceptance.by} on ${acceptance.at.slice(0, 10)}`], links: [] };
+};
+
+const tasksSections = ({ tasks }: Run): readonly { readonly title: string; readonly steps: readonly DetailStep[] }[] =>
+  tasks === undefined || tasks.open.length === 0
+    ? []
+    : [{ title: `Tasks: ${tasks.total - tasks.open.length} of ${tasks.total} done`, steps: tasks.open.map((task) => taskStep(tasks, task)) }];
+
 export const buildRunDetail = (ticket: ViewTicket, options: ViewOptions): RunDetail | undefined => {
   const { record, run } = describe(ticket, options);
   if (record === undefined) return undefined;
@@ -367,6 +400,7 @@ export const buildRunDetail = (ticket: ViewTicket, options: ViewOptions): RunDet
       { title: 'Refinement', steps: refinement },
       { title: `Run ${record.runs.length} of ${options.config.limits.runs}`, steps: [{ label: 'Revalidate', status: stepChip(run, 1, 'revalidate'), lines: [], links: [] }] },
       ...attempts,
+      ...tasksSections(run),
       ...(outcome.length === 0 ? [] : [{ title: 'Outcome', steps: outcome }]),
     ],
   };
