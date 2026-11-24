@@ -49,12 +49,12 @@ Ask the person which fixes to make, then make them one pull request at a time.
 factory migrate --json
 ```
 
-It opens one pull request that pins this engine in `factory.yaml` and runs any schema migration, and it never touches the current checkout. Until that pull request is merged, the project keeps running its pinned engine, so nothing changes for anyone else.
+`migrate` runs the engine of this plugin's release, not the one the project pins. It opens one pull request that pins this engine in `factory.yaml` and runs any schema migration, and it never touches the current checkout. Until that pull request is merged, the project keeps running its pinned engine, so nothing changes for anyone else.
 
 | Result | What to do |
 |---|---|
 | `action: "opened"` | Share the `url`, and list the `applied` migrations if there are any. Ask the person to review and merge it |
-| `action: "none"` | Say that the project is already on this engine |
+| `action: "none"` | Say that the project is already on this plugin's engine. A newer engine needs a newer plugin: update the software-factory plugin, then run this again |
 | `reason: "newer_engine"` | The project is ahead of this engine. Tell the person to install the pinned engine instead |
 | any other refusal | Show the `message` |
 

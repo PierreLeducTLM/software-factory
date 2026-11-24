@@ -55,6 +55,18 @@ describe('the plugin command', () => {
     expect(run(join(project, 'src'), ['doctor']).stdout).toBe('project-launcher doctor\n');
   });
 
+  it('runs migrate with the engine of the plugin release, so a project can move past the engine it pins', () => {
+    const { root, cache, run } = getWorld();
+    const project = join(root, 'project');
+    spawnSync('git', ['init', '--quiet', project]);
+    write(join(project, '.factory', 'bin', 'factory'), '#!/bin/sh\necho "project-launcher $*"\n', 0o755);
+
+    const result = run(project, ['migrate', '--json']);
+
+    expect(result.stdout).toBe('cache-engine migrate --json\n');
+    expect(readFileSync(join(cache, 'software-factory', ENGINE_VERSION, 'package.json'), 'utf8')).toBe(enginePackage(ENGINE_VERSION));
+  });
+
   it('runs the engine of the plugin release from the user cache when the project has none yet', () => {
     const { root, cache, run } = getWorld();
     const empty = join(root, 'empty');
