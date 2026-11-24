@@ -1,13 +1,13 @@
 import { TSS_SERVER_FUNCTION, createServerFn } from "./ssr.mjs";
 import { _enum, array, boolean, discriminatedUnion, literal, number, object, string, tuple, unknown } from "../_libs/zod.mjs";
 import { require_dist } from "../_libs/yaml.mjs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-// node_modules/.nitro/vite/services/ssr/assets/functions-BwZsRDGy.js
+// node_modules/.nitro/vite/services/ssr/assets/functions-BpvMze5D.js
 var import_dist = require_dist();
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
@@ -241,7 +241,7 @@ var createJiraTicketProvider = ({ baseUrl, email, token, repository, filter, htt
 		return response === void 0 ? void 0 : PropertySchema.parse(JSON.parse(response.body)).value.commentId;
 	};
 	const searchPages = async (jql, nextPageToken) => {
-		const response = await call("POST", "/rest/api/3/search/jql", {
+		const response = await call("POST", "/rest/api/2/search/jql", {
 			jql,
 			fields: ISSUE_FIELDS$1,
 			properties: ["factory"],
@@ -701,9 +701,20 @@ var createCommandRunner = (binary) => {
 	const run = promisify(execFile);
 	return async (args, options) => ({ stdout: (await run(binary, [...args], options === void 0 ? {} : { cwd: options.cwd })).stdout });
 };
+var looksLikeJson = (text) => text.trimStart().startsWith("{");
+var printedOnFailure = (error) => error instanceof Error && "stdout" in error && typeof error.stdout === "string" && looksLikeJson(error.stdout) ? error.stdout : void 0;
+var printedBy = async (run, args) => {
+	try {
+		return (await run(args)).stdout;
+	} catch (error) {
+		const stdout = printedOnFailure(error);
+		if (stdout === void 0) throw error;
+		return stdout;
+	}
+};
 var askOrca = async (run, args) => {
-	const { stdout } = await run([...args, "--json"]);
-	const envelope = EnvelopeSchema.safeParse(stdout.trimStart().startsWith("{") ? JSON.parse(stdout) : void 0);
+	const stdout = await printedBy(run, [...args, "--json"]);
+	const envelope = EnvelopeSchema.safeParse(looksLikeJson(stdout) ? JSON.parse(stdout) : void 0);
 	if (!envelope.success) throw new Error(`Orca did not answer with JSON: ${stdout.slice(0, 200)}`);
 	return envelope.data.ok ? {
 		ok: true,
@@ -731,13 +742,21 @@ var TICKET_LINKS = {
 	linear: "--linear-issue",
 	jira: "--reference"
 };
-var createOrcaWorktreeStarter = ({ run, projectDir }) => async ({ name, prompt, ticket }) => {
+var COMMON_GIT_DIR = [
+	"rev-parse",
+	"--path-format=absolute",
+	"--git-common-dir"
+];
+var REPO_NOT_FOUND = "repo_not_found";
+var unknownRepo = (repoDir) => `Orca does not know the repo at ${repoDir}. Add it in Orca, or run the dashboard from a worktree of a repo Orca knows.`;
+var createOrcaWorktreeStarter = ({ run, git }) => async ({ name, prompt, ticket }) => {
+	const repoDir = dirname((await git(COMMON_GIT_DIR)).stdout.trim());
 	const link = [TICKET_LINKS[ticket.tracker], ticket.key];
-	const result = await demandOfOrca(run, [
+	const reply = await askOrca(run, [
 		"worktree",
 		"create",
 		"--repo",
-		`path:${projectDir}`,
+		`path:${repoDir}`,
 		"--name",
 		name,
 		"--no-parent",
@@ -748,7 +767,8 @@ var createOrcaWorktreeStarter = ({ run, projectDir }) => async ({ name, prompt, 
 		prompt,
 		"--activate"
 	]);
-	return basename(WorktreeResultSchema.parse(result).worktree.path);
+	if (!reply.ok) throw new Error(reply.code === REPO_NOT_FOUND ? unknownRepo(repoDir) : reply.message);
+	return basename(WorktreeResultSchema.parse(reply.result).worktree.path);
 };
 var DEFAULT_ATTEMPTS_PER_RUN = 5;
 var DEFAULT_RUNS_PER_TICKET = 3;
@@ -2467,6 +2487,7 @@ var createProjectViewSource = async ({ cwd, env }) => {
 		maxRetries: MAX_RETRIES
 	});
 	const orca = createCommandRunner("orca");
+	const runGit = createCommandRunner("git");
 	return createViewSource({
 		providers: [{
 			name: TICKET_PROVIDER_NAMES[supportedProvider(adapters).kind],
@@ -2479,7 +2500,7 @@ var createProjectViewSource = async ({ cwd, env }) => {
 		openWorktree: createOrcaWorktreeOpener({ run: orca }),
 		startWorktree: createOrcaWorktreeStarter({
 			run: orca,
-			projectDir: cwd
+			git: (args) => runGit(args, { cwd })
 		})
 	});
 };
