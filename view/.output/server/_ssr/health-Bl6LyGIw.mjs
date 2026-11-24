@@ -1,7 +1,7 @@
-import { Health, Route$1 } from "./router-D1hXzNJ-.mjs";
+import { Health, Route$1 } from "./router-Bi3COU6h.mjs";
 import { useNavigate } from "../_libs/@tanstack/react-router+[3...].mjs";
 import { require_jsx_runtime } from "../_libs/@tanstack/react-router+[...].mjs";
-// node_modules/.nitro/vite/services/ssr/assets/health-T9xSuxnr.js
+// node_modules/.nitro/vite/services/ssr/assets/health-Bl6LyGIw.js
 var import_jsx_runtime = require_jsx_runtime();
 function HealthRoute() {
 	const result = Route$1.useLoaderData();

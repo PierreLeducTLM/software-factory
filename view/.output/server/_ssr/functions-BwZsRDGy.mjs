@@ -7,7 +7,7 @@ import { hostname } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-// node_modules/.nitro/vite/services/ssr/assets/functions-Cwmm4w8P.js
+// node_modules/.nitro/vite/services/ssr/assets/functions-BwZsRDGy.js
 var import_dist = require_dist();
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
@@ -46,6 +46,24 @@ object({ state: _enum([
 	"INPROGRESS",
 	"STOPPED"
 ]) });
+object({ values: array(object({
+	kind: string(),
+	pattern: string().optional(),
+	branch_match_kind: string().optional(),
+	branch_type: string().optional()
+})) });
+object({
+	values: array(object({
+		status: string(),
+		new: object({ path: string() }).nullable().optional()
+	})),
+	next: string().optional()
+});
+var ModelBranchSchema = object({ branch: object({ name: string() }).nullable().optional() }).nullable().optional();
+object({
+	development: ModelBranchSchema,
+	production: ModelBranchSchema
+});
 object({ error: object({ message: string() }) });
 object({
 	number: number(),
@@ -70,6 +88,22 @@ object({
 	errors: array(object({ message: string() })).optional(),
 	data: unknown().optional()
 });
+object({
+	content: string(),
+	encoding: literal("base64")
+});
+object({
+	contexts: array(string()).default([]),
+	checks: array(object({ context: string() })).default([])
+});
+array(object({
+	type: string(),
+	parameters: object({ required_status_checks: array(object({ context: string() })).optional() }).optional()
+}));
+array(object({
+	filename: string(),
+	status: string()
+}));
 object({ revertPullRequest: object({ revertPullRequest: object({ number: number() }) }) });
 var TOO_MANY_REQUESTS = 429;
 var DEFAULT_WAIT_SECONDS = 5;
@@ -1108,6 +1142,20 @@ var RunRevertSchema = object({
 	needed: boolean().optional(),
 	merged: boolean().optional()
 });
+var RunTasksSchema = object({
+	total: number().int().min(0),
+	path: string(),
+	commit: string(),
+	open: array(object({
+		text: string(),
+		note: string().optional()
+	})),
+	accepted: array(object({
+		text: string(),
+		by: string(),
+		at: string()
+	}))
+});
 var RunSchema = object({
 	claimant: string(),
 	machine: string(),
@@ -1143,6 +1191,7 @@ var RunSchema = object({
 		passed: boolean(),
 		detail: string().optional()
 	}).optional(),
+	tasks: RunTasksSchema.optional(),
 	compacted: boolean().optional()
 });
 var FactoryStateSchema = _enum([
@@ -1427,6 +1476,14 @@ var buildHealth = (tickets, options) => {
 		providers: [...new Set(tickets.map((ticket) => ticket.provider))].map((provider) => providerHealth(provider, known.filter((entry) => entry.provider === provider).map(({ record }) => record), options))
 	};
 };
+var acceptanceOf = ({ accepted }, task) => accepted.find((acceptance) => acceptance.text === task.text);
+var unacceptedTasks = (tasks) => tasks.open.filter((task) => acceptanceOf(tasks, task) === void 0);
+var peopleList = (people) => {
+	const unique = [...new Set(people)];
+	const last = unique.at(-1) ?? "";
+	return unique.length <= 1 ? last : `${unique.slice(0, -1).join(", ")} and ${last}`;
+};
+var acceptorsOf = (tasks) => [...new Set(tasks.open.flatMap((task) => acceptanceOf(tasks, task)?.by ?? []))];
 var COLUMNS = [
 	{
 		id: "available",
@@ -1472,6 +1529,7 @@ var CATEGORY_ORDER = [
 	"interrupted",
 	"record_edited",
 	"sent_back",
+	"open_tasks",
 	"merge",
 	"approve",
 	"not_started"
@@ -1485,7 +1543,7 @@ var STEP_COLUMNS = {
 	diagnose: "build"
 };
 var VERIFY = "openspec-verify";
-var SHOWN_ATTEMPTS = 2;
+var SHOWN_ATTEMPTS = 1;
 var MS_PER_HOUR = 36e5;
 var plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 var FACTORY_STATES = [
@@ -1557,6 +1615,16 @@ var mergeNote = ({ run }) => {
 	if (merge.refused !== void 0) return "Auto-merge refused";
 	return merge.route === "auto" ? AUTO_MERGE_ON : "Would have auto-merged";
 };
+var openTasksNote = (tasks) => {
+	const open = unacceptedTasks(tasks).length;
+	return open === 0 ? void 0 : `${open} of ${tasks.total} tasks open`;
+};
+var acceptedNote = (tasks) => {
+	const accepted = tasks.open.length - unacceptedTasks(tasks).length;
+	return accepted === 0 ? void 0 : `${plural(accepted, "task")} accepted open by ${peopleList(acceptorsOf(tasks))}`;
+};
+var tasksNotes = ({ run }) => run?.tasks === void 0 ? [] : [openTasksNote(run.tasks), acceptedNote(run.tasks)].filter((note) => note !== void 0);
+var pullRequestNote = (entry) => [...tasksNotes(entry), mergeNote(entry)].join(" · ");
 var doneNote = (run) => {
 	const revert = run?.revert;
 	if (revert?.merged === true) return "Reverted";
@@ -1578,7 +1646,7 @@ var noteFor = (entry, column, config) => {
 	if (column === "revalidate") return "Checking drift";
 	if (column === "build") return "Building";
 	if (column === "review") return "Reviewing";
-	if (column === "pr") return mergeNote(entry);
+	if (column === "pr") return pullRequestNote(entry);
 	return doneNote(run);
 };
 var commandFor = (entry, column, config) => {
@@ -1604,7 +1672,7 @@ var cardFor = (entry, column, { note, command }, { config, machine }) => {
 		title: ticket.title,
 		provider: ticket.provider,
 		note,
-		rows: rows.slice(-2),
+		rows: rows.slice(-1),
 		earlierAttempts: Math.max(rows.length - SHOWN_ATTEMPTS, 0),
 		interrupted: entry.interrupted,
 		recordEdited: entry.recordEdited,
@@ -1681,14 +1749,24 @@ var reasonFor = (entry, { config, now }) => {
 		};
 	}
 	if (state === "in_review") {
+		const link = run?.pullRequest === void 0 ? {} : { link: run.pullRequest.url };
+		const open = run?.tasks === void 0 ? void 0 : openTasksNote(run.tasks);
+		if (open !== void 0) return {
+			category: "open_tasks",
+			since,
+			why: `${open}. Tick them in a push, or accept them as open.`,
+			command: `factory accept-tasks ${key}`,
+			...link
+		};
 		const note = mergeNote(entry);
 		if (note === AUTO_MERGE_ON) return void 0;
 		const refused = run?.merge?.refused;
+		const accepted = run?.tasks === void 0 ? void 0 : acceptedNote(run.tasks);
 		return {
 			category: "merge",
 			since,
-			why: refused === void 0 ? `${note}.` : `${note}: ${refused}.`,
-			...run?.pullRequest === void 0 ? {} : { link: run.pullRequest.url }
+			why: [refused === void 0 ? `${note}.` : `${note}: ${refused}.`, ...accepted === void 0 ? [] : [`${accepted}.`]].join(" "),
+			...link
 		};
 	}
 	if (state === "spec_review" && record?.refinement.readyGate?.passed === true) return {
@@ -1814,6 +1892,28 @@ var outcomeSteps = (record, run) => {
 		links: []
 	}];
 };
+var taskStep = (tasks, task) => {
+	const acceptance = acceptanceOf(tasks, task);
+	const note = task.note === void 0 ? [] : task.note.split("\n");
+	if (acceptance === void 0) return {
+		label: task.text,
+		status: "fail",
+		statusName: "open",
+		lines: note,
+		links: []
+	};
+	return {
+		label: task.text,
+		status: "pass",
+		statusName: "accepted open",
+		lines: [...note, `Accepted by ${acceptance.by} on ${acceptance.at.slice(0, 10)}`],
+		links: []
+	};
+};
+var tasksSections = ({ tasks }) => tasks === void 0 || tasks.open.length === 0 ? [] : [{
+	title: `Tasks: ${tasks.total - tasks.open.length} of ${tasks.total} done`,
+	steps: tasks.open.map((task) => taskStep(tasks, task))
+}];
 var buildRunDetail = (ticket, options) => {
 	const { record, run } = describe(ticket, options);
 	if (record === void 0) return void 0;
@@ -1864,6 +1964,7 @@ var buildRunDetail = (ticket, options) => {
 				}]
 			},
 			...attempts,
+			...tasksSections(run),
 			...outcome.length === 0 ? [] : [{
 				title: "Outcome",
 				steps: outcome
@@ -2151,6 +2252,27 @@ var createDemoViewSource = ({ config, now }) => {
 		at: ago(30),
 		by: "pierre"
 	});
+	const withOpenTasks = (record) => changeLatestRun(record, (run) => ({
+		...run,
+		tasks: {
+			total: 9,
+			path: "openspec/changes/invoice-pdf-attachments/tasks.md",
+			commit: "c0ffee1",
+			open: [
+				{
+					text: "4.1 Attach the PDF to the reminder email",
+					note: "Not done: the mail provider sandbox was down"
+				},
+				{ text: "4.2 Check the attachment size limit" },
+				{ text: "4.3 Try it on a live mailbox" }
+			],
+			accepted: [{
+				text: "4.3 Try it on a live mailbox",
+				by: "maya",
+				at: ago(20)
+			}]
+		}
+	}));
 	const merged = (risk, number, mergedAgo, outcome) => changeLatestRun(endRun(delivered(risk, number, "maya", mergedAgo + 120), {
 		status: "merged",
 		at: ago(mergedAgo),
@@ -2218,6 +2340,7 @@ var createDemoViewSource = ({ config, now }) => {
 						ticket("GH-231", "Dark mode for settings", states.in_development, 20, step(step(step(step(step(claimed(approved("low"), "pierre", MACHINE, 20), "revalidate", 20, 19), "build", 19, 8), "quality", 8, 6), "verify", 6, 3), "review", 3)),
 						ticket("PAY-138", "Partial refunds", states.in_review, 30, inReview("medium", 412)),
 						ticket("ENG-88", "Retry back-off for exports", states.in_review, 30, inReview("low", 415)),
+						ticket("PAY-144", "Invoice PDF attachments", states.in_review, 30, withOpenTasks(inReview("medium", 416))),
 						ticket("PAY-133", "Multi-currency totals", states.blocked, 25, blocked),
 						ticket("PAY-147", "Tax rounding rules", states.spec_review, 60, sentBack),
 						ticket("PAY-155", "Credit notes", states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), {

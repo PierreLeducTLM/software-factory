@@ -40,7 +40,7 @@ function RootComponent() {
               </p>
             ) : null}
             <nav className="tabs" aria-label="Views">
-              <Link to="/" className="tab" activeProps={{ className: 'tab tab--active' }} activeOptions={{ exact: true }}>
+              <Link to="/" className="tab" activeProps={{ className: 'tab tab--active' }} activeOptions={{ exact: true, includeSearch: false }}>
                 Board
               </Link>
               <Link to="/needs-you" className="tab" activeProps={{ className: 'tab tab--active' }}>

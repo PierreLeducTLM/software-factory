@@ -1,8 +1,8 @@
 import { __toESM } from "../_runtime.mjs";
-import { CopyCommand, waiting } from "./router-D1hXzNJ-.mjs";
+import { CopyCommand, waiting } from "./router-Bi3COU6h.mjs";
 import { require_jsx_runtime, require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { useLoaderData } from "../_libs/@tanstack/react-router+[3...].mjs";
-// node_modules/.nitro/vite/services/ssr/assets/needs-you-BnXCbT7g.js
+// node_modules/.nitro/vite/services/ssr/assets/needs-you-DokJMIeX.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var CATEGORIES = [
@@ -12,6 +12,7 @@ var CATEGORIES = [
 	"interrupted",
 	"record_edited",
 	"sent_back",
+	"open_tasks",
 	"merge",
 	"approve",
 	"not_started"
@@ -23,6 +24,7 @@ var LABELS = {
 	interrupted: "Interrupted",
 	record_edited: "Record edited",
 	sent_back: "Sent back",
+	open_tasks: "Open tasks",
 	merge: "Ready to merge",
 	approve: "Approve spec",
 	not_started: "Not started"
@@ -34,6 +36,7 @@ var TONES = {
 	interrupted: "warn",
 	record_edited: "warn",
 	sent_back: "warn",
+	open_tasks: "warn",
 	merge: "info",
 	approve: "good",
 	not_started: "muted"
@@ -144,7 +147,7 @@ function NeedsYou({ items, now, copy }) {
 							}), item.link === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", {
 								className: "button",
 								href: item.link,
-								children: item.category === "merge" || item.category === "revert" ? "Open pull request" : "Open report"
+								children: item.category === "merge" || item.category === "open_tasks" || item.category === "revert" ? "Open pull request" : "Open report"
 							})]
 						})
 					]

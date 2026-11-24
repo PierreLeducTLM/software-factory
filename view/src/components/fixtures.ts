@@ -1,4 +1,8 @@
+import { RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
+import { createContext, createElement, useContext, type ReactNode } from 'react';
+import { render } from 'vitest-browser-react';
 import type { Card, Column, NeedsYouItem, RunDetail } from '../../../src/view/model.js';
+import { cardSearch } from './BoardScreen';
 
 export const getCard = (overrides?: Partial<Card>): Card => ({
   key: 'PAY-142',
@@ -9,10 +13,7 @@ export const getCard = (overrides?: Partial<Card>): Card => ({
   risk: 'low',
   run: { number: 1, limit: 3 },
   attempt: { number: 2, limit: 5 },
-  rows: [
-    { number: 1, build: 'pass', gate: 'fail', verify: 'pending', review: 'pending' },
-    { number: 2, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' },
-  ],
+  rows: [{ number: 2, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' }],
   earlierAttempts: 0,
   seconds: 840,
   interrupted: false,
@@ -56,3 +57,30 @@ export const getItem = (overrides?: Partial<NeedsYouItem>): NeedsYouItem => ({
 });
 
 export const textOf = (locator: { readonly element: () => Element }): string => locator.element().textContent ?? '';
+
+export const getSampleColumns = (): readonly Column[] =>
+  getColumns({
+    available: [getCard({ key: 'PIE-21', title: 'Start a worktree from the dashboard', rows: [], note: 'Available for refinement' })],
+    ready: [getCard({ key: 'ENG-90', title: 'Webhook retry policy', rows: [], note: 'Eligible for /factory-next' }), getCard({ key: 'PAY-151', title: 'Refund export', rows: [], note: 'Waiting for a developer' })],
+    build: [getCard(), getCard({ key: 'ENG-95', title: 'Audit log export', earlierAttempts: 1, risk: 'medium' })],
+    review: [getCard({ key: 'ENG-87', title: 'Retry back-off for exports', rows: [{ number: 1, build: 'pass', gate: 'pass', verify: 'pass', review: 'running' }] })],
+    pr: [getCard({ key: 'ENG-88', title: 'Currency rounding', pullRequest: 'https://github.test/pull/412' })],
+    needs_you: [
+      getCard({ key: 'PAY-147', title: 'Invoice PDF footer', note: 'Sent back with 1 question.', category: 'sent_back' }),
+      getCard({ key: 'PAY-155', title: 'Late fee reminder', note: 'The ready gate passed. Waiting for approval.', category: 'approve', risk: 'high' }),
+    ],
+    done: [getCard({ key: 'ENG-80', title: 'CSV import' }), getCard({ key: 'ENG-81', title: 'Tax report' })],
+  });
+
+const Rendered = createContext<ReactNode>(null);
+
+export const renderBoard = async (ui: ReactNode, { entries = ['/'] }: { readonly entries?: readonly string[] } = {}) => {
+  const root = createRootRoute();
+  const board = createRoute({ getParentRoute: () => root, path: '/', validateSearch: cardSearch, component: () => useContext(Rendered) });
+  const needsYou = createRoute({ getParentRoute: () => root, path: '/needs-you', component: () => createElement('h1', null, 'Needs you page') });
+  const router = createRouter({ routeTree: root.addChildren([board, needsYou]), history: createMemoryHistory({ initialEntries: [...entries], initialIndex: entries.length - 1 }), scrollRestoration: true });
+  await router.load();
+  const within = (node: ReactNode) => createElement(Rendered.Provider, { value: node }, createElement(RouterProvider, { router }));
+  const screen = await render(within(ui));
+  return { ...screen, router, rerender: (node: ReactNode) => screen.rerender(within(node)) };
+};
