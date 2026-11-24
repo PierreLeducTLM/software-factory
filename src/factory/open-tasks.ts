@@ -18,6 +18,8 @@ const INDENTED = /^\s+\S/;
 const LIST_MARKER = /^[-*+]\s+/;
 export const TASKS_CONTEXT = 'factory/tasks';
 const SECTION = '## Open tasks';
+const TASKS_FILE = 'tasks.md';
+const CHANGE_TASKS = /^openspec\/changes\/(?:archive\/)?[^/]+\/tasks\.md$/;
 const HEADING = '## ';
 
 const withNote = (open: readonly OpenTask[], line: string): readonly OpenTask[] =>
@@ -110,10 +112,23 @@ const withoutSection = (lines: readonly string[]): readonly string[] => {
 };
 
 export const withOpenTasksSection = (body: string, tasks: TaskState): string => {
-  const rest = withoutSection(body.split('\n'));
+  const newline = body.includes('\r\n') ? '\r\n' : '\n';
+  const rest = withoutSection(body.split(newline));
   const section = sectionLines(tasks);
-  if (section.length === 0) return rest.join('\n');
+  if (section.length === 0) return rest.join(newline);
   const at = rest.findIndex((line) => line.startsWith(HEADING));
-  if (at === -1) return [...trimEnd(rest), '', ...trimEnd(section)].join('\n');
-  return [...rest.slice(0, at), ...section, ...rest.slice(at)].join('\n');
+  if (at === -1) return [...trimEnd(rest), '', ...trimEnd(section)].join(newline);
+  return [...rest.slice(0, at), ...section, ...rest.slice(at)].join(newline);
+};
+
+const markdownIn = (files: readonly string[]): string => JSON.stringify(files.filter((file) => file.endsWith('.md')).toSorted());
+
+export const findTasksPath = (files: readonly string[], specFiles: readonly string[]): string | undefined => {
+  const folders = files.filter((file) => CHANGE_TASKS.test(file)).map((file) => file.slice(0, -TASKS_FILE.length));
+  const [only] = folders;
+  if (folders.length === 1 && only !== undefined) return `${only}${TASKS_FILE}`;
+  const spec = markdownIn(specFiles);
+  const matching = folders.filter((folder) => markdownIn(files.flatMap((file) => (file.startsWith(folder) ? [file.slice(folder.length)] : []))) === spec);
+  const [match] = matching;
+  return matching.length === 1 && match !== undefined ? `${match}${TASKS_FILE}` : undefined;
 };

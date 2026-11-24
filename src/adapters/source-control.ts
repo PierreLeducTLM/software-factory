@@ -45,4 +45,5 @@ export interface SourceControl {
   postStatus(status: CommitStatus): Promise<void>;
   readFileAt(request: { readonly path: string; readonly commit: string }): Promise<string | undefined>;
   requiredChecks(branch: string): Promise<RequiredChecks>;
+  changedFiles(number: number): Promise<readonly string[]>;
 }

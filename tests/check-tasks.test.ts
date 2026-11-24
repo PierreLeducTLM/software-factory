@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TicketProvider } from '../src/adapters/ticket-provider.js';
+import { advance } from '../src/factory/build-loop.js';
 import { acceptTasks, checkTasks } from '../src/factory/merge.js';
 import { PASS, getWorld, reachReview, type World } from './fakes/loop-world.js';
 
@@ -27,6 +28,22 @@ const getDelivered = async (tasks = withOpen([FIRST, SECOND])) => {
   await world.step({ verdicts: { reviewer: PASS } });
   world.git.putFile('commit-1', PATH, tasks);
   return world;
+};
+
+const SPEC_PATHS = ['proposal.md', 'design.md', 'specs/billing/spec.md'].map((file) => PATH.replace('tasks.md', file));
+
+const getDeliveredUntracked = async () => {
+  const world = await getWorld({ branchTasks: withOpen([FIRST, SECOND]) });
+  await reachReview(world);
+  await advance({ ...world.deps, readFileOnBranch: async () => undefined }, 'PAY-142', { verdicts: { reviewer: PASS } });
+  await world.tickets.addAttachment({ key: 'PAY-142', name: 'factory-failure-report-run-1.md', content: '# Failure report' });
+  return world;
+};
+
+const pushChange = (world: World, commit: string, tasks: string, others: readonly string[] = []): void => {
+  [...SPEC_PATHS, ...others].forEach((path) => world.git.putFile(commit, path, '# Spec'));
+  world.git.putFile(commit, 'src/billing/export.ts', 'export {}');
+  push(world, commit, tasks);
 };
 
 const push = (world: World, commit: string, tasks?: string): void => {
@@ -103,6 +120,19 @@ describe('checking the tasks of a pull request in CI', () => {
     expect(await world.summary()).toBe('Pull request #401 · 1 of 9 tasks open');
   });
 
+  it('still finds the ticket of a pull request whose body was edited in a browser, with CRLF line endings', async () => {
+    const world = await getDelivered();
+    await world.sourceControl.updatePullRequestBody({ number: 401, body: (await bodyOf(world)).replaceAll('\n', '\r\n') });
+    push(world, 'commit-2', withOpen([SECOND]));
+
+    const result = await checkTasks(world.deps, { pullRequest: 401 });
+
+    const body = await bodyOf(world);
+    expect(result).toMatchObject({ ok: true, action: 'checked', key: 'PAY-142', description: '1 of 9 tasks open' });
+    expect(body.split('## Open tasks')).toHaveLength(2);
+    expect(body).toContain(`## Open tasks\r\n- ${SECOND}\r\n\r\n## Decisions applied`);
+  });
+
   it('passes a pull request with no Ticket line without reading any ticket (pull request with no factory ticket)', async () => {
     const world = await getDelivered();
     world.git.push('docs/typo', 'd1');
@@ -124,6 +154,16 @@ describe('checking the tasks of a pull request in CI', () => {
     expect(world.git.statusesOf('commit-2')).toEqual([
       { context: 'factory/tasks', state: 'failure', description: 'tasks.md of PAY-142 could not be read at commit-2', link: 'memory://pull/401', commit: 'commit-2' },
     ]);
+  });
+
+  it('finds the tasks.md of the change in the pull request when delivery recorded none', async () => {
+    const world = await getDeliveredUntracked();
+    pushChange(world, 'commit-2', withOpen([SECOND]), ['openspec/changes/archive/2026-11-20-force-refresh/tasks.md']);
+
+    const result = await checkTasks(world.deps, { pullRequest: 401 });
+
+    expect(result).toMatchObject({ ok: true, action: 'checked', description: '1 of 9 tasks open', saved: true });
+    expect((await world.record()).runs[0]?.tasks).toEqual({ total: 9, path: PATH, commit: 'commit-2', open: [{ text: SECOND }], accepted: [] });
   });
 
   it('fails when no run of the ticket is linked to the pull request', async () => {
@@ -271,6 +311,16 @@ describe('accepting open tasks', () => {
     const world = await getWorld();
 
     expect(await acceptTasks(world.deps, 'PAY-999')).toEqual({ ok: false, reason: 'no_run', message: 'PAY-999 has no factory run' });
+  });
+
+  it('accepts the open tasks of a pull request whose delivery recorded no tasks', async () => {
+    const world = await getDeliveredUntracked();
+    pushChange(world, 'commit-2', withOpen([FIRST, SECOND]));
+
+    const result = await acceptTasks(world.deps, 'PAY-142');
+
+    expect(result).toMatchObject({ ok: true, accepted: [FIRST, SECOND] });
+    expect((await world.record()).runs[0]?.tasks?.path).toBe(PATH);
   });
 
   it('refuses when tasks.md cannot be read at the head commit', async () => {

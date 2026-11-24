@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runCli } from './cli.js';
 import { createSpecFolder } from './inputs.js';
-import { createRealDeps, createSetupDeps } from './real-deps.js';
+import { createRealDeps, createRealSourceControl, createSetupDeps } from './real-deps.js';
 import { setupCommand } from './setup-command.js';
 import { viewCommand } from './view-command.js';
 import { isPortFree, startDashboard, untilStopped, waitUntilListening } from './view-server.js';
@@ -38,6 +38,7 @@ process.exitCode =
     : await runCli({
   argv: process.argv.slice(2),
   deps: () => createRealDeps({ cwd: process.cwd(), env: process.env }),
+  sourceControl: () => createRealSourceControl({ cwd: process.cwd(), env: process.env }),
   folder: createSpecFolder(),
   readFile: (path) => readFile(path, 'utf8'),
   write: (line) => console.log(line),

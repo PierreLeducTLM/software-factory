@@ -48,6 +48,16 @@ export const createFakeBitbucket = ({ apiUrl, repository, now }: Options) => {
       }
     }
 
+    const diffstat = new RegExp(`^${pulls}/(\\d+)/diffstat\\?pagelen=(\\d+)(?:&page=(\\d+))?$`).exec(path);
+    if (diffstat !== null && request.method === 'GET') {
+      const all = await backend.changedFiles(Number(diffstat[1]));
+      const size = Number(diffstat[2]);
+      const page = Number(diffstat[3] ?? '1');
+      const values = all.slice((page - 1) * size, page * size).map((path) => ({ status: 'added', old: null, new: { path } }));
+      const next = page * size < all.length ? { next: `${apiUrl}${pulls}/${diffstat[1]}/diffstat?pagelen=${size}&page=${page + 1}` } : {};
+      return json(200, { values, ...next });
+    }
+
     const pull = new RegExp(`^${pulls}/(\\d+)(/merge)?$`).exec(path);
     if (pull !== null) {
       const number = Number(pull[1]);

@@ -74,6 +74,13 @@ export const createInMemorySourceControl = ({ now }: Options): { readonly source
     readFileAt: async ({ path, commit }) => state.files[`${commit}\n${path}`],
 
     requiredChecks: async (branch) => state.required[branch] ?? [],
+
+    changedFiles: async (number) => {
+      const pullRequest = find(number);
+      if (pullRequest === undefined) throw new Error(`Pull request ${number} does not exist`);
+      const prefix = `${pullRequest.headCommit}\n`;
+      return Object.keys(state.files).flatMap((key) => (key.startsWith(prefix) ? [key.slice(prefix.length)] : []));
+    },
   };
 
   const world: World = {

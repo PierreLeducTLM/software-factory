@@ -10,7 +10,7 @@ import type { Ticket } from '../src/adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig } from '../src/config/project-config.js';
 import { runCli } from '../src/cli/cli.js';
 import { createSpecFolder } from '../src/cli/inputs.js';
-import { createProjectViewSource, createRealDeps, createSampleViewSource, createSetupDeps } from '../src/cli/real-deps.js';
+import { createProjectViewSource, createRealDeps, createRealSourceControl, createSampleViewSource, createSetupDeps } from '../src/cli/real-deps.js';
 import type { SourceControl } from '../src/adapters/source-control.js';
 import type { LoopDeps } from '../src/factory/build-loop.js';
 import type { ScriptRun } from '../src/factory/checks.js';
@@ -693,6 +693,57 @@ describe('factory steps run from CI', () => {
     });
   });
 
+  it('passes a pull request with no factory ticket even when the tracker secret is missing, reading it with source control alone', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.push('deps/bump', 'b1');
+    const other = await cli.sourceControl.openPullRequest({ branch: 'deps/bump', base: 'main', title: 'Bump zod', body: 'Bumps zod' });
+    const out: string[] = [];
+    const errors: string[] = [];
+    const runWith = (number: number) =>
+      runCli({
+        argv: ['check-tasks', '--pull-request', String(number)],
+        deps: async () => {
+          throw new Error('Set the LINEAR_API_KEY environment variable');
+        },
+        sourceControl: async () => cli.sourceControl,
+        folder: createSpecFolder(),
+        readFile: async () => '',
+        write: (line) => void out.push(line),
+        writeError: (line) => void errors.push(line),
+      });
+
+    const passed = await runWith(other.number);
+    const factory = await runWith(401);
+
+    expect([passed, factory]).toEqual([0, 0]);
+    expect(out).toEqual(['No factory ticket']);
+    expect(errors).toEqual(['Set the LINEAR_API_KEY environment variable', 'The factory step was skipped. The build is not affected.']);
+    expect(cli.git.statusesOf('b1')).toMatchObject([{ context: 'factory/tasks', state: 'success', description: 'No factory ticket' }]);
+  });
+
+  it('reads with source control alone only to check tasks', async () => {
+    const cli = await getDeliveredCli();
+    cli.git.push('deps/bump', 'b1');
+    const other = await cli.sourceControl.openPullRequest({ branch: 'deps/bump', base: 'main', title: 'Bump zod', body: 'Bumps zod' });
+    const errors: string[] = [];
+
+    const code = await runCli({
+      argv: ['record-merge', '--pull-request', String(other.number)],
+      deps: async () => {
+        throw new Error('Set the LINEAR_API_KEY environment variable');
+      },
+      sourceControl: async () => cli.sourceControl,
+      folder: createSpecFolder(),
+      readFile: async () => '',
+      write: () => undefined,
+      writeError: (line) => void errors.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(errors).toEqual(['Set the LINEAR_API_KEY environment variable', 'The factory step was skipped. The build is not affected.']);
+    expect(cli.git.statusesOf('b1')).toEqual([]);
+  });
+
   it('needs the pull request number to check the tasks', async () => {
     const cli = await getDeliveredCli();
 
@@ -820,6 +871,13 @@ describe('setting the command line up in a project', () => {
     expect(data.providers).toEqual(['Sample data']);
     expect(data.columns.flatMap((column) => column.cards).length).toBe(29);
     expect(data.loadedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it('reads pull requests with the source control token alone, without the tracker secret', async () => {
+    const cwd = getProjectFolder({ 'factory.yaml': FACTORY_YAML, 'adapters.yaml': ADAPTERS_YAML });
+
+    await expect(createRealSourceControl({ cwd, env: { GH_TOKEN: 'gh-secret' } })).resolves.toHaveProperty('postStatus');
+    await expect(createRealSourceControl({ cwd, env: {} })).rejects.toThrow('Set the GH_TOKEN environment variable');
   });
 
   it('lists every problem in a config file on its own line', async () => {

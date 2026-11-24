@@ -163,4 +163,20 @@ describe('GitHub source control', () => {
       `GitHub answered ${status} to GET /repos/acme/billing-service/contents/openspec/tasks.md?ref=c1`,
     );
   });
+
+  it('lists the files of a pull request page by page, leaving out the ones it removes', async () => {
+    const requested: string[] = [];
+    const http: Http = async (request) => {
+      requested.push(request.url);
+      const page = Number(new URL(request.url).searchParams.get('page'));
+      const files = page === 1 ? Array.from({ length: 100 }, (_, index) => ({ filename: `src/f${index}.ts`, status: 'modified' })) : [{ filename: 'old.ts', status: 'removed' }, { filename: 'tasks.md', status: 'added' }];
+      return { status: 200, headers: {}, body: JSON.stringify(files) };
+    };
+
+    const files = await getDirect(http).changedFiles(7);
+
+    expect(files).toHaveLength(101);
+    expect(files.at(-1)).toBe('tasks.md');
+    expect(requested).toEqual([`${API_URL}/repos/acme/billing-service/pulls/7/files?per_page=100&page=1`, `${API_URL}/repos/acme/billing-service/pulls/7/files?per_page=100&page=2`]);
+  });
 });

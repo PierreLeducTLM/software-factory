@@ -12,9 +12,11 @@ import {
   type StatusResult,
 } from '../factory/refinement.js';
 import { advance, type AdvanceInput, type AdvanceResult, type LoopDeps } from '../factory/build-loop.js';
+import type { SourceControl } from '../adapters/source-control.js';
 import {
   acceptTasks,
   checkTasks,
+  checkWithoutTicket,
   recordMerge,
   revertMerge,
   watchRun,
@@ -30,6 +32,7 @@ import type { SpecFolder } from './inputs.js';
 type CliOptions = {
   readonly argv: readonly string[];
   readonly deps: () => Promise<LoopDeps>;
+  readonly sourceControl?: () => Promise<SourceControl>;
   readonly folder: SpecFolder;
   readonly readFile: (path: string) => Promise<string>;
   readonly write: (line: string) => void;
@@ -243,12 +246,38 @@ const parse = (argv: readonly string[]): Command | undefined => {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-export const runCli = async ({ argv, deps, folder, readFile, write, writeError }: CliOptions): Promise<number> => {
+type Printer = Pick<CliOptions, 'argv' | 'write' | 'writeError'>;
+
+const print = ({ argv, write, writeError }: Printer, { result, lines, succeeded }: Outcome): number => {
+  if (argv.includes('--json')) {
+    write(JSON.stringify(result));
+  } else if ('message' in result && typeof result.message === 'string') {
+    [result.message, ...lines].forEach(writeError);
+  } else {
+    lines.forEach(write);
+  }
+  return succeeded ? OK : REFUSED;
+};
+
+const withoutTicket = async ({ argv, sourceControl }: Pick<CliOptions, 'argv' | 'sourceControl'>): Promise<Outcome | undefined> => {
+  const [name, flag, given] = argv;
+  if (name !== 'check-tasks' || flag !== '--pull-request' || sourceControl === undefined || !/^\d+$/.test(given ?? '')) return undefined;
+  const checked = await sourceControl()
+    .then((source) => checkWithoutTicket(source, { pullRequest: Number(given) }))
+    .catch(() => undefined);
+  return checked === undefined ? undefined : checkTasksOutcome(checked);
+};
+
+export const runCli = async (options: CliOptions): Promise<number> => {
+  const { argv, deps, folder, readFile, writeError } = options;
   const command = parse(argv);
   if (command === undefined) {
     USAGE.forEach(writeError);
     return USAGE_ERROR;
   }
+
+  const unticketed = await withoutTicket(options);
+  if (unticketed !== undefined) return print(options, unticketed);
 
   const built = await deps().then(
     (value) => ({ ok: true as const, value }),
@@ -271,13 +300,5 @@ export const runCli = async ({ argv, deps, folder, readFile, write, writeError }
     return inCi ? OK : REFUSED;
   }
 
-  const { result, lines, succeeded } = ran.value;
-  if (argv.includes('--json')) {
-    write(JSON.stringify(result));
-  } else if ('message' in result && typeof result.message === 'string') {
-    [result.message, ...lines].forEach(writeError);
-  } else {
-    lines.forEach(write);
-  }
-  return succeeded ? OK : REFUSED;
+  return print(options, ran.value);
 };

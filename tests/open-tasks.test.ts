@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextTasks, parseTasks, tasksStatus, withOpenTasksSection } from '../src/factory/open-tasks.js';
+import { findTasksPath, nextTasks, parseTasks, tasksStatus, withOpenTasksSection } from '../src/factory/open-tasks.js';
 import type { RunTasks } from '../src/record/ticket-record.js';
 
 const getMockTasks = (overrides?: Partial<RunTasks>): RunTasks => ({
@@ -191,7 +191,37 @@ describe('the Open tasks section of the pull request body', () => {
     expect(withOpenTasksSection('Ticket: PIE-47\n  ', getMockTasks({ open: [{ text: '4.2 Update the docs' }] }))).toBe('Ticket: PIE-47\n\n## Open tasks\n- 4.2 Update the docs');
   });
 
+  it('replaces the section of a body edited in a browser, keeping its CRLF line endings', () => {
+    const edited = withOpenTasksSection(BODY, getMockTasks()).replaceAll('\n', '\r\n');
+
+    const after = withOpenTasksSection(edited, getMockTasks({ open: [{ text: '4.2 Update the docs' }] }));
+
+    expect(after).toBe(BODY.replace('## Decisions applied', '## Open tasks\n- 4.2 Update the docs\n\n## Decisions applied').replaceAll('\n', '\r\n'));
+  });
+
   it('removes a section that ends the body', () => {
     expect(withOpenTasksSection('Ticket: PIE-47\n\n## Open tasks\n- 4.2 Update the docs', getMockTasks({ open: [] }))).toBe('Ticket: PIE-47');
+  });
+});
+
+describe('finding the tasks.md of a change among the files of a pull request', () => {
+  const SPEC = ['proposal.md', 'design.md', 'tasks.md', 'specs/billing/spec.md'];
+  const folder = (path: string, files: readonly string[] = SPEC): readonly string[] => files.map((file) => `${path}/${file}`);
+
+  it('takes the only tasks.md of a change folder, archived or not', () => {
+    expect(findTasksPath(['src/x.ts', ...folder('openspec/changes/archive/2026-11-21-billing-export')], SPEC)).toBe('openspec/changes/archive/2026-11-21-billing-export/tasks.md');
+    expect(findTasksPath(['src/x.ts', 'tasks.md', ...folder('openspec/changes/billing-export')], SPEC)).toBe('openspec/changes/billing-export/tasks.md');
+  });
+
+  it('picks the change whose files are the spec of the ticket when the pull request holds several', () => {
+    const files = [...folder('openspec/changes/archive/2026-11-20-force-refresh', ['proposal.md', 'tasks.md']), ...folder('openspec/changes/archive/2026-11-21-billing-export')];
+
+    expect(findTasksPath(files, SPEC)).toBe('openspec/changes/archive/2026-11-21-billing-export/tasks.md');
+    expect(findTasksPath([...files, 'openspec/changes/archive/2026-11-21-billing-export/.openspec.yaml'], SPEC)).toBe('openspec/changes/archive/2026-11-21-billing-export/tasks.md');
+  });
+
+  it('finds nothing when no change folder holds a tasks.md, or several match the spec', () => {
+    expect(findTasksPath(['src/x.ts', 'openspec/specs/billing/spec.md'], SPEC)).toBeUndefined();
+    expect(findTasksPath([...folder('openspec/changes/archive/2026-11-20-billing-export'), ...folder('openspec/changes/archive/2026-11-21-billing-export')], SPEC)).toBeUndefined();
   });
 });

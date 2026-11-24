@@ -45,12 +45,15 @@ const BranchRulesSchema = z.array(
   }),
 );
 
+const PullFilesSchema = z.array(z.object({ filename: z.string(), status: z.string() }));
+
 const RevertedSchema = z.object({ revertPullRequest: z.object({ revertPullRequest: z.object({ number: z.number() }) }) });
 
 type Pull = z.infer<typeof PullSchema>;
 
 const NOT_FOUND = 404;
 const DESCRIPTION_LIMIT = 140;
+const FILES_PER_PAGE = 100;
 const REVERTS = /Reverts \S*#(\d+)/;
 
 const ENABLE_AUTO_MERGE = 'mutation($id: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $id }) { pullRequest { number } } }';
@@ -139,6 +142,12 @@ export const createGitHubSourceControl = ({ apiUrl, repository, token, http }: O
     return [...new Set([...protection, ...rules])];
   };
 
+  const changedFiles = async (number: number, page = 1): Promise<readonly string[]> => {
+    const files = PullFilesSchema.parse(JSON.parse((await call('GET', `${pullPath(number)}/files?per_page=${FILES_PER_PAGE}&page=${page}`)).body));
+    const rest = files.length < FILES_PER_PAGE ? [] : await changedFiles(number, page + 1);
+    return [...files.filter((file) => file.status !== 'removed').map((file) => file.filename), ...rest];
+  };
+
   return {
     openPullRequest: async ({ branch, base, title, body }) =>
       toPullRequest(PullSchema.parse(JSON.parse((await call('POST', `/repos/${repository}/pulls`, { head: branch, base, title, body })).body))),
@@ -189,5 +198,7 @@ export const createGitHubSourceControl = ({ apiUrl, repository, token, http }: O
     },
 
     requiredChecks,
+
+    changedFiles: (number) => changedFiles(number),
   };
 };

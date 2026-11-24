@@ -44,6 +44,14 @@ export const createFakeGitHub = ({ apiUrl, repository, now }: Options) => {
       }
     }
 
+    const files = new RegExp(`^${pulls}/(\\d+)/files\\?per_page=(\\d+)&page=(\\d+)$`).exec(path);
+    if (files !== null && request.method === 'GET') {
+      const all = await backend.changedFiles(Number(files[1]));
+      const size = Number(files[2]);
+      const page = Number(files[3]);
+      return json(200, all.slice((page - 1) * size, page * size).map((filename) => ({ filename, status: 'added' })));
+    }
+
     const number = Number(path.startsWith(`${pulls}/`) ? path.slice(pulls.length + 1) : Number.NaN);
     if (Number.isInteger(number)) {
       if (!['GET', 'PATCH'].includes(request.method)) return json(405, {});

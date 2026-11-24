@@ -103,6 +103,9 @@ const createTicketProvider = (adapters: AdaptersConfig, env: Options['env'], htt
   });
 };
 
+export const createRealSourceControl = async ({ cwd, env }: Options): Promise<SourceControl> =>
+  createSourceControl(await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig), env, withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES }));
+
 export const createSampleViewSource = (): ViewSource => createDemoViewSource({ config: sampleFactoryConfig(), now });
 
 export const createProjectViewSource = async ({ cwd, env }: Options): Promise<ViewSource> => {

@@ -1,10 +1,10 @@
-import type { PullRequest } from '../adapters/source-control.js';
+import type { PullRequest, SourceControl } from '../adapters/source-control.js';
 import type { Ticket } from '../adapters/ticket-provider.js';
 import { loadRecord, saveRecord } from '../record/record-store.js';
 import { appendEvent, parseComment, setState, type Run, type RunTasks, type TicketRecord } from '../record/ticket-record.js';
 import type { LoopDeps } from './build-loop.js';
 import { timeoutSecondsOf } from './checks.js';
-import { nextTasks, parseTasks, sameTasks, TASKS_CONTEXT, tasksCommitStatus, tasksStatus, unacceptedTasks, withOpenTasksSection } from './open-tasks.js';
+import { findTasksPath, nextTasks, parseTasks, sameTasks, TASKS_CONTEXT, tasksCommitStatus, tasksStatus, unacceptedTasks, withOpenTasksSection } from './open-tasks.js';
 import type { RiskLevel } from './risk.js';
 import type { FactoryDeps } from './run-lifecycle.js';
 
@@ -43,7 +43,7 @@ export type WatchResult =
 
 const PULL_REQUEST_REFERENCES = [/^Merge pull request #(\d+)\b/, /\(pull request #(\d+)\)/i, /\(#(\d+)\)\s*$/];
 const REVERTED_COMMIT = /This reverts commit ([0-9a-f]{7,40})/;
-const TICKET_LINE = /^Ticket: (\S+)$/m;
+const TICKET_LINE = /^Ticket: (\S+)\r?$/m;
 const UNKNOWN_MERGER = 'unknown';
 const SMOKE_CHECK_TIMEOUT_SECONDS = 300;
 const DETAIL_LIMIT = 500;
@@ -204,9 +204,18 @@ const readRecord = (deps: LoopDeps, key: string): Promise<TicketRecord | undefin
     () => undefined,
   );
 
+const FACTORY_ATTACHMENT = 'factory-';
+
+const tasksPathIn = async (deps: LoopDeps, key: string, pullRequest: PullRequest): Promise<string | undefined> => {
+  const files = await deps.sourceControl.changedFiles(pullRequest.number).catch(() => []);
+  const attached = await deps.tickets.listAttachments(key).catch(() => []);
+  const spec = attached.flatMap(({ name }) => (name.startsWith(FACTORY_ATTACHMENT) ? [] : [name.replaceAll('__', '/')]));
+  return findTasksPath(files, spec);
+};
+
 const readTasksAt = async (deps: LoopDeps, key: string, run: Run, pullRequest: PullRequest): Promise<ReadTasksAt> => {
   const unreadable: Unreadable = { ok: false, message: `tasks.md of ${key} could not be read at ${pullRequest.headCommit}` };
-  const path = run.tasks?.path;
+  const path = run.tasks?.path ?? (await tasksPathIn(deps, key, pullRequest));
   if (path === undefined) return unreadable;
   const text = await deps.sourceControl.readFileAt({ path, commit: pullRequest.headCommit }).catch(() => undefined);
   return text === undefined ? unreadable : { ok: true, tasks: nextTasks(run.tasks, parseTasks(text), { path, commit: pullRequest.headCommit }) };
@@ -228,21 +237,30 @@ const linkedRun = async (deps: LoopDeps, key: string, pullRequest: PullRequest):
   return run === undefined ? { ok: false, message: `No run of ${key} is linked to pull request ${pullRequest.number}` } : { ok: true, record, index, run };
 };
 
-export const checkTasks = async (deps: LoopDeps, { pullRequest: number }: { readonly pullRequest: number }): Promise<CheckTasksResult> => {
+type TasksCheck = { readonly pullRequest: number };
+
+const postTasks = (sourceControl: SourceControl, pullRequest: PullRequest, state: 'success' | 'failure', description: string): Promise<void> =>
+  sourceControl.postStatus({ context: TASKS_CONTEXT, state, description, link: pullRequest.url, commit: pullRequest.headCommit });
+
+export const checkWithoutTicket = async (sourceControl: SourceControl, { pullRequest: number }: TasksCheck): Promise<CheckTasksResult | undefined> => {
+  const pullRequest = await sourceControl.getPullRequest(number);
+  if (pullRequest === undefined || TICKET_LINE.test(pullRequest.body)) return undefined;
+  await postTasks(sourceControl, pullRequest, 'success', 'No factory ticket');
+  return { ok: true, action: 'no_ticket' };
+};
+
+export const checkTasks = async (deps: LoopDeps, check: TasksCheck): Promise<CheckTasksResult> => {
+  const unticketed = await checkWithoutTicket(deps.sourceControl, check);
+  if (unticketed !== undefined) return unticketed;
+  const number = check.pullRequest;
   const pullRequest = await deps.sourceControl.getPullRequest(number);
-  if (pullRequest === undefined) return { ok: false, reason: 'unreadable', message: `Pull request ${number} could not be read` };
-  const post = (state: 'success' | 'failure', description: string): Promise<void> =>
-    deps.sourceControl.postStatus({ context: TASKS_CONTEXT, state, description, link: pullRequest.url, commit: pullRequest.headCommit });
+  const key = pullRequest === undefined ? undefined : TICKET_LINE.exec(pullRequest.body)?.[1];
+  if (pullRequest === undefined || key === undefined) return { ok: false, reason: 'unreadable', message: `Pull request ${number} could not be read` };
   const fail = async (message: string): Promise<CheckTasksResult> => {
-    await post('failure', message);
+    await postTasks(deps.sourceControl, pullRequest, 'failure', message);
     return { ok: false, reason: 'unreadable', message };
   };
 
-  const key = TICKET_LINE.exec(pullRequest.body)?.[1];
-  if (key === undefined) {
-    await post('success', 'No factory ticket');
-    return { ok: true, action: 'no_ticket' };
-  }
   const linked = await linkedRun(deps, key, pullRequest);
   if (!linked.ok) return fail(linked.message);
   const read = await readTasksAt(deps, key, linked.run, pullRequest);

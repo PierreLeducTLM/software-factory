@@ -225,7 +225,6 @@ describe('Bitbucket source control', () => {
   it.each([
     [{ kind: 'require_passing_builds_to_merge', pattern: 'main', branch_match_kind: 'glob' }, true],
     [{ kind: 'require_passing_builds_to_merge', pattern: '*', branch_match_kind: 'glob' }, true],
-    [{ kind: 'require_passing_builds_to_merge', branch_match_kind: 'branching_model' }, true],
     [{ kind: 'require_passing_builds_to_merge', pattern: 'release/*', branch_match_kind: 'glob' }, false],
     [{ kind: 'require_approvals_to_merge', pattern: 'main', branch_match_kind: 'glob' }, false],
   ])('requires every build on main when a passing-builds merge check covers it: %o', async (restriction, required) => {
@@ -234,7 +233,42 @@ describe('Bitbucket source control', () => {
     expect(await sourceControl.requiredChecks('main')).toEqual(required ? ['*'] : []);
   });
 
+  const routes = (restriction: Record<string, unknown>, model: { readonly status: number; readonly body: unknown }): Http => async (request) => {
+    const answer = request.url.endsWith('/branching-model') ? model : { status: 200, body: { values: [restriction] } };
+    return { status: answer.status, headers: {}, body: JSON.stringify(answer.body) };
+  };
+
+  const MODEL = { status: 200, body: { development: { branch: { name: 'develop' }, use_mainbranch: false }, production: { branch: { name: 'main' }, use_mainbranch: true, enabled: true } } };
+
+  it.each([
+    ['production', true],
+    ['development', false],
+    ['release', false],
+  ])('counts a passing-builds merge check on the %s branch type only when the branching model puts main there', async (branchType, required) => {
+    const restriction = { kind: 'require_passing_builds_to_merge', branch_match_kind: 'branching_model', branch_type: branchType };
+
+    expect(await getDirect(routes(restriction, MODEL)).requiredChecks('main')).toEqual(required ? ['*'] : []);
+  });
+
+  it.each([400, 403])('cannot tell the required checks when the branching model answers %i', async (status) => {
+    const restriction = { kind: 'require_passing_builds_to_merge', branch_match_kind: 'branching_model', branch_type: 'production' };
+
+    expect(await getDirect(routes(restriction, { status, body: {} })).requiredChecks('main')).toBe('unreadable');
+  });
+
   it.each([400, 403])('cannot tell the required checks when Bitbucket answers %i about the branch restrictions', async (status) => {
     expect(await getDirect(answering(status, {})).requiredChecks('main')).toBe('unreadable');
+  });
+
+  it('lists the files of a pull request, following the next page and leaving out the ones it removes', async () => {
+    const next = `${API_URL}/repositories/acme/billing-service/pullrequests/7/diffstat?pagelen=500&page=2`;
+    const http: Http = async (request) => {
+      const body = request.url === next
+        ? { values: [{ status: 'removed', old: { path: 'old.ts' }, new: null }, { status: 'renamed', old: { path: 'a.md' }, new: { path: 'tasks.md' } }] }
+        : { values: [{ status: 'modified', old: { path: 'src/x.ts' }, new: { path: 'src/x.ts' } }], next };
+      return { status: 200, headers: {}, body: JSON.stringify(body) };
+    };
+
+    expect(await getDirect(http).changedFiles(7)).toEqual(['src/x.ts', 'tasks.md']);
   });
 });

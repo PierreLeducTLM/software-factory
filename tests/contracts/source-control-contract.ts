@@ -192,6 +192,15 @@ export const describeSourceControlContract = (
       expect(await sourceControl.readFileAt({ path: 'openspec/changes/archive/2026-11-21-billing-export/design.md', commit: 'c1' })).toBeUndefined();
     });
 
+    it('lists the files a pull request adds or changes', async () => {
+      const context = setup();
+      context.world.putFile('c1', 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', '- [ ] 1.1 Open\n');
+      context.world.putFile('c1', 'src/billing/export.ts', 'export {}\n');
+      const pullRequest = await open(context);
+
+      expect((await context.sourceControl.changedFiles(pullRequest.number)).toSorted()).toEqual(['openspec/changes/archive/2026-11-21-billing-export/tasks.md', 'src/billing/export.ts']);
+    });
+
     it('says whether a check is required on a branch, or that it cannot tell', async () => {
       const { sourceControl, world } = setup();
 
