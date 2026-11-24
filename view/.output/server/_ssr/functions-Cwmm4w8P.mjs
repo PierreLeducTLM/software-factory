@@ -1,13 +1,13 @@
 import { TSS_SERVER_FUNCTION, createServerFn } from "./ssr.mjs";
 import { _enum, array, boolean, discriminatedUnion, literal, number, object, string, tuple, unknown } from "../_libs/zod.mjs";
 import { require_dist } from "../_libs/yaml.mjs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-// node_modules/.nitro/vite/services/ssr/assets/functions-DuCb7d0Z.js
+// node_modules/.nitro/vite/services/ssr/assets/functions-Cwmm4w8P.js
 var import_dist = require_dist();
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
@@ -653,7 +653,7 @@ var EnvelopeSchema = discriminatedUnion("ok", [object({
 		message: string()
 	})
 })]);
-object({ worktree: object({
+var WorktreeResultSchema = object({ worktree: object({
 	id: string(),
 	path: string(),
 	branch: string(),
@@ -692,6 +692,29 @@ var createOrcaWorktreeOpener = ({ run }) => async (worktreeId) => {
 		"--worktree",
 		`id:${worktreeId}`
 	]);
+};
+var TICKET_LINKS = {
+	linear: "--linear-issue",
+	jira: "--reference"
+};
+var createOrcaWorktreeStarter = ({ run, projectDir }) => async ({ name, prompt, ticket }) => {
+	const link = [TICKET_LINKS[ticket.tracker], ticket.key];
+	const result = await demandOfOrca(run, [
+		"worktree",
+		"create",
+		"--repo",
+		`path:${projectDir}`,
+		"--name",
+		name,
+		"--no-parent",
+		...link,
+		"--agent",
+		"claude",
+		"--prompt",
+		prompt,
+		"--activate"
+	]);
+	return basename(WorktreeResultSchema.parse(result).worktree.path);
 };
 var DEFAULT_ATTEMPTS_PER_RUN = 5;
 var DEFAULT_RUNS_PER_TICKET = 3;
@@ -1194,7 +1217,7 @@ var recordReadyGate = (record, { passed, fingerprint, findings, at, by }) => app
 	type: "ready_gate",
 	detail: passed ? "passed" : "failed"
 });
-var startRun = (record, { claimant, machine, worktreeId, at, attemptLimit }) => appendEvent({
+var startRun$1 = (record, { claimant, machine, worktreeId, at, attemptLimit }) => appendEvent({
 	...record,
 	runs: [...record.runs, {
 		claimant,
@@ -1900,7 +1923,9 @@ var RUNNING_COLUMNS = [
 	"build",
 	"review"
 ];
-var createViewSource = ({ providers, config, repository, machine, now, openWorktree }) => {
+var NEXT_COMMAND = "/factory-next";
+var messageOf$1 = (error) => error instanceof Error ? error.message : String(error);
+var createViewSource = ({ providers, config, repository, machine, now, openWorktree, startWorktree }) => {
 	const store = createViewStore({
 		providers,
 		states: config.states,
@@ -1970,8 +1995,35 @@ var createViewSource = ({ providers, config, repository, machine, now, openWorkt
 			};
 			return openWorktree(run.worktreeId).then(() => ({ ok: true }), (error) => ({
 				ok: false,
-				message: `Orca could not open the run: ${error instanceof Error ? error.message : String(error)}`
+				message: `Orca could not open the run: ${messageOf$1(error)}`
 			}));
+		},
+		startInOrca: async ({ key, command }) => {
+			await fresh();
+			const refused = (message) => ({
+				ok: false,
+				message: `Orca could not start ${key}: ${message}`
+			});
+			const startable = buildBoard(store.snapshot().tickets, {
+				config,
+				now: now(),
+				machine,
+				repository
+			}).flatMap((column) => column.cards).filter((card) => card.key === key && card.command !== void 0 && !card.onThisMachine);
+			if (startable.length === 0) return refused(`${key} has nothing to start in a new worktree.`);
+			const card = startable.find((candidate) => candidate.command === command);
+			if (card === void 0) return refused(`${key} changed since this panel opened. Reopen it to see what to run.`);
+			return startWorktree({
+				name: key.toLowerCase(),
+				prompt: command === NEXT_COMMAND ? `/factory-run ${key}` : command,
+				ticket: {
+					key,
+					tracker: card.provider === TICKET_PROVIDER_NAMES.linear ? "linear" : "jira"
+				}
+			}).then((worktree) => ({
+				ok: true,
+				worktree
+			}), (error) => refused(messageOf$1(error)));
 		},
 		health: async (periodDays) => {
 			const at = now();
@@ -1991,6 +2043,7 @@ var createViewSource = ({ providers, config, repository, machine, now, openWorkt
 var REPOSITORY = "acme/billing-service";
 var MACHINE = "this-machine";
 var MINUTE = 6e4;
+var NO_ORCA = "This is sample data, with no Orca session behind it.";
 var createDemoViewSource = ({ config, now }) => {
 	const start = Date.parse(now());
 	const ago = (minutes) => (/* @__PURE__ */ new Date(start - minutes * MINUTE)).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -2007,7 +2060,7 @@ var createDemoViewSource = ({ config, now }) => {
 		fingerprint: "demo",
 		predictedRisk: risk
 	});
-	const claimed = (record, claimant, machine, minutesAgo) => startRun(record, {
+	const claimed = (record, claimant, machine, minutesAgo) => startRun$1(record, {
 		claimant,
 		machine,
 		worktreeId: `wt-${claimant}`,
@@ -2148,68 +2201,75 @@ var createDemoViewSource = ({ config, now }) => {
 		}) }
 	});
 	const { states, labels } = config;
-	return createViewSource({
-		providers: [{
-			name: "Sample data",
-			provider: createInMemoryTicketProvider({
-				tickets: [
-					ticket("PAY-160", "Late payment reminders", states.to_refine, 1440, void 0, [labels.available]),
-					ticket("PAY-161", "Customer portal redesign", states.to_refine, 4300, void 0),
-					ticket("PAY-151", "Export invoices to CSV", states.ready_for_dev, 2880, approved("low")),
-					ticket("ENG-90", "Rate-limit the public API", states.ready_for_dev, 180, approved("medium"), [labels.auto]),
-					ticket("PAY-149", "Validate customer addresses", states.in_development, 1, step(claimed(approved("low"), "pierre", MACHINE, 1), "revalidate", 1)),
-					ticket("PAY-142", "Bulk invoice export", states.in_development, 41, step(firstAttemptFailed(claimed(approved("low"), "pierre", MACHINE, 41)), "build", 6)),
-					ticket("ENG-87", "Webhook retry policy", states.in_development, 5, step(step(claimed(approved("medium"), "maya", "maya-mbp", 5), "revalidate", 5, 4), "build", 4)),
-					ticket("ENG-95", "Audit log export", states.in_development, 95, step(step(claimed(approved("low"), "sam", "sam-mbp", 95), "revalidate", 95, 94), "build", 94)),
-					ticket("GH-231", "Dark mode for settings", states.in_development, 20, step(step(step(step(step(claimed(approved("low"), "pierre", MACHINE, 20), "revalidate", 20, 19), "build", 19, 8), "quality", 8, 6), "verify", 6, 3), "review", 3)),
-					ticket("PAY-138", "Partial refunds", states.in_review, 30, inReview("medium", 412)),
-					ticket("ENG-88", "Retry back-off for exports", states.in_review, 30, inReview("low", 415)),
-					ticket("PAY-133", "Multi-currency totals", states.blocked, 25, blocked),
-					ticket("PAY-147", "Tax rounding rules", states.spec_review, 60, sentBack),
-					ticket("PAY-155", "Credit notes", states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), {
-						passed: true,
-						fingerprint: "demo",
-						findings: [],
-						at: ago(180),
-						by: "pierre"
-					})),
-					ticket("PAY-158", "Discount codes", states.spec_review, 45, recordReadyGate(createRecord({ repository: REPOSITORY }), {
-						passed: false,
-						fingerprint: "demo",
-						findings: ["The spec has 1 open question."],
-						at: ago(45),
-						by: "pierre"
-					}), [labels.available]),
-					ticket("PAY-130", "Billing rules v2", states.done, 300, merged("high", 398, 300, { asIs: true })),
-					ticket("PAY-128", "Invoice footer text", states.done, 1500, merged("low", 396, 1500, { asIs: true })),
-					ticket("PAY-127", "Currency symbol placement", states.done, 2900, merged("low", 395, 2900, { asIs: true })),
-					ticket("ENG-84", "Pagination for audit log", states.done, 4300, merged("low", 392, 4300, { asIs: false })),
-					ticket("ENG-82", "Export file naming", states.done, 5700, merged("low", 390, 5700, {
-						asIs: true,
-						revert: {
-							at: ago(5e3),
-							by: "pull request 391",
-							merged: true
-						}
-					})),
-					ticket("ENG-85", "Cache invoice totals", states.done, 200, merged("medium", 397, 200, {
-						asIs: true,
-						revert: {
-							at: ago(90),
-							by: "the staging watch failed on ./smoke.sh",
-							needed: true
-						}
-					}))
-				],
-				now
-			})
-		}],
-		config,
-		repository: REPOSITORY,
-		machine: MACHINE,
-		now,
-		openWorktree: () => Promise.reject(/* @__PURE__ */ new Error("This is sample data, with no Orca session behind it."))
-	});
+	return {
+		...createViewSource({
+			providers: [{
+				name: "Sample data",
+				provider: createInMemoryTicketProvider({
+					tickets: [
+						ticket("PAY-160", "Late payment reminders", states.to_refine, 1440, void 0, [labels.available]),
+						ticket("PAY-161", "Customer portal redesign", states.to_refine, 4300, void 0),
+						ticket("PAY-151", "Export invoices to CSV", states.ready_for_dev, 2880, approved("low")),
+						ticket("ENG-90", "Rate-limit the public API", states.ready_for_dev, 180, approved("medium"), [labels.auto]),
+						ticket("PAY-149", "Validate customer addresses", states.in_development, 1, step(claimed(approved("low"), "pierre", MACHINE, 1), "revalidate", 1)),
+						ticket("PAY-142", "Bulk invoice export", states.in_development, 41, step(firstAttemptFailed(claimed(approved("low"), "pierre", MACHINE, 41)), "build", 6)),
+						ticket("ENG-87", "Webhook retry policy", states.in_development, 5, step(step(claimed(approved("medium"), "maya", "maya-mbp", 5), "revalidate", 5, 4), "build", 4)),
+						ticket("ENG-95", "Audit log export", states.in_development, 95, step(step(claimed(approved("low"), "sam", "sam-mbp", 95), "revalidate", 95, 94), "build", 94)),
+						ticket("GH-231", "Dark mode for settings", states.in_development, 20, step(step(step(step(step(claimed(approved("low"), "pierre", MACHINE, 20), "revalidate", 20, 19), "build", 19, 8), "quality", 8, 6), "verify", 6, 3), "review", 3)),
+						ticket("PAY-138", "Partial refunds", states.in_review, 30, inReview("medium", 412)),
+						ticket("ENG-88", "Retry back-off for exports", states.in_review, 30, inReview("low", 415)),
+						ticket("PAY-133", "Multi-currency totals", states.blocked, 25, blocked),
+						ticket("PAY-147", "Tax rounding rules", states.spec_review, 60, sentBack),
+						ticket("PAY-155", "Credit notes", states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), {
+							passed: true,
+							fingerprint: "demo",
+							findings: [],
+							at: ago(180),
+							by: "pierre"
+						})),
+						ticket("PAY-158", "Discount codes", states.spec_review, 45, recordReadyGate(createRecord({ repository: REPOSITORY }), {
+							passed: false,
+							fingerprint: "demo",
+							findings: ["The spec has 1 open question."],
+							at: ago(45),
+							by: "pierre"
+						}), [labels.available]),
+						ticket("PAY-130", "Billing rules v2", states.done, 300, merged("high", 398, 300, { asIs: true })),
+						ticket("PAY-128", "Invoice footer text", states.done, 1500, merged("low", 396, 1500, { asIs: true })),
+						ticket("PAY-127", "Currency symbol placement", states.done, 2900, merged("low", 395, 2900, { asIs: true })),
+						ticket("ENG-84", "Pagination for audit log", states.done, 4300, merged("low", 392, 4300, { asIs: false })),
+						ticket("ENG-82", "Export file naming", states.done, 5700, merged("low", 390, 5700, {
+							asIs: true,
+							revert: {
+								at: ago(5e3),
+								by: "pull request 391",
+								merged: true
+							}
+						})),
+						ticket("ENG-85", "Cache invoice totals", states.done, 200, merged("medium", 397, 200, {
+							asIs: true,
+							revert: {
+								at: ago(90),
+								by: "the staging watch failed on ./smoke.sh",
+								needed: true
+							}
+						}))
+					],
+					now
+				})
+			}],
+			config,
+			repository: REPOSITORY,
+			machine: MACHINE,
+			now,
+			openWorktree: () => Promise.reject(/* @__PURE__ */ new Error(NO_ORCA)),
+			startWorktree: () => Promise.reject(/* @__PURE__ */ new Error(NO_ORCA))
+		}),
+		startInOrca: async ({ key }) => ({
+			ok: false,
+			message: `Orca could not start ${key}: ${NO_ORCA}`
+		})
+	};
 };
 object({
 	code: number(),
@@ -2283,6 +2343,7 @@ var createProjectViewSource = async ({ cwd, env }) => {
 		sleep,
 		maxRetries: MAX_RETRIES
 	});
+	const orca = createCommandRunner("orca");
 	return createViewSource({
 		providers: [{
 			name: TICKET_PROVIDER_NAMES[supportedProvider(adapters).kind],
@@ -2292,7 +2353,11 @@ var createProjectViewSource = async ({ cwd, env }) => {
 		repository: adapters.repository,
 		machine: hostname(),
 		now,
-		openWorktree: createOrcaWorktreeOpener({ run: createCommandRunner("orca") })
+		openWorktree: createOrcaWorktreeOpener({ run: orca }),
+		startWorktree: createOrcaWorktreeStarter({
+			run: orca,
+			projectDir: cwd
+		})
 	});
 };
 var holder = {};
@@ -2352,6 +2417,15 @@ var openRun_createServerFn_handler = createServerRpc({
 	filename: "src/server/functions.ts"
 }, (opts) => openRun.__executeServer(opts));
 var openRun = createServerFn({ method: "POST" }).validator((key) => key).handler(openRun_createServerFn_handler, async ({ data }) => (await getSource()).openInOrca(data));
+var startRun_createServerFn_handler = createServerRpc({
+	id: "d2af39f86abab94aaeb8033b5f23f8fa0de3c2e25186d97758dad4cbf0fad499",
+	name: "startRun",
+	filename: "src/server/functions.ts"
+}, (opts) => startRun.__executeServer(opts));
+var startRun = createServerFn({ method: "POST" }).validator((request) => ({
+	key: String(request.key),
+	command: String(request.command)
+})).handler(startRun_createServerFn_handler, async ({ data }) => (await getSource()).startInOrca(data));
 var PERIODS = [
 	7,
 	30,
@@ -2375,4 +2449,4 @@ var fetchHealth = createServerFn({ method: "GET" }).validator((days) => PERIODS.
 		};
 	}
 });
-export { fetchDetail_createServerFn_handler, fetchHealth_createServerFn_handler, fetchView_createServerFn_handler, openRun_createServerFn_handler, reloadView_createServerFn_handler };
+export { fetchDetail_createServerFn_handler, fetchHealth_createServerFn_handler, fetchView_createServerFn_handler, openRun_createServerFn_handler, reloadView_createServerFn_handler, startRun_createServerFn_handler };

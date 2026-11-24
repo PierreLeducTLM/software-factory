@@ -92,44 +92,44 @@ var public_assets_data_default = {
 	"/assets/CopyCommand-DArfV8xF.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"11707-aZo6DKmxDuYMfHalaCSFqtCDnmw\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
+		"mtime": "2026-11-24T03:13:59.069Z",
 		"size": 71431,
 		"path": "../public/assets/CopyCommand-DArfV8xF.js"
 	},
-	"/assets/health-DRRKlWt1.js": {
+	"/assets/health-DZPfHSgN.js": {
 		"type": "text/javascript; charset=utf-8",
-		"etag": "\"1bc-bseNy+LkS38J8VsQFgA1m4Dzlw0\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
+		"etag": "\"1bc-qH3p8fREjInExUIYR4++fhG07eg\"",
+		"mtime": "2026-11-24T03:13:59.069Z",
 		"size": 444,
-		"path": "../public/assets/health-DRRKlWt1.js"
+		"path": "../public/assets/health-DZPfHSgN.js"
 	},
-	"/assets/index-CwtaV0IZ.js": {
+	"/assets/index-BjP0r44Q.js": {
 		"type": "text/javascript; charset=utf-8",
-		"etag": "\"45193-/x+Ybre7uL+FSemg/H63j+D8zxg\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
-		"size": 283027,
-		"path": "../public/assets/index-CwtaV0IZ.js"
+		"etag": "\"45201-TfjrC3PLPyE1OKrYC1KQ55SlIAQ\"",
+		"mtime": "2026-11-24T03:13:59.069Z",
+		"size": 283137,
+		"path": "../public/assets/index-BjP0r44Q.js"
 	},
 	"/assets/needs-you-dMF1FQwy.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"bc2-QNuaI0Sl/4jOYxNrl8TFCrc1jM0\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
+		"mtime": "2026-11-24T03:13:59.069Z",
 		"size": 3010,
 		"path": "../public/assets/needs-you-dMF1FQwy.js"
 	},
-	"/assets/routes-BGwn-K-z.js": {
+	"/assets/routes-DLep6Zi_.js": {
 		"type": "text/javascript; charset=utf-8",
-		"etag": "\"1abd-0wdFYNku5Rj1SG465gWMCJCrFJ8\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
-		"size": 6845,
-		"path": "../public/assets/routes-BGwn-K-z.js"
+		"etag": "\"1ec6-ApPeHDYaScRmbHFYh/nZT0Syfc4\"",
+		"mtime": "2026-11-24T03:13:59.069Z",
+		"size": 7878,
+		"path": "../public/assets/routes-DLep6Zi_.js"
 	},
-	"/assets/styles-C758B0uX.css": {
+	"/assets/styles-DbaZTOM_.css": {
 		"type": "text/css; charset=utf-8",
-		"etag": "\"1f11-mWG9kvxcBoprg25qUBzoHIeRS6Q\"",
-		"mtime": "2026-11-23T16:15:31.521Z",
-		"size": 7953,
-		"path": "../public/assets/styles-C758B0uX.css"
+		"etag": "\"1f9d-LYmkNsYTyU8YoPx0hkrtd9WT0i8\"",
+		"mtime": "2026-11-24T03:13:59.070Z",
+		"size": 8093,
+		"path": "../public/assets/styles-DbaZTOM_.css"
 	}
 };
 // #nitro/virtual/public-assets-node
@@ -251,11 +251,11 @@ var findRouteRules = /* @__PURE__ */ (() => {
 		return r.reverse();
 	};
 })();
-var _lazy_75a9b7cf4e32fc8e = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
+var _lazy_f65c7c90a9c3b0a1 = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
 var findRoute = /* @__PURE__ */ (() => {
 	const data = {
 		route: "/**",
-		handler: _lazy_75a9b7cf4e32fc8e
+		handler: _lazy_f65c7c90a9c3b0a1
 	};
 	return ((_m, p) => {
 		if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
