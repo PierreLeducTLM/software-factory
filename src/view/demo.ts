@@ -91,6 +91,22 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
 
   const inReview = (risk: Risk, number: number): TicketRecord => endRun(delivered(risk, number, 'pierre', 0), { status: 'in_review', at: ago(30), by: 'pierre' });
 
+  const withOpenTasks = (record: TicketRecord): TicketRecord =>
+    changeLatestRun(record, (run) => ({
+      ...run,
+      tasks: {
+        total: 9,
+        path: 'openspec/changes/invoice-pdf-attachments/tasks.md',
+        commit: 'c0ffee1',
+        open: [
+          { text: '4.1 Attach the PDF to the reminder email', note: 'Not done: the mail provider sandbox was down' },
+          { text: '4.2 Check the attachment size limit' },
+          { text: '4.3 Try it on a live mailbox' },
+        ],
+        accepted: [{ text: '4.3 Try it on a live mailbox', by: 'maya', at: ago(20) }],
+      },
+    }));
+
   const merged = (risk: Risk, number: number, mergedAgo: number, outcome: { readonly asIs: boolean; readonly revert?: NonNullable<Run['revert']> }): TicketRecord =>
     changeLatestRun(endRun(delivered(risk, number, 'maya', mergedAgo + 120), { status: 'merged', at: ago(mergedAgo), by: 'factory-ci' }), (run) => ({
       ...run,
@@ -133,6 +149,7 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     ticket('GH-231', 'Dark mode for settings', states.in_development, 20, step(step(step(step(step(claimed(approved('low'), 'pierre', MACHINE, 20), 'revalidate', 20, 19), 'build', 19, 8), 'quality', 8, 6), 'verify', 6, 3), 'review', 3)),
     ticket('PAY-138', 'Partial refunds', states.in_review, 30, inReview('medium', 412)),
     ticket('ENG-88', 'Retry back-off for exports', states.in_review, 30, inReview('low', 415)),
+    ticket('PAY-144', 'Invoice PDF attachments', states.in_review, 30, withOpenTasks(inReview('medium', 416))),
     ticket('PAY-133', 'Multi-currency totals', states.blocked, 25, blocked),
     ticket('PAY-147', 'Tax rounding rules', states.spec_review, 60, sentBack),
     ticket('PAY-155', 'Credit notes', states.spec_review, 180, recordReadyGate(createRecord({ repository: REPOSITORY }), { passed: true, fingerprint: 'demo', findings: [], at: ago(180), by: 'pierre' })),
