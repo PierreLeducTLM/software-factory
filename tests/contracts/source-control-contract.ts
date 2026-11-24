@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { CiResult, SourceControl } from '../../src/adapters/source-control.js';
+import { requiresCheck, type CiResult, type CommitStatus, type SourceControl } from '../../src/adapters/source-control.js';
 
 export type SourceControlWorld = {
   readonly push: (branch: string, commit: string) => void;
   readonly merge: (number: number, by: string) => void;
   readonly setCi: (ref: string, job: string, result: Exclude<CiResult, 'missing'>) => void;
   readonly advanceClock: (iso: string) => void;
+  readonly putFile: (commit: string, path: string, content: string) => void;
+  readonly statusesOf: (commit: string) => readonly CommitStatus[];
+  readonly requireChecks: (branch: string, contexts: readonly string[] | 'unreadable') => void;
 };
+
+const getMockStatus = (overrides?: Partial<CommitStatus>): CommitStatus => ({
+  context: 'factory/tasks',
+  state: 'failure',
+  description: '2 of 9 tasks open',
+  link: 'https://example.test/pull/7',
+  commit: 'c1',
+  ...overrides,
+});
 
 export type SourceControlSetup = { readonly sourceControl: SourceControl; readonly world: SourceControlWorld };
 
@@ -147,6 +159,41 @@ export const describeSourceControlContract = (
 
       expect(await context.sourceControl.wasMergedAsIs({ number: pullRequest.number, commit: 'c1' })).toBe(false);
       expect(await context.sourceControl.wasMergedAsIs({ number: 999, commit: 'c1' })).toBe(false);
+    });
+
+    it('posts a commit status on a commit, a later one of the same context replacing it', async () => {
+      const { sourceControl, world } = setup();
+
+      await sourceControl.postStatus(getMockStatus());
+      await sourceControl.postStatus(getMockStatus({ context: 'other/check', state: 'success', description: 'Fine' }));
+      await sourceControl.postStatus(getMockStatus({ state: 'success', description: 'All 9 tasks done' }));
+
+      expect(world.statusesOf('c1')).toEqual([getMockStatus({ context: 'other/check', state: 'success', description: 'Fine' }), getMockStatus({ state: 'success', description: 'All 9 tasks done' })]);
+      expect(world.statusesOf('c2')).toEqual([]);
+    });
+
+    it('reads a file as it is at a commit, and nothing for a file that is not there', async () => {
+      const { sourceControl, world } = setup();
+      world.putFile('c1', 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', '- [ ] 1.1 Open\n');
+      world.putFile('c2', 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', '- [x] 1.1 Open\n');
+
+      expect(await sourceControl.readFileAt({ path: 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', commit: 'c1' })).toBe('- [ ] 1.1 Open\n');
+      expect(await sourceControl.readFileAt({ path: 'openspec/changes/archive/2026-11-21-billing-export/tasks.md', commit: 'c2' })).toBe('- [x] 1.1 Open\n');
+      expect(await sourceControl.readFileAt({ path: 'openspec/changes/archive/2026-11-21-billing-export/design.md', commit: 'c1' })).toBeUndefined();
+    });
+
+    it('says whether a check is required on a branch, or that it cannot tell', async () => {
+      const { sourceControl, world } = setup();
+
+      const none = await sourceControl.requiredChecks('main');
+      world.requireChecks('main', ['factory/tasks']);
+      const required = await sourceControl.requiredChecks('main');
+      world.requireChecks('main', 'unreadable');
+      const unreadable = await sourceControl.requiredChecks('main');
+
+      expect(none !== 'unreadable' && requiresCheck(none, 'factory/tasks')).toBe(false);
+      expect(required !== 'unreadable' && requiresCheck(required, 'factory/tasks')).toBe(true);
+      expect(unreadable).toBe('unreadable');
     });
 
     it.skipIf(capabilities.revert)('says plainly that it cannot open a revert pull request', async () => {

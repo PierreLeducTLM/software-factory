@@ -5,9 +5,11 @@ import {
   createRecord,
   endRun,
   endStep,
+  parseComment,
   recordApproval,
   recordReadyGate,
   recordSendBack,
+  renderComment,
   setState,
   startRun,
   startStep,
@@ -269,6 +271,33 @@ describe('factory state, approval and steps in the record', () => {
     const loaded = await loadRecord(provider, 'PAY-142');
 
     expect(loaded.status === 'ok' && loaded.record.runs[0]?.attempt).toBe(3);
+  });
+
+  it('keeps the tasks of a run, with their notes and acceptances, when saved and read back', async () => {
+    const provider = getProvider();
+    const running = getRunningRecord();
+    const tasks = {
+      total: 9,
+      path: 'openspec/changes/archive/2026-11-21-billing-export/tasks.md',
+      commit: 'c7',
+      open: [{ text: '4.1 Run the end-to-end check', note: 'Not done: needs the release' }, { text: '4.2 Update the docs' }],
+      accepted: [{ text: '4.2 Update the docs', by: 'pierre', at: '2026-11-24T10:00:00Z' }],
+    };
+    const record = { ...running, runs: running.runs.map((run) => ({ ...run, tasks })) };
+
+    await saveRecord(provider, { key: 'PAY-142', record, summary: 'In review', budget: BIG_BUDGET });
+    const loaded = await loadRecord(provider, 'PAY-142');
+
+    expect(loaded.status === 'ok' && loaded.record.runs[0]?.tasks).toEqual(tasks);
+  });
+
+  it('still reads a run recorded before runs had tasks', () => {
+    const record = getRunningRecord();
+
+    const parsed = parseComment(renderComment({ record, summary: 'Building' }), { trustEdited: false });
+
+    expect(parsed).toEqual({ status: 'ok', record });
+    expect(parsed.status === 'ok' && parsed.record.runs[0]?.tasks).toBeUndefined();
   });
 
   it('hands a run to another developer and worktree, and says so in an event', () => {

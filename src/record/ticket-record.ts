@@ -62,6 +62,14 @@ const RunRevertSchema = z.object({
   merged: z.boolean().optional(),
 });
 
+const RunTasksSchema = z.object({
+  total: z.number().int().min(0),
+  path: z.string(),
+  commit: z.string(),
+  open: z.array(z.object({ text: z.string(), note: z.string().optional() })),
+  accepted: z.array(z.object({ text: z.string(), by: z.string(), at: z.string() })),
+});
+
 const RunSchema = z.object({
   claimant: z.string(),
   machine: z.string(),
@@ -79,6 +87,7 @@ const RunSchema = z.object({
   merge: RunMergeSchema.optional(),
   revert: RunRevertSchema.optional(),
   watch: z.object({ at: z.string(), passed: z.boolean(), detail: z.string().optional() }).optional(),
+  tasks: RunTasksSchema.optional(),
   compacted: z.boolean().optional(),
 });
 
@@ -117,6 +126,7 @@ const TicketRecordSchema = z.object({
 
 export type FactoryEvent = Readonly<z.infer<typeof EventSchema>>;
 export type Run = Readonly<z.infer<typeof RunSchema>>;
+export type RunTasks = Readonly<z.infer<typeof RunTasksSchema>>;
 export type Attempt = Readonly<z.infer<typeof AttemptSchema>>;
 export type FactoryState = z.infer<typeof FactoryStateSchema>;
 export type Approval = Readonly<z.infer<typeof ApprovalSchema>>;

@@ -211,4 +211,26 @@ describe('Bitbucket source control', () => {
 
     await expect(setup.sourceControl.updatePullRequestBody({ number: 999, body: 'x' })).rejects.toThrow('Pull request 999 does not exist');
   });
+
+  it('posts a commit status as a build status Bitbucket counts in its merge checks', async () => {
+    const { bitbucket, sourceControl } = getSetup();
+
+    await sourceControl.postStatus({ context: 'factory/tasks', state: 'success', description: 'All 6 tasks done', link: 'https://bitbucket.test/pr/7', commit: 'c1' });
+
+    const request = bitbucket.requests[0];
+    expect([request?.method, request?.url]).toEqual(['POST', `${API_URL}/repositories/acme/billing-service/commit/c1/statuses/build`]);
+    expect(JSON.parse(request?.body ?? '{}')).toEqual({ key: 'factory/tasks', name: 'factory/tasks', state: 'SUCCESSFUL', description: 'All 6 tasks done', url: 'https://bitbucket.test/pr/7' });
+  });
+
+  it.each([
+    [{ kind: 'require_passing_builds_to_merge', pattern: 'main', branch_match_kind: 'glob' }, true],
+    [{ kind: 'require_passing_builds_to_merge', pattern: '*', branch_match_kind: 'glob' }, true],
+    [{ kind: 'require_passing_builds_to_merge', branch_match_kind: 'branching_model' }, true],
+    [{ kind: 'require_passing_builds_to_merge', pattern: 'release/*', branch_match_kind: 'glob' }, false],
+    [{ kind: 'require_approvals_to_merge', pattern: 'main', branch_match_kind: 'glob' }, false],
+  ])('requires every build on main when a passing-builds merge check covers it: %o', async (restriction, required) => {
+    const sourceControl = getDirect(answering(200, { values: [restriction] }));
+
+    expect(await sourceControl.requiredChecks('main')).toEqual(required ? ['*'] : []);
+  });
 });

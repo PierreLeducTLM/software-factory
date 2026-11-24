@@ -1,4 +1,4 @@
-import type { CiResult, PullRequest, SourceControl } from './source-control.js';
+import type { CiResult, CommitStatus, PullRequest, RequiredChecks, SourceControl } from './source-control.js';
 
 type Options = { readonly now: () => string };
 
@@ -6,18 +6,25 @@ type World = {
   readonly push: (branch: string, commit: string) => void;
   readonly merge: (number: number, by: string) => void;
   readonly setCi: (ref: string, job: string, result: Exclude<CiResult, 'missing'>) => void;
+  readonly putFile: (commit: string, path: string, content: string) => void;
+  readonly statusesOf: (commit: string) => readonly CommitStatus[];
+  readonly requireChecks: (branch: string, contexts: RequiredChecks) => void;
+  readonly close: (number: number) => void;
 };
 
 type State = {
   pullRequests: readonly PullRequest[];
   branches: Readonly<Record<string, string>>;
   ci: Readonly<Record<string, CiResult>>;
+  files: Readonly<Record<string, string>>;
+  statuses: readonly CommitStatus[];
+  required: Readonly<Record<string, RequiredChecks>>;
 };
 
 const FIRST_NUMBER = 401;
 
 export const createInMemorySourceControl = ({ now }: Options): { readonly sourceControl: SourceControl; readonly world: World } => {
-  const state: State = { pullRequests: [], branches: {}, ci: {} };
+  const state: State = { pullRequests: [], branches: {}, ci: {}, files: {}, statuses: [], required: {} };
 
   const find = (number: number): PullRequest | undefined => state.pullRequests.find((pullRequest) => pullRequest.number === number);
 
@@ -59,6 +66,14 @@ export const createInMemorySourceControl = ({ now }: Options): { readonly source
       const pullRequest = find(number);
       return pullRequest?.state === 'merged' && pullRequest.headCommit === commit;
     },
+
+    postStatus: async (status) => {
+      state.statuses = [...state.statuses.filter((posted) => posted.commit !== status.commit || posted.context !== status.context), { ...status }];
+    },
+
+    readFileAt: async ({ path, commit }) => state.files[`${commit}\n${path}`],
+
+    requiredChecks: async (branch) => state.required[branch] ?? [],
   };
 
   const world: World = {
@@ -72,6 +87,14 @@ export const createInMemorySourceControl = ({ now }: Options): { readonly source
     setCi: (ref, job, result) => {
       state.ci = { ...state.ci, [`${ref}\n${job}`]: result };
     },
+    putFile: (commit, path, content) => {
+      state.files = { ...state.files, [`${commit}\n${path}`]: content };
+    },
+    statusesOf: (commit) => state.statuses.filter((status) => status.commit === commit),
+    requireChecks: (branch, contexts) => {
+      state.required = { ...state.required, [branch]: contexts };
+    },
+    close: (number) => change(number, { state: 'closed' }),
   };
 
   return { sourceControl, world };

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Http, HttpResponse } from './http.js';
-import type { CiResult, PullRequest, SourceControl } from './source-control.js';
+import { EVERY_CHECK, type CiResult, type PullRequest, type SourceControl } from './source-control.js';
 
 type Options = {
   readonly apiUrl: string;
@@ -24,11 +24,16 @@ const PullSchema = z.object({
 
 const BranchSchema = z.object({ target: z.object({ hash: z.string() }) });
 const BuildSchema = z.object({ state: z.enum(['SUCCESSFUL', 'FAILED', 'INPROGRESS', 'STOPPED']) });
+const RestrictionsSchema = z.object({
+  values: z.array(z.object({ kind: z.string(), pattern: z.string().optional(), branch_match_kind: z.string().optional() })),
+});
 const ErrorSchema = z.object({ error: z.object({ message: z.string() }) });
 
 type Pull = z.infer<typeof PullSchema>;
 
 const NOT_FOUND = 404;
+const PASSING_BUILDS = 'require_passing_builds_to_merge';
+const STATUS_STATES = { success: 'SUCCESSFUL', failure: 'FAILED' } as const;
 
 const STATES: Readonly<Record<Pull['state'], PullRequest['state']>> = {
   OPEN: 'open',
@@ -43,6 +48,11 @@ const BUILDS: Readonly<Record<z.infer<typeof BuildSchema>['state'], CiResult>> =
   FAILED: 'failed',
   STOPPED: 'failed',
 };
+
+const pathIn = (path: string): string => path.split('/').map(encodeURIComponent).join('/');
+
+const covers = (restriction: z.infer<typeof RestrictionsSchema>['values'][number], branch: string): boolean =>
+  restriction.branch_match_kind === 'branching_model' || restriction.pattern === branch || restriction.pattern === '*';
 
 const toIso = (time: string): string => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -147,6 +157,25 @@ export const createBitbucketSourceControl = ({ apiUrl, repository, token, userna
       if (pull === undefined || pull.state !== 'MERGED') return false;
       const head = pull.source.commit.hash;
       return head.startsWith(commit) || commit.startsWith(head);
+    },
+
+    postStatus: async ({ context, state, description, link, commit }) => {
+      await call('POST', `${base}/commit/${encodeURIComponent(commit)}/statuses/build`, {
+        key: context,
+        name: context,
+        state: STATUS_STATES[state],
+        description,
+        url: link,
+      });
+    },
+
+    readFileAt: async ({ path, commit }) => (await find(`${base}/src/${encodeURIComponent(commit)}/${pathIn(path)}`))?.body,
+
+    requiredChecks: async (branch) => {
+      const response = await send('GET', `${base}/branch-restrictions?kind=${PASSING_BUILDS}`);
+      if (response.status >= 400) return 'unreadable';
+      const restrictions = RestrictionsSchema.parse(JSON.parse(response.body)).values;
+      return restrictions.some((restriction) => restriction.kind === PASSING_BUILDS && covers(restriction, branch)) ? [EVERY_CHECK] : [];
     },
   };
 };

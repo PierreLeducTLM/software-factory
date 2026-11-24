@@ -124,4 +124,44 @@ describe('GitHub source control', () => {
     await expect(sourceControl.enableAutoMerge(999)).rejects.toThrow('Pull request 999 does not exist');
     await expect(sourceControl.openRevertPullRequest(999)).rejects.toThrow('Pull request 999 does not exist');
   });
+
+  it('posts a commit status with its context, description and link', async () => {
+    const { github, sourceControl } = getSetup();
+
+    await sourceControl.postStatus({ context: 'factory/tasks', state: 'failure', description: `2 of 9 tasks open ${'x'.repeat(200)}`, link: 'https://github.test/pull/7', commit: 'c1' });
+
+    const request = github.requests[0];
+    const sent: unknown = JSON.parse(request?.body ?? '{}');
+    expect([request?.method, request?.url]).toEqual(['POST', `${API_URL}/repos/acme/billing-service/statuses/c1`]);
+    expect(sent).toMatchObject({ state: 'failure', context: 'factory/tasks', target_url: 'https://github.test/pull/7' });
+    expect(sent).toHaveProperty('description', `2 of 9 tasks open ${'x'.repeat(122)}`);
+  });
+
+  const routes = (answers: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>): Http => async (request) => {
+    const answer = Object.entries(answers).find(([path]) => request.url.endsWith(path))?.[1] ?? { status: 404, body: {} };
+    return { status: answer.status, headers: {}, body: JSON.stringify(answer.body) };
+  };
+
+  it('counts a check required by a ruleset on the branch, alongside branch protection', async () => {
+    const sourceControl = getDirect(
+      routes({
+        '/branches/main/protection/required_status_checks': { status: 200, body: { contexts: ['build'], checks: [{ context: 'build' }] } },
+        '/rules/branches/main': { status: 200, body: [{ type: 'pull_request' }, { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'factory/tasks' }] } }] },
+      }),
+    );
+
+    expect(await sourceControl.requiredChecks('main')).toEqual(['build', 'factory/tasks']);
+  });
+
+  it('cannot tell the required checks when GitHub refuses to show the rulesets', async () => {
+    const sourceControl = getDirect(routes({ '/rules/branches/main': { status: 403, body: {} } }));
+
+    expect(await sourceControl.requiredChecks('main')).toBe('unreadable');
+  });
+
+  it('fails with the status and path when GitHub refuses to show a file', async () => {
+    await expect(getDirect(answering(500, {})).readFileAt({ path: 'openspec/tasks.md', commit: 'c1' })).rejects.toThrow(
+      'GitHub answered 500 to GET /repos/acme/billing-service/contents/openspec/tasks.md?ref=c1',
+    );
+  });
 });
