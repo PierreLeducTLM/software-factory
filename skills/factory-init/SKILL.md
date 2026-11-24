@@ -23,7 +23,7 @@ Ask these together, in one message, and nothing more:
 
 The person can name other variables: pass them with `--token-env` and `--email-env`.
 
-The command also opens the pull request through the API of the source control, so it needs a token there. On GitHub it is `GH_TOKEN`: when it is not set and `gh auth status` shows a login, run the command with `GH_TOKEN=$(gh auth token)` in front of it. On Bitbucket it is `BITBUCKET_TOKEN` and `BITBUCKET_USERNAME`, which the person must export. Other names go through `--source-token-env` and `--source-username-env`.
+The command also opens the pull request through the API of the source control, so it needs a token there. On GitHub it is `GH_TOKEN`: when it is not set and `gh auth status` shows a login, run the command with `GH_TOKEN=$(gh auth token)` in front of it. On Bitbucket it is `BITBUCKET_TOKEN` and `BITBUCKET_USERNAME`, which the person must export. When the token is a Bitbucket access token (it starts with `ATCTT`), it is used alone: pass `--source-access-token`, and no username is needed. Other names go through `--source-token-env` and `--source-username-env`.
 
 ## 2. Run it
 
@@ -58,6 +58,7 @@ Options, only when the person asks for them:
 | `--sensitive-paths a,b` | Paths whose changes always need a person, such as `src/auth/**` |
 | `--main-branch`, `--repository`, `--source-control github\|bitbucket` | When they cannot be read from git |
 | `--token-env`, `--email-env`, `--source-token-env` | Other names for the variables |
+| `--source-access-token` | The Bitbucket token is an access token, sent alone with no username |
 
 To look at what the command would find before it changes anything, run `factory init detect`.
 

@@ -150,6 +150,16 @@ describe('git inputs', () => {
     expect(modes).toEqual(['100755', '100644']);
   });
 
+  it('publishes its files even when the project ignores their folder, as the .NET rule [Bb]in/ ignores .factory/bin', async () => {
+    const { origin, clone } = getClone();
+    git(clone, 'config', 'user.email', 'pierre@example.test');
+    commit(origin, '.gitignore', '[Bb]in/\n');
+
+    await publisherFor(clone)({ branch: 'factory/install', base: 'main', files: { '.factory/bin/factory': '#!/bin/sh\n' }, executable: ['.factory/bin/factory'], message: 'install' });
+
+    expect(git(origin, 'show', 'factory/install:.factory/bin/factory')).toBe('#!/bin/sh');
+  });
+
   it('removes its temporary worktree when the push fails', async () => {
     const { clone } = getClone();
     git(clone, 'config', 'user.email', 'pierre@example.test');

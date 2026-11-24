@@ -111,8 +111,10 @@ const bitbucketSteps = (item: unknown): readonly z.infer<typeof BitbucketStepSch
   return Array.isArray(parsed.data.parallel) ? parsed.data.parallel : parsed.data.parallel.steps;
 };
 
+export const BITBUCKET_PIPELINES_FILE = 'bitbucket-pipelines.yml';
+
 const bitbucketJobs = async (files: ProjectFiles): Promise<readonly CiJob[]> => {
-  const file = 'bitbucket-pipelines.yml';
+  const file = BITBUCKET_PIPELINES_FILE;
   const parsed = BitbucketSchema.safeParse(yamlOf(await files.read(file)));
   if (!parsed.success) return [];
   const { default: always, branches, 'pull-requests': pullRequests, custom, tags } = parsed.data.pipelines;

@@ -53,7 +53,7 @@ const USAGE = [
   '  factory init --ticket <KEY> --team <key> | --base-url <url> --filter <jql> [options]',
   '  factory init detect [--verify]',
   '  options: --project <name> --token-env <name> --email-env <name> --repository <owner/name> --main-branch <name>',
-  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name>',
+  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name> --source-access-token',
   '           --statuses "state=Status;state=Status" --sensitive-paths <a,b> --verify',
   '  factory workflow --title <text> [--preview]',
   'Add --json to any command for one line of JSON.',
@@ -330,6 +330,18 @@ describe('factory init', () => {
     expect(out).toContain('Store these CI secrets: T, E, BT, BU');
     expect(setup.published[0]?.files['.factory/factory.yaml']).toContain('src/auth/**');
     expect(setup.published[0]?.files['.factory/adapters.yaml']).toContain('base_url: https://acme.atlassian.net');
+  });
+
+  it('uses a Bitbucket access token alone, with no username, when told the token is an access token', async () => {
+    const ci = { ...NEW_PROJECT, 'bitbucket-pipelines.yml': 'pipelines:\n  default:\n    - step:\n        name: Test\n        script:\n          - pnpm test\n' };
+    const setup = getSetup(ci, { statuses: ALL_STATUSES });
+
+    const { out, errors } = await setup.run('init', '--ticket', 'PAY-1', '--team', 'PAY', '--repository', 'acme/billing', '--source-control', 'bitbucket', '--source-access-token');
+
+    expect(errors).toEqual([]);
+    expect(out).toContain('Store these CI secrets: LINEAR_API_KEY, BITBUCKET_TOKEN');
+    expect(setup.published[0]?.files['.factory/adapters.yaml']).toContain('token_env: BITBUCKET_TOKEN');
+    expect(setup.published[0]?.files['.factory/adapters.yaml']).not.toContain('username_env');
   });
 
   it('leaves only the required check by hand when CI does everything, and takes the statuses the person chose', async () => {
