@@ -154,6 +154,7 @@ export const createRealDeps = async ({ cwd, env }: Options): Promise<LoopDeps> =
     commitMessage: git.commitMessage,
     changeFolders: archive.changeFolders,
     archiveChange: archive.archiveChange,
+    readFileOnBranch: git.readFileOnBranch,
   };
 };
 

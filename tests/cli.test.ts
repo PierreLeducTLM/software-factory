@@ -83,6 +83,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
     pushBranch: async (branch) => git.push(branch, 'c1'),
     changeFolders: async () => [{ name: 'billing-export', files: Object.keys(files).map((name) => name.replaceAll('__', '/')), archived: false }],
     archiveChange: async () => ({ ok: true }),
+    readFileOnBranch: async () => undefined,
     tickets,
     runtime: createInMemoryAgentRuntime({ worktree: { id: 'wt-1', path: '/work/pay-142', branch: 'factory/pay-142', host: 'pierre-mbp' } }),
     config: config.value,

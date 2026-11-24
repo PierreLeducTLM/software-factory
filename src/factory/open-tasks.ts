@@ -1,3 +1,4 @@
+import type { CommitStatus } from '../adapters/source-control.js';
 import type { RunTasks } from '../record/ticket-record.js';
 
 export type OpenTask = RunTasks['open'][number];
@@ -8,13 +9,14 @@ export type TaskList = { readonly total: number; readonly open: readonly OpenTas
 
 export type TasksStatus = { readonly state: 'success' | 'failure'; readonly description: string };
 
-type TaskState = Pick<RunTasks, 'total' | 'open' | 'accepted'>;
+export type TaskState = { readonly total: number; readonly open: readonly OpenTask[]; readonly accepted: readonly Acceptance[] };
 
 type Reading = TaskList & { readonly collecting: boolean };
 
 const TASK_LINE = /^\s*(?:[-*+]|\d{1,9}[.)])\s*\[(?:\s*([^\]\s]?)\s*\](?![([])|\s+\])\s*(.*)/;
 const INDENTED = /^\s+\S/;
 const LIST_MARKER = /^[-*+]\s+/;
+export const TASKS_CONTEXT = 'factory/tasks';
 const SECTION = '## Open tasks';
 const HEADING = '## ';
 
@@ -43,7 +45,7 @@ export const parseTasks = (markdown: string): TaskList => {
   return { total, open };
 };
 
-export const acceptanceOf = ({ accepted }: Pick<RunTasks, 'accepted'>, task: OpenTask): Acceptance | undefined =>
+export const acceptanceOf = ({ accepted }: Pick<TaskState, 'accepted'>, task: OpenTask): Acceptance | undefined =>
   accepted.find((acceptance) => acceptance.text === task.text);
 
 export const unacceptedTasks = (tasks: TaskState): readonly OpenTask[] => tasks.open.filter((task) => acceptanceOf(tasks, task) === undefined);
@@ -65,6 +67,15 @@ export const tasksStatus = (tasks: TaskState): TasksStatus => {
 };
 
 type ReadAt = { readonly path: string; readonly commit: string };
+
+type PullRequestHead = { readonly url: string; readonly headCommit: string };
+
+export const tasksCommitStatus = (tasks: TaskState, { url, headCommit }: PullRequestHead): CommitStatus => ({
+  context: TASKS_CONTEXT,
+  ...tasksStatus(tasks),
+  link: url,
+  commit: headCommit,
+});
 
 export const nextTasks = (previous: RunTasks | undefined, read: TaskList, { path, commit }: ReadAt): RunTasks => ({
   total: read.total,

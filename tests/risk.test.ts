@@ -237,4 +237,22 @@ describe('merge route', () => {
       reason: 'auto-merge for low risk is back in shadow mode after a revert',
     });
   });
+
+  it('leaves a run with open tasks to a person, ahead of every other rule (low risk with open tasks)', () => {
+    const openTasks = { open: 2, total: 9 };
+    const human = { route: 'human', wouldAutoMerge: false, reason: '2 of 9 tasks were open at delivery' };
+
+    expect(decideMerge(getRisk('  shadow: false\n'), 'low', { ...open, openTasks })).toEqual(human);
+    expect(decideMerge(getRisk('  shadow: false\n'), 'medium', { ...open, openTasks })).toEqual(human);
+    expect(decideMerge(getRisk('  shadow: false\n'), 'low', { ceiling: 'human', noAutomergeLabel: true, suspended: true, openTasks })).toEqual(human);
+  });
+
+  it('does not count a run with open tasks as one that would have auto-merged (shadow mode with open tasks)', () => {
+    expect(decideMerge(getRisk(), 'low', { ...open, openTasks: { open: 1, total: 5 } })).toEqual({ route: 'human', wouldAutoMerge: false, reason: '1 of 5 tasks were open at delivery' });
+  });
+
+  it('decides as before when no task is open (no open tasks)', () => {
+    expect(decideMerge(getRisk('  shadow: false\n'), 'low', { ...open, openTasks: { open: 0, total: 9 } })).toEqual(decideMerge(getRisk('  shadow: false\n'), 'low', open));
+    expect(decideMerge(getRisk(), 'low', { ...open, openTasks: { open: 0, total: 9 } })).toEqual(decideMerge(getRisk(), 'low', open));
+  });
 });

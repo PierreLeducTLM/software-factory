@@ -61,7 +61,12 @@ export type WorldOptions = {
   readonly archivedFiles?: readonly string[];
   readonly archiveThrows?: string;
   readonly pushFailures?: number;
+  readonly branchTasks?: string;
 };
+
+export const TICKED_TASKS = '# Tasks\n\n- [x] 1.1 Add the exporter and verify the test passes\n';
+
+const tasksPathOf = (folder: ChangeFolder): string => `openspec/changes/${folder.archived ? 'archive/' : ''}${folder.name}/tasks.md`;
 
 const specPath = (name: string): string => name.replaceAll('__', '/');
 
@@ -126,6 +131,8 @@ export const getWorld = async (options?: WorldOptions) => {
       if (moved !== undefined) folders.splice(index, 1, { name: `2026-11-21-${name}`, files: moved.files, archived: true });
       return { ok: true };
     },
+    readFileOnBranch: async (path) =>
+      folders.some((folder) => folder.files.includes('tasks.md') && tasksPathOf(folder) === path) ? (options?.branchTasks ?? TICKED_TASKS) : undefined,
     pushBranch: async (branch) => {
       events.push(`push ${branch}`);
       if (failures.push > 0) {
