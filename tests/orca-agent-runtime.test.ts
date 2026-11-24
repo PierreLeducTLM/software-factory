@@ -12,13 +12,25 @@ const WORKTREE = {
 const ok = (result: unknown): string => JSON.stringify({ id: 'r1', ok: true, result, _meta: {} });
 const failed = (code: string, message: string): string => JSON.stringify({ id: 'local', ok: false, error: { code, message } });
 
-const getRuntime = (replies: Readonly<Record<string, string>>) => {
+const COMMON_DIR_QUESTION = 'rev-parse --path-format=absolute --git-common-dir';
+
+const gitReporting = (commonDir: string): CommandRunner => async (args) => {
+  if (args.join(' ') !== COMMON_DIR_QUESTION) throw new Error(`Unexpected git call: ${args.join(' ')}`);
+  return { stdout: `${commonDir}\n` };
+};
+
+const getRuntime = (replies: Readonly<Record<string, string>>, { commonDir = '/work/billing/.git' }: { readonly commonDir?: string } = {}) => {
   const calls: (readonly string[])[] = [];
   const run: CommandRunner = async (args) => {
     calls.push(args);
     return { stdout: replies[`${args[0]} ${args[1]}`] ?? failed('unknown_command', 'Unknown command') };
   };
-  return { runtime: createOrcaAgentRuntime({ run }), open: createOrcaWorktreeOpener({ run }), start: createOrcaWorktreeStarter({ run, projectDir: '/work/billing' }), calls };
+  return { runtime: createOrcaAgentRuntime({ run }), open: createOrcaWorktreeOpener({ run }), start: createOrcaWorktreeStarter({ run, git: gitReporting(commonDir) }), calls };
+};
+
+const exitingWith = (stdout: string): CommandRunner => {
+  const node = createCommandRunner(process.execPath);
+  return (args) => node(['-e', `process.stdout.write(${JSON.stringify(stdout)}); process.exit(1)`, ...args]);
 };
 
 describe('Orca agent runtime', () => {
@@ -130,6 +142,42 @@ describe('Orca agent runtime', () => {
     const { start } = getRuntime({ 'worktree create': ok({ worktree: { ...WORKTREE, path: '/work/workspaces/billing/pie-21-2', branch: 'pie-21-2' } }) });
 
     expect(await start({ name: 'pie-21', prompt: '/factory-refine PIE-21', ticket: { key: 'PIE-21', tracker: 'linear' } })).toBe('pie-21-2');
+  });
+
+  it('starts the worktree in the main checkout Orca knows, even when the dashboard runs from one of its worktrees', async () => {
+    const { start, calls } = getRuntime({ 'worktree create': ok({ worktree: WORKTREE }) }, { commonDir: '/Users/dev/projects/billing/.git' });
+
+    await start({ name: 'pay-142', prompt: '/factory-run PAY-142', ticket: { key: 'PAY-142', tracker: 'jira' } });
+
+    expect(calls[0]?.slice(2, 4)).toEqual(['--repo', 'path:/Users/dev/projects/billing']);
+  });
+
+  it('says which repo Orca does not know and how to fix it', async () => {
+    const { start } = getRuntime({ 'worktree create': failed('repo_not_found', 'repo_not_found') });
+
+    await expect(start({ name: 'pay-142', prompt: '/factory-run PAY-142', ticket: { key: 'PAY-142', tracker: 'jira' } })).rejects.toThrow(
+      new Error('Orca does not know the repo at /work/billing. Add it in Orca, or run the dashboard from a worktree of a repo Orca knows.'),
+    );
+  });
+
+  it('keeps Orca\'s message when Orca exits with an error', async () => {
+    const run = exitingWith(failed('runtime_unreachable', 'Orca is not running'));
+
+    await expect(createOrcaWorktreeStarter({ run, git: gitReporting('/work/billing/.git') })({ name: 'pie-21', prompt: 'go', ticket: { key: 'PIE-21', tracker: 'linear' } })).rejects.toThrow(
+      new Error('Orca is not running'),
+    );
+  });
+
+  it('keeps Orca\'s answer when a question exits with an error', async () => {
+    const run = exitingWith(failed('selector_not_found', 'No Orca workspace contains the current directory: /private/tmp'));
+
+    expect(await createOrcaAgentRuntime({ run }).currentWorktree()).toBeUndefined();
+  });
+
+  it('still fails with the command\'s own error when Orca exits with an error and prints no JSON', async () => {
+    const run = exitingWith('');
+
+    await expect(createOrcaAgentRuntime({ run }).currentWorktree()).rejects.toThrow('Command failed');
   });
 
   it('fails with Orca\'s message when the worktree cannot be started', async () => {

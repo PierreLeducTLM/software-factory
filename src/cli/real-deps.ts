@@ -113,6 +113,7 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
   const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
   const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
   const orca = createCommandRunner('orca');
+  const runGit = createCommandRunner('git');
   return createViewSource({
     providers: [{ name: TICKET_PROVIDER_NAMES[supportedProvider(adapters).kind], provider: createTicketProvider(adapters, env, http) }],
     config,
@@ -120,7 +121,7 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
     machine: hostname(),
     now,
     openWorktree: createOrcaWorktreeOpener({ run: orca }),
-    startWorktree: createOrcaWorktreeStarter({ run: orca, projectDir: cwd }),
+    startWorktree: createOrcaWorktreeStarter({ run: orca, git: (args) => runGit(args, { cwd }) }),
   });
 };
 
