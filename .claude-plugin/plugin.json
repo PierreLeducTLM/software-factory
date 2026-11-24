@@ -1,6 +1,6 @@
 {
   "name": "software-factory",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "license": "MIT",
   "description": "Turns an approved ticket spec into a merged pull request: refine, build and keep the project's factory setup healthy, driven by the factory command line."
 }
