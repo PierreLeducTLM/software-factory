@@ -185,6 +185,63 @@ describe('board', () => {
     expect(screen.getByRole('button', { name: 'Open in Orca' }).elements()).toHaveLength(0);
   });
 
+  it('offers Start in Orca next to the command of a card that is not running on this machine', async () => {
+    const { claimant: _claimant, ...available } = getCard({ key: 'PIE-21', onThisMachine: false, rows: [], command: '/factory-refine PIE-21' });
+    const startInOrca = vi.fn(async () => ({ ok: true as const, worktree: 'pie-21' }));
+    const screen = await render(<BoardScreen columns={getColumns({ available: [available] })} loadDetail={noDetail} openInOrca={vi.fn()} startInOrca={startInOrca} />);
+
+    await screen.getByRole('button', { name: /Open PIE-21/ }).click();
+
+    await expect.element(screen.getByText('/factory-refine PIE-21')).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Copy command' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Start in Orca' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Open in Orca' }).elements()).toHaveLength(0);
+  });
+
+  it('offers Start in Orca, and not Open in Orca, on an interrupted run claimed on another machine', async () => {
+    const card = getCard({ key: 'PIE-12', onThisMachine: false, claimant: 'maya', interrupted: true, command: '/factory-run PIE-12' });
+    const screen = await render(<BoardScreen columns={getColumns({ build: [card] })} loadDetail={noDetail} openInOrca={vi.fn()} startInOrca={vi.fn()} />);
+
+    await screen.getByRole('button', { name: /Open PIE-12/ }).click();
+
+    await expect.element(screen.getByRole('button', { name: 'Start in Orca' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Open in Orca' }).elements()).toHaveLength(0);
+  });
+
+  it('keeps Open in Orca, and offers no Start in Orca, on a run on this machine', async () => {
+    const card = getCard({ key: 'PIE-12', onThisMachine: true, interrupted: true, command: '/factory-run PIE-12' });
+    const screen = await render(<BoardScreen columns={getColumns({ build: [card] })} loadDetail={noDetail} openInOrca={vi.fn()} startInOrca={vi.fn()} />);
+
+    await screen.getByRole('button', { name: /Open PIE-12/ }).click();
+
+    await expect.element(screen.getByRole('button', { name: 'Open in Orca' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Copy command' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Start in Orca' }).elements()).toHaveLength(0);
+  });
+
+  it('offers no Start in Orca on a card with no command', async () => {
+    const card = getCard({ onThisMachine: false, claimant: 'maya' });
+    const screen = await render(<BoardScreen columns={getColumns({ build: [card] })} loadDetail={noDetail} openInOrca={vi.fn()} startInOrca={vi.fn()} />);
+
+    await screen.getByRole('button', { name: /Open PAY-142/ }).click();
+
+    await expect.element(screen.getByRole('complementary', { name: 'Run detail' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Start in Orca' }).elements()).toHaveLength(0);
+  });
+
+  it('starts a card\'s command in Orca from the detail panel', async () => {
+    const card = getCard({ key: 'PIE-30', onThisMachine: false, rows: [], command: '/factory-next' });
+    const startInOrca = vi.fn(async () => ({ ok: true as const, worktree: 'pie-30' }));
+    const screen = await render(<BoardScreen columns={getColumns({ ready: [card] })} loadDetail={noDetail} startInOrca={startInOrca} />);
+
+    await screen.getByRole('button', { name: /Open PIE-30/ }).click();
+    await screen.getByRole('button', { name: 'Start in Orca' }).click();
+
+    await expect.element(screen.getByText('Started in Orca: pie-30')).toBeVisible();
+    await expect.element(screen.getByText('/factory-next')).toBeVisible();
+    expect(startInOrca).toHaveBeenCalledWith({ key: 'PIE-30', command: '/factory-next' });
+  });
+
   it('says so when the ticket has no factory record, or the record holds nothing for a section', async () => {
     const { claimant: _claimant, ...unclaimed } = getCard({ rows: [] });
     const empty = await render(<BoardScreen columns={getColumns({ ready: [unclaimed] })} loadDetail={noDetail} />);

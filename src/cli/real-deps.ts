@@ -6,7 +6,7 @@ import { createGitHubSourceControl } from '../adapters/github-source-control.js'
 import { createFetchHttp, sleep, withRateLimitRetry, type Http } from '../adapters/http.js';
 import { createJiraTicketProvider } from '../adapters/jira-ticket-provider.js';
 import { createLinearTicketProvider } from '../adapters/linear-ticket-provider.js';
-import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, type CommandRunner } from '../adapters/orca-agent-runtime.js';
+import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, createOrcaWorktreeStarter, type CommandRunner } from '../adapters/orca-agent-runtime.js';
 import type { SourceControl } from '../adapters/source-control.js';
 import type { TicketProvider } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, sampleFactoryConfig, TICKET_PROVIDER_NAMES, type AdaptersConfig, type ConfigResult, type SupportedTicketProvider } from '../config/project-config.js';
@@ -109,13 +109,15 @@ export const createProjectViewSource = async ({ cwd, env }: Options): Promise<Vi
   const config = await loadConfig(cwd, 'factory.yaml', parseFactoryConfig);
   const adapters = await loadConfig(cwd, 'adapters.yaml', parseAdaptersConfig);
   const http = withRateLimitRetry(createFetchHttp(), { sleep, maxRetries: MAX_RETRIES });
+  const orca = createCommandRunner('orca');
   return createViewSource({
     providers: [{ name: TICKET_PROVIDER_NAMES[supportedProvider(adapters).kind], provider: createTicketProvider(adapters, env, http) }],
     config,
     repository: adapters.repository,
     machine: hostname(),
     now,
-    openWorktree: createOrcaWorktreeOpener({ run: createCommandRunner('orca') }),
+    openWorktree: createOrcaWorktreeOpener({ run: orca }),
+    startWorktree: createOrcaWorktreeStarter({ run: orca, projectDir: cwd }),
   });
 };
 

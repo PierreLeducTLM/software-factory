@@ -101,3 +101,9 @@ it('says that a sample run has no Orca session to open', async () => {
 
   expect(await source.openInOrca('PAY-149')).toEqual({ ok: false, message: 'Orca could not open the run: This is sample data, with no Orca session behind it.' });
 });
+
+it('says that sample data has no Orca to start a worktree in', async () => {
+  const source = createDemoViewSource({ config: getConfig(), now: () => '2026-11-21T08:00:00Z' });
+
+  expect(await source.startInOrca({ key: 'PAY-142', command: '/factory-run PAY-142' })).toEqual({ ok: false, message: 'Orca could not start PAY-142: This is sample data, with no Orca session behind it.' });
+});

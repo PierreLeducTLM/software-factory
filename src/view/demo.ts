@@ -23,6 +23,7 @@ type Options = { readonly config: FactoryConfig; readonly now: () => string };
 const REPOSITORY = 'acme/billing-service';
 const MACHINE = 'this-machine';
 const MINUTE = 60_000;
+const NO_ORCA = 'This is sample data, with no Orca session behind it.';
 
 type Risk = 'low' | 'medium' | 'high';
 
@@ -144,12 +145,14 @@ export const createDemoViewSource = ({ config, now }: Options): ViewSource => {
     ticket('ENG-85', 'Cache invoice totals', states.done, 200, merged('medium', 397, 200, { asIs: true, revert: { at: ago(90), by: 'the staging watch failed on ./smoke.sh', needed: true } })),
   ];
 
-  return createViewSource({
+  const source = createViewSource({
     providers: [{ name: 'Sample data', provider: createInMemoryTicketProvider({ tickets, now }) }],
     config,
     repository: REPOSITORY,
     machine: MACHINE,
     now,
-    openWorktree: () => Promise.reject(new Error('This is sample data, with no Orca session behind it.')),
+    openWorktree: () => Promise.reject(new Error(NO_ORCA)),
+    startWorktree: () => Promise.reject(new Error(NO_ORCA)),
   });
+  return { ...source, startInOrca: async ({ key }) => ({ ok: false, message: `Orca could not start ${key}: ${NO_ORCA}` }) };
 };

@@ -1,7 +1,8 @@
 import type { Card, RunDetail } from '../../../src/view/model.js';
-import type { OpenResult } from '../../../src/view/source.js';
+import type { OpenResult, StartRequest, StartResult } from '../../../src/view/source.js';
 import { CopyCommand } from './CopyCommand';
 import { OpenInOrca } from './OpenInOrca';
+import { StartInOrca } from './StartInOrca';
 
 type Props = {
   readonly card: Card;
@@ -10,13 +11,14 @@ type Props = {
   readonly onClose: () => void;
   readonly copy?: (text: string) => Promise<void>;
   readonly openInOrca?: (key: string) => Promise<OpenResult>;
+  readonly startInOrca?: (request: StartRequest) => Promise<StartResult>;
 };
 
 const STATUS_NAMES = { pass: 'passed', fail: 'failed', running: 'in progress', pending: 'not started' } as const;
 
 const isLink = (text: string): boolean => /^https?:\/\//.test(text);
 
-export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca }: Props) {
+export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca, startInOrca }: Props) {
   return (
     <aside className="detail" aria-label="Run detail">
       <header className="detail__header">
@@ -34,6 +36,7 @@ export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrc
       {card.claimant === undefined ? null : <p className="detail__where">{card.onThisMachine ? 'This run is on your machine, in Orca.' : `This run is in ${card.claimant}'s Orca.`}</p>}
       {card.onThisMachine && openInOrca !== undefined ? <OpenInOrca key={card.key} runKey={card.key} open={openInOrca} /> : null}
       {card.command === undefined ? null : <CopyCommand command={card.command} {...(copy === undefined ? {} : { copy })} />}
+      {card.command === undefined || card.onThisMachine || startInOrca === undefined ? null : <StartInOrca key={card.key} runKey={card.key} command={card.command} start={startInOrca} />}
       {card.pullRequest === undefined ? null : (
         <p>
           <a className="button" href={card.pullRequest}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
+import { createCommandRunner, createOrcaAgentRuntime, createOrcaWorktreeOpener, createOrcaWorktreeStarter, type CommandRunner } from '../src/adapters/orca-agent-runtime.js';
 
 const WORKTREE = {
   id: '42023d6c::/work/billing/pay-142',
@@ -18,7 +18,7 @@ const getRuntime = (replies: Readonly<Record<string, string>>) => {
     calls.push(args);
     return { stdout: replies[`${args[0]} ${args[1]}`] ?? failed('unknown_command', 'Unknown command') };
   };
-  return { runtime: createOrcaAgentRuntime({ run }), open: createOrcaWorktreeOpener({ run }), calls };
+  return { runtime: createOrcaAgentRuntime({ run }), open: createOrcaWorktreeOpener({ run }), start: createOrcaWorktreeStarter({ run, projectDir: '/work/billing' }), calls };
 };
 
 describe('Orca agent runtime', () => {
@@ -103,6 +103,39 @@ describe('Orca agent runtime', () => {
     const { open } = getRuntime({ 'worktree activate': failed('selector_not_found', 'No worktree matches id:gone') });
 
     await expect(open('gone')).rejects.toThrow('No worktree matches id:gone');
+  });
+
+  it('starts Claude with the prompt in a new worktree named for a Linear ticket, linked to the issue, and brings Orca to the front', async () => {
+    const { start, calls } = getRuntime({ 'worktree create': ok({ worktree: { ...WORKTREE, path: '/work/workspaces/billing/pie-21', branch: 'pie-21' } }) });
+
+    const name = await start({ name: 'pie-21', prompt: '/factory-refine PIE-21', ticket: { key: 'PIE-21', tracker: 'linear' } });
+
+    expect(name).toBe('pie-21');
+    expect(calls).toEqual([
+      ['worktree', 'create', '--repo', 'path:/work/billing', '--name', 'pie-21', '--no-parent', '--linear-issue', 'PIE-21', '--agent', 'claude', '--prompt', '/factory-refine PIE-21', '--activate', '--json'],
+    ]);
+  });
+
+  it('links a Jira ticket to the new worktree as a reference', async () => {
+    const { start, calls } = getRuntime({ 'worktree create': ok({ worktree: WORKTREE }) });
+
+    await start({ name: 'pay-142', prompt: '/factory-run PAY-142', ticket: { key: 'PAY-142', tracker: 'jira' } });
+
+    expect(calls).toEqual([
+      ['worktree', 'create', '--repo', 'path:/work/billing', '--name', 'pay-142', '--no-parent', '--reference', 'PAY-142', '--agent', 'claude', '--prompt', '/factory-run PAY-142', '--activate', '--json'],
+    ]);
+  });
+
+  it('names the started worktree as Orca created it, with the suffix Orca added', async () => {
+    const { start } = getRuntime({ 'worktree create': ok({ worktree: { ...WORKTREE, path: '/work/workspaces/billing/pie-21-2', branch: 'pie-21-2' } }) });
+
+    expect(await start({ name: 'pie-21', prompt: '/factory-refine PIE-21', ticket: { key: 'PIE-21', tracker: 'linear' } })).toBe('pie-21-2');
+  });
+
+  it('fails with Orca\'s message when the worktree cannot be started', async () => {
+    const { start } = getRuntime({ 'worktree create': failed('runtime_unreachable', 'Orca is not running') });
+
+    await expect(start({ name: 'pie-21', prompt: '/factory-refine PIE-21', ticket: { key: 'PIE-21', tracker: 'linear' } })).rejects.toThrow('Orca is not running');
   });
 
   it('posts progress as the worktree comment', async () => {

@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
+import type { StartRequest } from '../../../src/view/source.js';
 import { getSource } from './source';
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -26,6 +27,10 @@ export const fetchDetail = createServerFn({ method: 'GET' })
 export const openRun = createServerFn({ method: 'POST' })
   .validator((key: string) => key)
   .handler(async ({ data }) => (await getSource()).openInOrca(data));
+
+export const startRun = createServerFn({ method: 'POST' })
+  .validator((request: StartRequest) => ({ key: String(request.key), command: String(request.command) }))
+  .handler(async ({ data }) => (await getSource()).startInOrca(data));
 
 const PERIODS = [7, 30, 90];
 
