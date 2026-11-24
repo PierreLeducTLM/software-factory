@@ -249,6 +249,14 @@ export const checkWithoutTicket = async (sourceControl: SourceControl, { pullReq
   return { ok: true, action: 'no_ticket' };
 };
 
+export const failTasksCheck = async (sourceControl: SourceControl, { pullRequest: number }: TasksCheck, reason: string): Promise<CheckTasksResult> => {
+  const pullRequest = await sourceControl.getPullRequest(number);
+  const key = pullRequest === undefined ? undefined : TICKET_LINE.exec(pullRequest.body)?.[1];
+  const message = key === undefined ? `The tasks of pull request ${number} could not be checked: ${reason}` : `The factory record of ${key} could not be read: ${reason}`;
+  if (pullRequest !== undefined) await postTasks(sourceControl, pullRequest, 'failure', message);
+  return { ok: false, reason: 'unreadable', message };
+};
+
 export const checkTasks = async (deps: LoopDeps, check: TasksCheck): Promise<CheckTasksResult> => {
   const unticketed = await checkWithoutTicket(deps.sourceControl, check);
   if (unticketed !== undefined) return unticketed;

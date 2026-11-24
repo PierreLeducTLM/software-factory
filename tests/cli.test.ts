@@ -59,13 +59,17 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
   }, Promise.resolve());
   const changedOnMain: string[] = [];
   const commits: Record<string, string> = {};
-  const broken: { reason?: string; git?: string; revert?: string } = {};
+  const broken: { reason?: string; git?: string; revert?: string; pullRequest?: string } = {};
   const scripts: ScriptRun[] = [];
   const verdictFiles: Record<string, string> = {};
   const branchFiles: Record<string, string> = {};
   const { sourceControl: memory, world: git } = createInMemorySourceControl({ now: () => '2026-11-21T08:00:00Z' });
   const sourceControl: SourceControl = {
     ...memory,
+    getPullRequest: async (number) => {
+      if (broken.pullRequest !== undefined) throw new Error(broken.pullRequest);
+      return memory.getPullRequest(number);
+    },
     openRevertPullRequest: async (number) => {
       if (broken.revert !== undefined) throw new Error(broken.revert);
       return memory.openRevertPullRequest(number);
@@ -106,6 +110,7 @@ const getCli = async (ticket: Ticket, files: Readonly<Record<string, string>> = 
         if (broken.reason !== undefined) throw new Error(broken.reason);
         return deps;
       },
+      sourceControl: async () => sourceControl,
       folder: createSpecFolder(),
       readFile: async (path) => {
         const content = verdictFiles[path];
@@ -682,15 +687,23 @@ describe('factory steps run from CI', () => {
     expect(await cli.run('check-tasks', '--pull-request', String(other.number))).toEqual({ code: 0, out: ['No factory ticket'], errors: [] });
   });
 
-  it('skips check-tasks without failing the build when the service account is missing', async () => {
+  it('fails the tasks status and exits 1 when the factory cannot be set up to read the ticket', async () => {
     const cli = await getDeliveredCli();
     cli.broken.reason = 'Set the LINEAR_API_KEY environment variable';
 
-    expect(await cli.run('check-tasks', '--pull-request', '401')).toEqual({
-      code: 0,
-      out: [],
-      errors: ['Set the LINEAR_API_KEY environment variable', 'The factory step was skipped. The build is not affected.'],
-    });
+    const result = await cli.run('check-tasks', '--pull-request', '401');
+
+    expect(result).toEqual({ code: 1, out: [], errors: ['The factory record of PAY-142 could not be read: Set the LINEAR_API_KEY environment variable'] });
+    expect(cli.git.statusesOf('c1')).toEqual([
+      { context: 'factory/tasks', state: 'failure', description: 'The factory record of PAY-142 could not be read: Set the LINEAR_API_KEY environment variable', link: 'memory://pull/401', commit: 'c1' },
+    ]);
+  });
+
+  it('exits 1 with the error when the tasks cannot be checked at all', async () => {
+    const cli = await getDeliveredCli();
+    cli.broken.pullRequest = 'GitHub answered 503 to GET /repos/acme/billing-service/pulls/401';
+
+    expect(await cli.run('check-tasks', '--pull-request', '401')).toEqual({ code: 1, out: [], errors: ['GitHub answered 503 to GET /repos/acme/billing-service/pulls/401'] });
   });
 
   it('passes a pull request with no factory ticket even when the tracker secret is missing, reading it with source control alone', async () => {
@@ -715,9 +728,9 @@ describe('factory steps run from CI', () => {
     const passed = await runWith(other.number);
     const factory = await runWith(401);
 
-    expect([passed, factory]).toEqual([0, 0]);
+    expect([passed, factory]).toEqual([0, 1]);
     expect(out).toEqual(['No factory ticket']);
-    expect(errors).toEqual(['Set the LINEAR_API_KEY environment variable', 'The factory step was skipped. The build is not affected.']);
+    expect(errors).toEqual(['The factory record of PAY-142 could not be read: Set the LINEAR_API_KEY environment variable']);
     expect(cli.git.statusesOf('b1')).toMatchObject([{ context: 'factory/tasks', state: 'success', description: 'No factory ticket' }]);
   });
 

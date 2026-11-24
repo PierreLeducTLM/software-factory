@@ -17,6 +17,7 @@ import {
   acceptTasks,
   checkTasks,
   checkWithoutTicket,
+  failTasksCheck,
   recordMerge,
   revertMerge,
   watchRun,
@@ -259,13 +260,27 @@ const print = ({ argv, write, writeError }: Printer, { result, lines, succeeded 
   return succeeded ? OK : REFUSED;
 };
 
-const withoutTicket = async ({ argv, sourceControl }: Pick<CliOptions, 'argv' | 'sourceControl'>): Promise<Outcome | undefined> => {
+const tasksCheckOf = (argv: readonly string[]): number | undefined => {
   const [name, flag, given] = argv;
-  if (name !== 'check-tasks' || flag !== '--pull-request' || sourceControl === undefined || !/^\d+$/.test(given ?? '')) return undefined;
-  const checked = await sourceControl()
-    .then((source) => checkWithoutTicket(source, { pullRequest: Number(given) }))
-    .catch(() => undefined);
+  return name === 'check-tasks' && flag === '--pull-request' && /^\d+$/.test(given ?? '') ? Number(given) : undefined;
+};
+
+const withSourceControl = async <T>({ sourceControl }: Pick<CliOptions, 'sourceControl'>, use: (source: SourceControl) => Promise<T>): Promise<T | undefined> =>
+  sourceControl === undefined ? undefined : sourceControl().then(use).catch(() => undefined);
+
+const withoutTicket = async (options: Pick<CliOptions, 'argv' | 'sourceControl'>): Promise<Outcome | undefined> => {
+  const pullRequest = tasksCheckOf(options.argv);
+  if (pullRequest === undefined) return undefined;
+  const checked = await withSourceControl(options, (source) => checkWithoutTicket(source, { pullRequest }));
   return checked === undefined ? undefined : checkTasksOutcome(checked);
+};
+
+const tasksCheckFailed = async (options: CliOptions, message: string): Promise<number> => {
+  const pullRequest = tasksCheckOf(options.argv);
+  const failed = pullRequest === undefined ? undefined : await withSourceControl(options, (source) => failTasksCheck(source, { pullRequest }, message));
+  if (failed !== undefined) return print(options, checkTasksOutcome(failed));
+  options.writeError(message);
+  return REFUSED;
 };
 
 export const runCli = async (options: CliOptions): Promise<number> => {
@@ -283,7 +298,9 @@ export const runCli = async (options: CliOptions): Promise<number> => {
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, message: messageOf(error) }),
   );
-  const inCi = CI_COMMANDS.some((name) => name === argv[0]);
+  const checkingTasks = argv[0] === 'check-tasks';
+  const inCi = CI_COMMANDS.some((name) => name === argv[0]) && !checkingTasks;
+  if (!built.ok && checkingTasks) return tasksCheckFailed(options, built.message);
   if (!built.ok) {
     writeError(built.message);
     if (inCi) writeError(SKIPPED);

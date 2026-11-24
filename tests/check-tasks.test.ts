@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TicketProvider } from '../src/adapters/ticket-provider.js';
 import { advance } from '../src/factory/build-loop.js';
-import { acceptTasks, checkTasks } from '../src/factory/merge.js';
+import { acceptTasks, checkTasks, failTasksCheck } from '../src/factory/merge.js';
 import { PASS, getWorld, reachReview, type World } from './fakes/loop-world.js';
 
 const PATH = 'openspec/changes/archive/2026-11-21-billing-export/tasks.md';
@@ -193,6 +193,32 @@ describe('checking the tasks of a pull request in CI', () => {
     const world = await getDelivered();
 
     expect(await checkTasks(world.deps, { pullRequest: 999 })).toEqual({ ok: false, reason: 'unreadable', message: 'Pull request 999 could not be read' });
+  });
+});
+
+describe('failing the tasks check when the factory cannot read the ticket', () => {
+  it('posts a failing status naming the ticket whose record could not be read', async () => {
+    const world = await getDelivered();
+
+    const result = await failTasksCheck(world.sourceControl, { pullRequest: 401 }, 'Set the LINEAR_API_KEY environment variable');
+
+    expect(result).toEqual({ ok: false, reason: 'unreadable', message: 'The factory record of PAY-142 could not be read: Set the LINEAR_API_KEY environment variable' });
+    expect(world.git.statusesOf('commit-1')).toEqual([
+      { context: 'factory/tasks', state: 'failure', description: 'The factory record of PAY-142 could not be read: Set the LINEAR_API_KEY environment variable', link: 'memory://pull/401', commit: 'commit-1' },
+    ]);
+  });
+
+  it('names the pull request when it has no Ticket line, and posts nothing for a pull request that does not exist', async () => {
+    const world = await getDelivered();
+    world.git.push('docs/typo', 'd1');
+    const other = await world.sourceControl.openPullRequest({ branch: 'docs/typo', base: 'main', title: 'Typo', body: 'Fixes a typo' });
+
+    const named = await failTasksCheck(world.sourceControl, { pullRequest: other.number }, 'boom');
+    const missing = await failTasksCheck(world.sourceControl, { pullRequest: 999 }, 'boom');
+
+    expect(named).toMatchObject({ ok: false, message: `The tasks of pull request ${other.number} could not be checked: boom` });
+    expect(world.git.statusesOf('d1')).toMatchObject([{ state: 'failure', description: `The tasks of pull request ${other.number} could not be checked: boom` }]);
+    expect(missing).toMatchObject({ ok: false, message: 'The tasks of pull request 999 could not be checked: boom' });
   });
 });
 
