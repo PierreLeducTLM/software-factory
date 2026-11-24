@@ -57,7 +57,7 @@ export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrc
                 <p className="step__head">
                   <span className={`dot dot--${step.status}`} aria-hidden="true" />
                   <strong>{step.label}</strong>
-                  <span className="step__status">{STATUS_NAMES[step.status]}</span>
+                  <span className="step__status">{step.statusName ?? STATUS_NAMES[step.status]}</span>
                 </p>
                 {step.lines.map((line, index) => (
                   <p className="step__line" key={`${index}-${line}`}>

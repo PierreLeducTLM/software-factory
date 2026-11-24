@@ -744,7 +744,7 @@ describe('setting the command line up in a project', () => {
     const data = await createSampleViewSource().load();
 
     expect(data.providers).toEqual(['Sample data']);
-    expect(data.columns.flatMap((column) => column.cards).length).toBe(27);
+    expect(data.columns.flatMap((column) => column.cards).length).toBe(29);
     expect(data.loadedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 

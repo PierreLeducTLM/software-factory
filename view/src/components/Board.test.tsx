@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-react';
+import type { RunDetail } from '../../../src/view/model.js';
 import { BoardScreen } from './BoardScreen';
 import { textOf, getCard, getColumns, getDetail } from './fixtures';
 
@@ -94,6 +95,41 @@ describe('board', () => {
       'dot dot--waiting',
       'dot dot--pass',
     ]);
+  });
+
+  it('shows how many tasks a pull request leaves open, and the accept command on its Needs you card', async () => {
+    const pullRequest = 'https://github.test/pull/30';
+    const inPr = getCard({ key: 'PIE-63', note: '2 of 9 tasks open · Merge by a person', pullRequest });
+    const needsYou = getCard({ key: 'PIE-63', note: '2 of 9 tasks open. Tick them in a push, or accept them as open.', command: 'factory accept-tasks PIE-63', category: 'open_tasks', pullRequest });
+    const screen = await render(<BoardScreen columns={getColumns({ pr: [inPr], needs_you: [needsYou] })} loadDetail={async () => getDetail()} />);
+    const cards = screen.getByRole('button', { name: /Open PIE-63/ });
+
+    expect(textOf(cards.nth(0))).toContain('2 of 9 tasks open · Merge by a person');
+    expect(cards.nth(1).element().querySelector('.dot')?.className).toBe('dot dot--waiting');
+
+    await cards.nth(1).click();
+
+    const panel = screen.getByRole('complementary', { name: 'Run detail' });
+    await expect.element(panel.getByText('factory accept-tasks PIE-63')).toBeVisible();
+    await expect.element(panel.getByRole('link', { name: 'Open pull request' })).toHaveAttribute('href', pullRequest);
+  });
+
+  it('lists the open tasks of a run in its detail, with their notes and who accepted them', async () => {
+    const tasks: RunDetail['sections'][number] = {
+      title: 'Tasks: 7 of 9 done',
+      steps: [
+        { label: '4.1 Open the board against live Linear', status: 'pass', statusName: 'accepted open', lines: ['Not done: the board was not opened against live Linear', 'Accepted by Pierre on 2026-11-24'], links: [] },
+        { label: '4.2 Record a demo', status: 'fail', statusName: 'open', lines: [], links: [] },
+      ],
+    };
+    const screen = await render(<BoardScreen columns={getColumns({ pr: [getCard({ key: 'PIE-68' })] })} loadDetail={async () => getDetail({ sections: [tasks] })} />);
+
+    await screen.getByRole('button', { name: /Open PIE-68/ }).click();
+
+    const panel = screen.getByRole('complementary', { name: 'Run detail' });
+    await expect.element(panel.getByRole('heading', { name: 'Tasks: 7 of 9 done' })).toBeVisible();
+    expect(textOf(panel.getByRole('listitem').nth(0))).toBe('4.1 Open the board against live Linearaccepted openNot done: the board was not opened against live LinearAccepted by Pierre on 2026-11-24');
+    expect(textOf(panel.getByRole('listitem').nth(1))).toBe('4.2 Record a demoopen');
   });
 
   it('opens the card that was clicked when a ticket shows in its station and in Needs you', async () => {

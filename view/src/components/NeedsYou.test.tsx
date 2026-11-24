@@ -43,6 +43,30 @@ describe('needs you', () => {
     await expect.element(screen.getByRole('button', { name: 'Revert 1' })).toBeVisible();
   });
 
+  it('shows a pull request with open tasks, with the accept command and a link to the pull request', async () => {
+    const copy = vi.fn(async () => undefined);
+    const openTasks = getItem({
+      category: 'open_tasks',
+      key: 'PIE-63',
+      title: 'Block merge on open tasks',
+      why: '2 of 9 tasks open. Tick them in a push, or accept them as open.',
+      command: 'factory accept-tasks PIE-63',
+      link: 'https://github.test/pull/30',
+    });
+    const screen = await render(<NeedsYou items={[openTasks, merge]} now={NOW} copy={copy} />);
+    const row = screen.getByRole('listitem').nth(0);
+
+    expect(row.element().querySelector('.item__label')?.textContent).toBe('Open tasks');
+    expect(textOf(row)).toContain('2 of 9 tasks open. Tick them in a push, or accept them as open.');
+    await expect.element(row.getByText('factory accept-tasks PIE-63')).toBeVisible();
+    await expect.element(row.getByRole('link', { name: 'Open pull request' })).toHaveAttribute('href', 'https://github.test/pull/30');
+    await expect.element(screen.getByRole('button', { name: 'Open tasks 1' })).toBeVisible();
+
+    await row.getByRole('button', { name: 'Copy command' }).click();
+
+    expect(copy).toHaveBeenCalledWith('factory accept-tasks PIE-63');
+  });
+
   it('copies the command of an item, and links to its pull request or report', async () => {
     const copy = vi.fn(async () => undefined);
     const screen = await render(<NeedsYou items={items} now={NOW} copy={copy} />);
