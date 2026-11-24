@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { AgentRuntime, Worktree } from './agent-runtime.js';
@@ -37,9 +37,24 @@ export const createCommandRunner = (binary: string): CommandRunner => {
   return async (args, options) => ({ stdout: (await run(binary, [...args], options === undefined ? {} : { cwd: options.cwd })).stdout });
 };
 
+const looksLikeJson = (text: string): boolean => text.trimStart().startsWith('{');
+
+const printedOnFailure = (error: unknown): string | undefined =>
+  error instanceof Error && 'stdout' in error && typeof error.stdout === 'string' && looksLikeJson(error.stdout) ? error.stdout : undefined;
+
+const printedBy = async (run: CommandRunner, args: readonly string[]): Promise<string> => {
+  try {
+    return (await run(args)).stdout;
+  } catch (error) {
+    const stdout = printedOnFailure(error);
+    if (stdout === undefined) throw error;
+    return stdout;
+  }
+};
+
 const askOrca = async (run: CommandRunner, args: readonly string[]): Promise<Reply> => {
-  const { stdout } = await run([...args, '--json']);
-  const envelope = EnvelopeSchema.safeParse(stdout.trimStart().startsWith('{') ? JSON.parse(stdout) : undefined);
+  const stdout = await printedBy(run, [...args, '--json']);
+  const envelope = EnvelopeSchema.safeParse(looksLikeJson(stdout) ? JSON.parse(stdout) : undefined);
   if (!envelope.success) throw new Error(`Orca did not answer with JSON: ${stdout.slice(0, 200)}`);
   return envelope.data.ok ? { ok: true, result: envelope.data.result } : { ok: false, code: envelope.data.error.code, message: envelope.data.error.message };
 };
@@ -65,13 +80,20 @@ export type WorktreeStart = {
 };
 
 const TICKET_LINKS: Readonly<Record<TicketTracker, string>> = { linear: '--linear-issue', jira: '--reference' };
+const COMMON_GIT_DIR = ['rev-parse', '--path-format=absolute', '--git-common-dir'];
+const REPO_NOT_FOUND = 'repo_not_found';
+
+const unknownRepo = (repoDir: string): string =>
+  `Orca does not know the repo at ${repoDir}. Add it in Orca, or run the dashboard from a worktree of a repo Orca knows.`;
 
 export const createOrcaWorktreeStarter =
-  ({ run, projectDir }: { readonly run: CommandRunner; readonly projectDir: string }) =>
+  ({ run, git }: { readonly run: CommandRunner; readonly git: CommandRunner }) =>
   async ({ name, prompt, ticket }: WorktreeStart): Promise<string> => {
+    const repoDir = dirname((await git(COMMON_GIT_DIR)).stdout.trim());
     const link = [TICKET_LINKS[ticket.tracker], ticket.key];
-    const result = await demandOfOrca(run, ['worktree', 'create', '--repo', `path:${projectDir}`, '--name', name, '--no-parent', ...link, '--agent', 'claude', '--prompt', prompt, '--activate']);
-    return basename(WorktreeResultSchema.parse(result).worktree.path);
+    const reply = await askOrca(run, ['worktree', 'create', '--repo', `path:${repoDir}`, '--name', name, '--no-parent', ...link, '--agent', 'claude', '--prompt', prompt, '--activate']);
+    if (!reply.ok) throw new Error(reply.code === REPO_NOT_FOUND ? unknownRepo(repoDir) : reply.message);
+    return basename(WorktreeResultSchema.parse(reply.result).worktree.path);
   };
 
 export const createOrcaAgentRuntime = ({ run }: { readonly run: CommandRunner }): AgentRuntime => {
