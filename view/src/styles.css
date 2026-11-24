@@ -465,6 +465,18 @@ p {
   cursor: progress;
 }
 
+.start-in-orca:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.start-in-orca__status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .list__title {
   margin: 0;
   font-family: var(--display);

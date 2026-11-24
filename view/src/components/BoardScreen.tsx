@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Card, Column, RunDetail } from '../../../src/view/model.js';
-import type { OpenResult } from '../../../src/view/source.js';
+import type { OpenResult, StartRequest, StartResult } from '../../../src/view/source.js';
 import { Board, type Selected } from './Board';
 import { RunDetailPanel } from './RunDetailPanel';
 
@@ -9,11 +9,12 @@ type Props = {
   readonly loadDetail: (key: string) => Promise<RunDetail | undefined>;
   readonly copy?: (text: string) => Promise<void>;
   readonly openInOrca?: (key: string) => Promise<OpenResult>;
+  readonly startInOrca?: (request: StartRequest) => Promise<StartResult>;
 };
 
 type Selection = Selected & { readonly detail: RunDetail | undefined; readonly loading: boolean };
 
-export function BoardScreen({ columns, loadDetail, copy, openInOrca }: Props) {
+export function BoardScreen({ columns, loadDetail, copy, openInOrca, startInOrca }: Props) {
   const [selection, setSelection] = useState<Selection | undefined>(undefined);
   const matches = (candidate: Card): boolean => candidate.key === selection?.key;
   const card = columns.find((column) => column.id === selection?.column)?.cards.find(matches) ?? columns.flatMap((column) => column.cards).find(matches);
@@ -28,7 +29,15 @@ export function BoardScreen({ columns, loadDetail, copy, openInOrca }: Props) {
     <main className="screen">
       <Board columns={columns} onSelect={select} {...(selection === undefined ? {} : { selected: { column: selection.column, key: selection.key } })} />
       {selection === undefined || card === undefined ? null : (
-        <RunDetailPanel card={card} detail={selection.detail} loading={selection.loading} onClose={() => setSelection(undefined)} {...(copy === undefined ? {} : { copy })} {...(openInOrca === undefined ? {} : { openInOrca })} />
+        <RunDetailPanel
+          card={card}
+          detail={selection.detail}
+          loading={selection.loading}
+          onClose={() => setSelection(undefined)}
+          {...(copy === undefined ? {} : { copy })}
+          {...(openInOrca === undefined ? {} : { openInOrca })}
+          {...(startInOrca === undefined ? {} : { startInOrca })}
+        />
       )}
     </main>
   );
