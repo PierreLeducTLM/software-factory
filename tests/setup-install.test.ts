@@ -23,6 +23,9 @@ const getAnswers = (overrides?: Partial<InstallAnswers>): InstallAnswers => ({
   ...overrides,
 });
 
+const REQUIRED_CHECK = 'After this pull request is merged, mark factory/tasks as a required status check on main, in its branch protection or a ruleset, so open tasks block the merge.';
+const MERGE_CHECK = 'After this pull request is merged, turn on the merge check that requires passing builds in the branch restrictions of main, so the factory/tasks build blocks the merge while tasks are open.';
+
 const factoryOf = (answers: InstallAnswers) => {
   const parsed = parseFactoryConfig(buildInstall(answers).files['.factory/factory.yaml'] ?? '');
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.issues));
@@ -133,7 +136,21 @@ describe('the CI steps of an install on GitHub', () => {
     expect(workflow).toContain('env:\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
     expect(workflow).toContain('          fetch-depth: 0\n');
     expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
-    expect(install.manual).toEqual([]);
+    expect(install.manual).toEqual([REQUIRED_CHECK]);
+  });
+
+  it('GitHub install: adds the tasks workflow, which checks the tasks of every pull request under the service account, and asks to make its check required', async () => {
+    const install = buildInstall(getAnswers({ mainBranch: 'trunk' }));
+    const workflow = install.files['.github/workflows/factory-tasks.yml'] ?? '';
+    const detection = await detectProject({ files: createInMemoryProjectFiles({ '.github/workflows/factory-tasks.yml': workflow }) });
+
+    expect(detection.ci.factorySteps).toEqual(['check-tasks']);
+    expect(detection.ci.jobs.map((job) => [job.name, job.commands])).toEqual([['check-tasks', ['.factory/bin/factory check-tasks --pull-request ${{ github.event.pull_request.number }}']]]);
+    expect(workflow).toContain('on:\n  pull_request:\n    types: [opened, synchronize, reopened]\npermissions:\n  contents: read\n  pull-requests: write\n  statuses: write\n');
+    expect(workflow).toContain('env:\n  JIRA_TOKEN: ${{ secrets.FACTORY_JIRA_TOKEN }}\n  JIRA_EMAIL: ${{ secrets.FACTORY_JIRA_EMAIL }}\n  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\njobs:');
+    expect(workflow).not.toContain('    if:');
+    expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
+    expect(install.manual).toEqual(['After this pull request is merged, mark factory/tasks as a required status check on trunk, in its branch protection or a ruleset, so open tasks block the merge.']);
   });
 
   it('adds the watch step only when the project has a staging watch', async () => {
@@ -154,7 +171,7 @@ describe('the CI steps of an install on GitHub', () => {
 
     expect(install.files['.github/workflows/factory.yml']).not.toContain('revert');
     expect(install.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(install.manual).toEqual(['The revert step was left out: name the workflow that builds the main branch, then run the install again.']);
+    expect(install.manual).toEqual(['The revert step was left out: name the workflow that builds the main branch, then run the install again.', REQUIRED_CHECK]);
   });
 
   it('adds the factory workflow with record-merge, and lists the tracker secrets, on a GitHub repository with no CI', async () => {
@@ -165,7 +182,7 @@ describe('the CI steps of an install on GitHub', () => {
     expect(detection.ci.factorySteps).toEqual(['record-merge']);
     expect(workflow).not.toContain('workflow_run');
     expect(install.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
-    expect(install.manual).toEqual(['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.']);
+    expect(install.manual).toEqual(['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.', REQUIRED_CHECK]);
   });
 });
 
@@ -176,7 +193,7 @@ describe('the CI steps of an install elsewhere', () => {
     const watched = buildInstall({ ...answers, watch: { checks: ['./smoke.sh'], duration: '10m', interval: '1m', environment: 'staging' } });
 
     expect(Object.keys(install.files)).not.toContain('.github/workflows/factory.yml');
-    expect(install.manual).toEqual([
+    expect(install.manual.slice(0, 2)).toEqual([
       'Add this step to bitbucket-pipelines.yml, under pipelines > branches > main:\n- step:\n    name: Factory record-merge\n    script:\n      - .factory/bin/factory record-merge --commit $BITBUCKET_COMMIT',
       'Add this after-script to the step that builds main:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then .factory/bin/factory revert --commit $BITBUCKET_COMMIT; fi',
     ]);
@@ -185,15 +202,28 @@ describe('the CI steps of an install elsewhere', () => {
     expect(buildInstall({ ...answers, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN' } }).secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'BB_TOKEN']);
   });
 
+  it('Bitbucket install: gives the check-tasks step for pull requests, and the merge check that makes its build required', async () => {
+    const install = buildInstall(getAnswers({ mainBranch: 'trunk', ci: { system: 'bitbucket-pipelines' }, sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
+    const step = install.manual[2] ?? '';
+    const pipeline = `pipelines:\n  pull-requests:\n    '**':\n${step.split('\n').slice(1).map((line) => `      ${line}`).join('\n')}\n`;
+    const detection = await detectProject({ files: createInMemoryProjectFiles({ 'bitbucket-pipelines.yml': pipeline }) });
+
+    expect(Object.keys(install.files)).not.toContain('.github/workflows/factory-tasks.yml');
+    expect(step).toBe("Add this step to bitbucket-pipelines.yml, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - .factory/bin/factory check-tasks --pull-request $BITBUCKET_PR_ID");
+    expect(detection.ci.factorySteps).toEqual(['check-tasks']);
+    expect(install.manual.slice(3)).toEqual(['After this pull request is merged, turn on the merge check that requires passing builds in the branch restrictions of trunk, so the factory/tasks build blocks the merge while tasks are open.']);
+  });
+
   it('keeps the GitHub workflow for a Bitbucket repository whose CI is GitHub Actions, and the Bitbucket steps for a GitHub repository built by Bitbucket Pipelines', () => {
     const actions = buildInstall(getAnswers({ sourceControl: { kind: 'bitbucket', tokenEnv: 'BB_TOKEN', usernameEnv: 'BB_USER' } }));
     const pipelines = buildInstall(getAnswers({ ci: { system: 'bitbucket-pipelines' } }));
 
     expect(Object.keys(actions.files)).toContain('.github/workflows/factory.yml');
     expect(actions.secrets).toEqual(['FACTORY_JIRA_TOKEN', 'FACTORY_JIRA_EMAIL']);
-    expect(actions.manual).toEqual([]);
+    expect(actions.manual).toEqual([MERGE_CHECK]);
     expect(Object.keys(pipelines.files)).not.toContain('.github/workflows/factory.yml');
-    expect(pipelines.manual).toHaveLength(2);
+    expect(pipelines.manual).toHaveLength(4);
+    expect(pipelines.manual.at(-1)).toBe(REQUIRED_CHECK);
     expect(pipelines.secrets).toEqual(['JIRA_TOKEN', 'JIRA_EMAIL', 'GH_TOKEN']);
   });
 

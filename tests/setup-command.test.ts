@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { OpenPullRequest } from '../src/adapters/source-control.js';
+import type { OpenPullRequest, RequiredChecks } from '../src/adapters/source-control.js';
 import type { Access, ProviderStatus } from '../src/adapters/ticket-provider.js';
 import { setupCommand } from '../src/cli/setup-command.js';
 import type { ScriptRun } from '../src/factory/checks.js';
@@ -39,6 +39,13 @@ jobs:
       - run: factory revert
 `;
 
+const TASKS_CI = `
+jobs:
+  check-tasks:
+    steps:
+      - run: factory check-tasks --pull-request 1
+`;
+
 const USAGE = [
   'Usage:',
   '  factory doctor [--run-checks] [--ticket <KEY>]',
@@ -57,11 +64,12 @@ const HEALTHY: Readonly<Record<string, string>> = {
   '.factory/factory.yaml': FACTORY,
   '.factory/adapters.yaml': ADAPTERS,
   '.github/workflows/factory.yml': FACTORY_CI,
+  '.github/workflows/factory-tasks.yml': TASKS_CI,
   'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }),
   'pnpm-lock.yaml': '',
 };
 
-type World = { readonly runs?: readonly ScriptRun[]; readonly access?: Access; readonly broken?: string; readonly main?: Readonly<Record<string, string>>; readonly statuses?: readonly ProviderStatus[] };
+type World = { readonly runs?: readonly ScriptRun[]; readonly access?: Access; readonly broken?: string; readonly main?: Readonly<Record<string, string>>; readonly statuses?: readonly ProviderStatus[]; readonly required?: RequiredChecks };
 
 const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) => {
   const runs = [...(world.runs ?? [])];
@@ -85,6 +93,7 @@ const getSetup = (files: Readonly<Record<string, string>>, world: World = {}) =>
             return world.access ?? { comment: true, transition: true };
           },
           canReenter: async () => false,
+          requiredChecks: async () => world.required ?? ['factory/tasks'],
           publishFiles: async (change) => void published.push(change),
           openPullRequest: async ({ branch }) => {
             opened.push(branch);
@@ -166,6 +175,18 @@ describe('factory doctor', () => {
       'Notes:',
       `- Engine ${ENGINE_VERSION} is a newer patch than the ${olderPatch} pinned in .factory/factory.yaml. Run "factory migrate" to move the project to it`,
     ]);
+  });
+
+  it('fails when factory/tasks is not required, and only notes it when the required checks cannot be read', async () => {
+    const notRequired = await getSetup(HEALTHY, { required: [] }).run('doctor');
+    const unreadable = await getSetup(HEALTHY, { required: 'unreadable' }).run('doctor');
+
+    expect(notRequired).toEqual({ code: 1, out: ['Drift found:', '- factory/tasks is not a required check on main, so open tasks do not block the merge'], errors: [] });
+    expect(unreadable).toEqual({
+      code: 0,
+      out: ['No drift found', 'Notes:', '- Could not verify the required checks on main: the token cannot read its branch protection, rulesets or merge checks. Check by hand that factory/tasks is required there'],
+      errors: [],
+    });
   });
 
   it('answers with the report as JSON', async () => {
@@ -290,6 +311,7 @@ describe('factory init', () => {
       'Store these CI secrets: FACTORY_LINEAR_API_KEY',
       'By hand:',
       '- The revert step was left out because no workflow builds the main branch. Add one, then run the install again.',
+      '- After this pull request is merged, mark factory/tasks as a required status check on main, in its branch protection or a ruleset, so open tasks block the merge.',
     ]);
     expect(setup.accessed).toEqual(['PAY-1']);
     expect(setup.opened).toEqual(['factory/install']);
@@ -310,15 +332,14 @@ describe('factory init', () => {
     expect(setup.published[0]?.files['.factory/adapters.yaml']).toContain('base_url: https://acme.atlassian.net');
   });
 
-  it('leaves out the steps by hand when CI does everything, and takes the statuses the person chose', async () => {
+  it('leaves only the required check by hand when CI does everything, and takes the statuses the person chose', async () => {
     const few = ['To refine', 'Backlog', 'Doing', 'Done', 'Ready for Dev'].map((name) => ({ name, category: 'todo' as const }));
     const ci = { ...NEW_PROJECT, '.github/workflows/ci.yml': 'name: CI\njobs:\n  t:\n    steps:\n      - run: pnpm test\n' };
 
     const { out, errors } = await getSetup(ci, { statuses: few }).run('init', '--ticket', 'PAY-1', '--team', 'PAY', '--source-control', 'github', '--statuses', 'spec_review=Backlog;in_review=Doing;blocked=Doing');
 
     expect(errors).toEqual([]);
-    expect(out).not.toContain('By hand:');
-    expect(out.at(-1)).toMatch(/^Store these CI secrets: FACTORY_/);
+    expect(out.slice(-3)).toEqual([expect.stringMatching(/^Store these CI secrets: FACTORY_/), 'By hand:', '- After this pull request is merged, mark factory/tasks as a required status check on main, in its branch protection or a ruleset, so open tasks block the merge.']);
     expect(out).toContain('Statuses: to_refine=To refine, spec_review=Backlog, ready_for_dev=Ready for Dev, in_development=Doing, in_review=Doing, blocked=Doing, done=Done');
   });
 

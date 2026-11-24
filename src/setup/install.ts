@@ -47,6 +47,7 @@ const DEFAULT_LABELS = { auto: 'factory-auto', no_automerge: 'factory:no-automer
 const FACTORY_YAML = '.factory/factory.yaml';
 const ADAPTERS_YAML = '.factory/adapters.yaml';
 export const WORKFLOW_FILE = '.github/workflows/factory.yml';
+export const TASKS_WORKFLOW_FILE = '.github/workflows/factory-tasks.yml';
 const BITBUCKET_FILE = 'bitbucket-pipelines.yml';
 
 const RUBRICS_README = `# Agent check rubrics
@@ -112,8 +113,7 @@ const adaptersYaml = ({ repository, ticketProvider, sourceControl }: Connection)
 const providerEnvs = ({ ticketProvider }: InstallAnswers): readonly string[] =>
   ticketProvider.kind === 'jira' ? [ticketProvider.tokenEnv, ticketProvider.emailEnv] : [ticketProvider.tokenEnv];
 
-const githubJob = (condition: string, command: string): readonly string[] => [
-  `    if: ${condition}`,
+const githubSteps = (command: string): readonly string[] => [
   '    runs-on: ubuntu-latest',
   '    steps:',
   '      - uses: actions/checkout@v4',
@@ -123,6 +123,14 @@ const githubJob = (condition: string, command: string): readonly string[] => [
   '        with:',
   '          node-version: 22',
   `      - run: ${FACTORY} ${command}`,
+];
+
+const githubJob = (condition: string, command: string): readonly string[] => [`    if: ${condition}`, ...githubSteps(command)];
+
+const serviceAccount = (envs: readonly string[], tokenEnv: string | undefined): readonly string[] => [
+  'env:',
+  ...envs.map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
+  ...(tokenEnv === undefined ? [] : [`  ${tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`]),
 ];
 
 export type FactoryWorkflowInput = {
@@ -148,9 +156,7 @@ export const factoryWorkflow = ({ mainBranch, providerEnvs: envs, tokenEnv, main
     'permissions:',
     '  contents: write',
     '  pull-requests: write',
-    'env:',
-    ...envs.map((env) => `  ${env}: \${{ secrets.${secretName(env)} }}`),
-    ...(tokenEnv === undefined ? [] : [`  ${tokenEnv}: \${{ secrets.GITHUB_TOKEN }}`]),
+    ...serviceAccount(envs, tokenEnv),
     'jobs:',
     '  record-merge:',
     ...githubJob("github.event_name == 'push'", 'record-merge --commit ${{ github.sha }}'),
@@ -170,6 +176,36 @@ export const factoryWorkflow = ({ mainBranch, providerEnvs: envs, tokenEnv, main
   ].join('\n'),
 });
 
+export type TasksWorkflowInput = Pick<FactoryWorkflowInput, 'providerEnvs' | 'tokenEnv'>;
+
+export const tasksWorkflow = ({ providerEnvs: envs, tokenEnv }: TasksWorkflowInput): FactoryWorkflow => ({
+  path: TASKS_WORKFLOW_FILE,
+  secrets: envs.map(secretName),
+  text: [
+    'name: Factory tasks',
+    'on:',
+    '  pull_request:',
+    '    types: [opened, synchronize, reopened]',
+    'permissions:',
+    '  contents: read',
+    '  pull-requests: write',
+    '  statuses: write',
+    ...serviceAccount(envs, tokenEnv),
+    'jobs:',
+    '  check-tasks:',
+    ...githubSteps('check-tasks --pull-request ${{ github.event.pull_request.number }}'),
+    '',
+  ].join('\n'),
+});
+
+export const requiredCheckStep = (mainBranch: string): string =>
+  `After this pull request is merged, mark factory/tasks as a required status check on ${mainBranch}, in its branch protection or a ruleset, so open tasks block the merge.`;
+
+const mergeCheckStep = (mainBranch: string): string =>
+  `After this pull request is merged, turn on the merge check that requires passing builds in the branch restrictions of ${mainBranch}, so the factory/tasks build blocks the merge while tasks are open.`;
+
+const requiredStep = ({ sourceControl, mainBranch }: InstallAnswers): string => (sourceControl.kind === 'github' ? requiredCheckStep(mainBranch) : mergeCheckStep(mainBranch));
+
 const githubWorkflow = (answers: InstallAnswers): FactoryWorkflow =>
   factoryWorkflow({
     mainBranch: answers.mainBranch,
@@ -183,6 +219,7 @@ const bitbucketSteps = ({ mainBranch, watch }: InstallAnswers): readonly string[
   `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
   `Add this after-script to the step that builds ${mainBranch}:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then ${FACTORY} revert --commit $BITBUCKET_COMMIT; fi`,
   ...(watch === undefined ? [] : [`Add this step after the deployment to ${watch.environment}:\n- step:\n    name: Factory watch\n    script:\n      - ${FACTORY} watch --commit $BITBUCKET_COMMIT`]),
+  `Add this step to ${BITBUCKET_FILE}, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - ${FACTORY} check-tasks --pull-request $BITBUCKET_PR_ID`,
 ];
 
 const checked = (path: string, text: string, issues: readonly { readonly path: string; readonly message: string }[] | undefined): string => {
@@ -203,7 +240,7 @@ export const buildInstall = (answers: InstallAnswers): Install => {
       [ADAPTERS_YAML]: checked(ADAPTERS_YAML, adapters, parsedAdapters.ok ? undefined : parsedAdapters.issues),
       '.factory/checks/README.md': RUBRICS_README,
       ...engineFiles(answers.engine),
-      ...(github ? { [WORKFLOW_FILE]: githubWorkflow(answers).text } : {}),
+      ...(github ? { [WORKFLOW_FILE]: githubWorkflow(answers).text, [TASKS_WORKFLOW_FILE]: tasksWorkflow({ providerEnvs: providerEnvs(answers), tokenEnv: answers.sourceControl.tokenEnv }).text } : {}),
     },
     executable: [LAUNCHER_PATH],
     manual: [
@@ -211,6 +248,7 @@ export const buildInstall = (answers: InstallAnswers): Install => {
       ...(system === 'none' && !github ? ['No CI system was found. Run "factory record-merge" on every merge to the main branch, and "factory revert" when the main build fails, from whatever builds this project.'] : []),
       ...(github && system === 'none' ? [NO_MAIN_BUILD] : []),
       ...(github && system !== 'none' && workflow === undefined ? [UNNAMED_MAIN_BUILD] : []),
+      ...(github || system === 'bitbucket-pipelines' ? [requiredStep(answers)] : []),
     ],
     secrets: github ? githubWorkflow(answers).secrets : system === 'none' ? [] : [...providerEnvs(answers), answers.sourceControl.tokenEnv, ...(answers.sourceControl.usernameEnv === undefined ? [] : [answers.sourceControl.usernameEnv])],
   };
