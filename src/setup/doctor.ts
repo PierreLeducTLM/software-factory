@@ -1,15 +1,17 @@
+import { requiresCheck, type RequiredChecks } from '../adapters/source-control.js';
 import type { Access } from '../adapters/ticket-provider.js';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig, type ConfigResult, type FactoryConfig } from '../config/project-config.js';
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION, enginePinMatches } from '../version.js';
-import { detectProject } from './detect.js';
+import { detectProject, FACTORY_WORKFLOWS } from './detect.js';
 import { ENGINE_PACKAGE_PATH, enginePackage, LAUNCHER_PATH } from './engine-files.js';
+import { TASKS_WORKFLOW_FILE, WORKFLOW_FILE } from './install.js';
 import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles } from './project-files.js';
 import { isNewerPatch } from './upgrade.js';
 import { verifyChecks } from './verify.js';
 
-export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' | 'unused_script' | 'ci_step' | 'ci_secret' | 'failing_check' | 'flaky_check' | 'service_account' | 'claim_lock';
+export type FindingKind = 'config' | 'secret' | 'schema' | 'engine' | 'ci_job' | 'unused_script' | 'ci_step' | 'ci_secret' | 'failing_check' | 'flaky_check' | 'service_account' | 'claim_lock' | 'required_check';
 
 export type Finding = { readonly kind: FindingKind; readonly message: string };
 
@@ -21,6 +23,7 @@ export type DoctorDeps = {
   readonly now: () => string;
   readonly checkAccess: (key: string) => Promise<Access>;
   readonly canReenter: (request: { readonly key: string; readonly status: string }) => Promise<boolean>;
+  readonly requiredChecks: (branch: string) => Promise<RequiredChecks>;
 };
 
 type Upgrade = { readonly migrations: readonly Migration[]; readonly target: number };
@@ -30,7 +33,8 @@ type DoctorOptions = { readonly runChecks: boolean; readonly ticket?: string; re
 const FACTORY_YAML = '.factory/factory.yaml';
 const ADAPTERS_YAML = '.factory/adapters.yaml';
 const SECRET_MESSAGE = 'Secrets must not be stored in adapters.yaml';
-const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
+const STEP_WORKFLOWS: Readonly<Record<string, string>> = { 'record-merge': WORKFLOW_FILE, 'check-tasks': TASKS_WORKFLOW_FILE };
+const TASKS_CHECK = 'factory/tasks';
 const MIGRATE_HINT = '. Run "factory migrate" and merge the pull request it opens';
 
 const finding = (kind: FindingKind, message: string): Finding => ({ kind, message });
@@ -77,10 +81,11 @@ const driftFindings = async (deps: DoctorDeps, config: FactoryConfig, adapters: 
   const detection = await detectProject({ files: deps.files });
   const jobs = detection.ci.jobs.map((job) => job.name);
   const gated = (run: string): boolean => config.checks.some((check) => check.kind === 'script' && check.run === run);
-  const builds = detection.ci.jobs.some((job) => job.file !== FACTORY_WORKFLOW);
-  const expected = ['record-merge', ...(builds ? ['revert'] : []), ...(config.watch.enabled ? ['watch'] : [])];
-  const migrates = adapters?.source_control.kind === 'github' && (await deps.files.read(FACTORY_WORKFLOW)) === undefined;
-  const hint = (step: string): string => (step === 'record-merge' && migrates ? MIGRATE_HINT : '');
+  const builds = detection.ci.jobs.some((job) => !FACTORY_WORKFLOWS.includes(job.file));
+  const expected = ['record-merge', ...(builds ? ['revert'] : []), ...(config.watch.enabled ? ['watch'] : []), 'check-tasks'];
+  const workflows = adapters?.source_control.kind === 'github' ? Object.values(STEP_WORKFLOWS) : [];
+  const missing = (await Promise.all(workflows.map(async (path) => ((await deps.files.read(path)) === undefined ? [path] : [])))).flat();
+  const hint = (step: string): string => (missing.includes(STEP_WORKFLOWS[step] ?? '') ? MIGRATE_HINT : '');
   const ciTexts = await Promise.all(detection.ci.files.map((file) => deps.files.read(file)));
   const local = config.checks.flatMap((check) => (check.kind === 'script' && check.source === 'local' && check.run !== undefined ? [{ id: check.id, category: 'tests' as const, source: 'local' as const, run: check.run, from: FACTORY_YAML }] : []));
   const verified = runChecks ? await verifyChecks(deps, local) : [];
@@ -102,6 +107,20 @@ const driftFindings = async (deps: DoctorDeps, config: FactoryConfig, adapters: 
   ];
 };
 
+type Verdict = { readonly findings: readonly Finding[]; readonly notes: readonly string[] };
+
+const couldNotVerify = (branch: string, reason: string): Verdict => ({ findings: [], notes: [`Could not verify the required checks on ${branch}: ${reason}. Check by hand that ${TASKS_CHECK} is required there`] });
+
+const requiredCheckVerdict = async (deps: DoctorDeps, branch: string): Promise<Verdict> => {
+  try {
+    const required = await deps.requiredChecks(branch);
+    if (required === 'unreadable') return couldNotVerify(branch, 'the token cannot read its branch protection, rulesets or merge checks');
+    return { findings: requiresCheck(required, TASKS_CHECK) ? [] : [finding('required_check', `${TASKS_CHECK} is not a required check on ${branch}, so open tasks do not block the merge`)], notes: [] };
+  } catch (error) {
+    return couldNotVerify(branch, messageOf(error));
+  }
+};
+
 const patchNotes = (pinned: string, engine: string = ENGINE_VERSION): readonly string[] =>
   isNewerPatch(pinned, engine) ? [`Engine ${engine} is a newer patch than the ${pinned} pinned in ${FACTORY_YAML}. Run "factory migrate" to move the project to it`] : [];
 
@@ -111,7 +130,8 @@ export const runDoctor = async (deps: DoctorDeps, options: DoctorOptions): Promi
   const factory: { readonly value?: FactoryConfig; readonly findings: readonly Finding[] } = schema.length > 0 ? { findings: schema } : configFindings(FACTORY_YAML, factoryText, parseFactoryConfig);
   const adapters = configFindings(ADAPTERS_YAML, await deps.files.read(ADAPTERS_YAML), parseAdaptersConfig);
   const drift = factory.value !== undefined ? await driftFindings(deps, factory.value, adapters.value, options) : [];
+  const required = factory.value !== undefined && adapters.value !== undefined ? await requiredCheckVerdict(deps, factory.value.main_branch) : { findings: [], notes: [] };
   const account = options.ticket === undefined ? [] : await accountFindings(deps, options.ticket, factory.value?.states.in_development);
-  const findings = [...factory.findings, ...adapters.findings, ...drift, ...account];
-  return { ok: findings.length === 0, findings, notes: factory.value === undefined ? [] : patchNotes(factory.value.engine, options.engine) };
+  const findings = [...factory.findings, ...adapters.findings, ...drift, ...required.findings, ...account];
+  return { ok: findings.length === 0, findings, notes: [...(factory.value === undefined ? [] : patchNotes(factory.value.engine, options.engine)), ...required.notes] };
 };

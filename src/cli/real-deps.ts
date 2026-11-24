@@ -170,6 +170,7 @@ export const createSetupDeps = ({ cwd, env }: Options): SetupDeps => {
     now,
     checkAccess: async (key) => createTicketProvider(await adapters(), env, http).checkAccess(key),
     canReenter: async (request) => createTicketProvider(await adapters(), env, http).canReenter(request),
+    requiredChecks: async (branch) => createSourceControl(await adapters(), env, http).requiredChecks(branch),
     publishFiles: createFilePublisher({ run: git }),
     readFile: (path) => readFile(join(cwd, path), 'utf8'),
     remoteUrl: repository.remoteUrl,

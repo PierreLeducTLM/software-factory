@@ -286,6 +286,7 @@ describe('measuring the checks while setting up', () => {
 
 describe('the CI of the project while setting up', () => {
   const GITHUB = WITH_CI;
+  const REQUIRED_CHECK = 'After this pull request is merged, mark factory/tasks as a required status check on main, in its branch protection or a ruleset, so open tasks block the merge.';
 
   it('names the workflow that builds main, so the revert step follows it', async () => {
     const { deps, published } = getInit({ files: GITHUB });
@@ -294,7 +295,7 @@ describe('the CI of the project while setting up', () => {
 
     const workflow = published[0]?.files['.github/workflows/factory.yml'] ?? '';
     expect(workflow).toContain('workflows: ["CI"]');
-    expect(result).toMatchObject({ ok: true, manual: [] });
+    expect(result).toMatchObject({ ok: true, manual: [REQUIRED_CHECK] });
     expect(parse(workflow).jobs).toHaveProperty('revert');
   });
 
@@ -336,7 +337,7 @@ describe('the CI of the project while setting up', () => {
     const result = await initProject(deps, LINEAR);
 
     expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out: name the workflow that builds the main branch, then run the install again.'] });
+    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out: name the workflow that builds the main branch, then run the install again.', REQUIRED_CHECK] });
   });
 
   it('says no workflow builds main when the only workflow is the factory workflow from an earlier install', async () => {
@@ -346,7 +347,40 @@ describe('the CI of the project while setting up', () => {
     const result = await initProject(deps, LINEAR);
 
     expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.'] });
+    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.', REQUIRED_CHECK] });
+  });
+
+  it('GitHub install: adds the tasks workflow to the install pull request, and says there to make factory/tasks a required status check', async () => {
+    const { deps, published, opened } = getInit({ files: GITHUB, defaultBranch: 'trunk' });
+
+    await initProject(deps, LINEAR);
+
+    expect(parse(published[0]?.files['.github/workflows/factory-tasks.yml'] ?? '').on).toEqual({ pull_request: { types: ['opened', 'synchronize', 'reopened'] } });
+    expect(opened[0]?.body.split('\n')).toContain('- After this pull request is merged, mark factory/tasks as a required status check on trunk, in its branch protection or a ruleset, so open tasks block the merge.');
+  });
+
+  it('Bitbucket install: lists the check-tasks pipeline step and the merge check for factory/tasks among the steps by hand', async () => {
+    const pipelines = 'pipelines:\n  branches:\n    main:\n      - step:\n          name: Build\n          script:\n            - pnpm test\n';
+    const { deps, published, opened } = getInit({ files: { ...PROJECT, 'bitbucket-pipelines.yml': pipelines }, remoteUrl: 'git@bitbucket.org:acme/billing-service.git' });
+
+    const result = await initProject(deps, LINEAR);
+    const manual = result.ok ? result.manual : [];
+
+    expect(Object.keys(published[0]?.files ?? {})).not.toContain('.github/workflows/factory-tasks.yml');
+    expect(manual.filter((step) => step.includes('factory check-tasks --pull-request $BITBUCKET_PR_ID'))).toHaveLength(1);
+    expect(manual.at(-1)).toBe('After this pull request is merged, turn on the merge check that requires passing builds in the branch restrictions of main, so the factory/tasks build blocks the merge while tasks are open.');
+    expect(opened[0]?.body).toContain(`- ${manual.at(-1) ?? ''}`);
+  });
+
+  it('does not mistake its own tasks workflow for the one that builds main, when it is installed again', async () => {
+    const factoryOnly = 'name: Factory\non: push\njobs:\n  record-merge:\n    steps:\n      - run: .factory/bin/factory record-merge --commit ${{ github.sha }}\n';
+    const tasksOnly = 'name: Factory tasks\non: pull_request\njobs:\n  check-tasks:\n    steps:\n      - run: .factory/bin/factory check-tasks --pull-request 1\n';
+    const { deps, published } = getInit({ files: { ...PROJECT, '.github/workflows/factory.yml': factoryOnly, '.github/workflows/factory-tasks.yml': tasksOnly } });
+
+    const result = await initProject(deps, LINEAR);
+
+    expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
+    expect(result).toMatchObject({ ok: true, manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.', REQUIRED_CHECK] });
   });
 
   it('adds the factory workflow without revert to a GitHub project without CI, and says why revert is missing', async () => {
@@ -356,7 +390,7 @@ describe('the CI of the project while setting up', () => {
 
     expect(published[0]?.files['.github/workflows/factory.yml']).toContain('record-merge');
     expect(published[0]?.files['.github/workflows/factory.yml']).not.toContain('workflow_run');
-    expect(result).toMatchObject({ ok: true, secrets: ['FACTORY_LINEAR_API_KEY'], manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.'] });
+    expect(result).toMatchObject({ ok: true, secrets: ['FACTORY_LINEAR_API_KEY'], manual: ['The revert step was left out because no workflow builds the main branch. Add one, then run the install again.', REQUIRED_CHECK] });
   });
 });
 

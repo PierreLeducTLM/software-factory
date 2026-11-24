@@ -5,7 +5,7 @@ import { parseAdaptersConfig } from '../config/project-config.js';
 import { ENGINE_VERSION, enginePinMatches } from '../version.js';
 import { detectProject, mainBuildWorkflow } from './detect.js';
 import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
-import { factoryWorkflow, WORKFLOW_FILE, type FactoryWorkflow } from './install.js';
+import { factoryWorkflow, requiredCheckStep, tasksWorkflow, TASKS_WORKFLOW_FILE, WORKFLOW_FILE, type FactoryWorkflow } from './install.js';
 import { migrateConfig, type Migration } from './migrate.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
 
@@ -63,19 +63,23 @@ const staleEngineFiles = async (files: ProjectFiles, engine: string): Promise<Re
 
 const body = (lines: readonly string[]): string => lines.join('\n');
 
-const missingWorkflow = async (files: ProjectFiles, pin: Pin): Promise<AddedWorkflow | undefined> => {
+type ServiceAccount = { readonly providerEnvs: readonly string[]; readonly tokenEnv?: string };
+
+const githubAccount = async (files: ProjectFiles): Promise<ServiceAccount | undefined> => {
   const adaptersText = await files.read(ADAPTERS_YAML);
   const adapters = adaptersText === undefined ? undefined : parseAdaptersConfig(adaptersText);
   if (adapters === undefined || !adapters.ok || adapters.value.source_control.kind !== 'github') return undefined;
   const { ticket_providers: providers, source_control: sourceControl } = adapters.value;
-  if ((await files.read(WORKFLOW_FILE)) !== undefined) return undefined;
-  const mainBuild = await mainBuildWorkflow(files, await detectProject({ files }));
-  const workflow = factoryWorkflow({
-    mainBranch: pin.main_branch,
+  return {
     providerEnvs: providers.flatMap((provider) => [provider.token_env, provider.email_env]).flatMap((name) => (name === undefined ? [] : [name])),
     ...(sourceControl.token_env === undefined ? {} : { tokenEnv: sourceControl.token_env }),
-    ...(mainBuild === undefined ? {} : { mainBuild }),
-  });
+  };
+};
+
+const missingFactoryWorkflow = async (files: ProjectFiles, pin: Pin, account: ServiceAccount): Promise<AddedWorkflow | undefined> => {
+  if ((await files.read(WORKFLOW_FILE)) !== undefined) return undefined;
+  const mainBuild = await mainBuildWorkflow(files, await detectProject({ files }));
+  const workflow = factoryWorkflow({ mainBranch: pin.main_branch, ...account, ...(mainBuild === undefined ? {} : { mainBuild }) });
   return {
     ...workflow,
     lines: [
@@ -86,6 +90,22 @@ const missingWorkflow = async (files: ProjectFiles, pin: Pin): Promise<AddedWork
       ...(workflow.secrets.length === 0 ? [] : ['Before merging, store these secrets in the CI secret store:', ...workflow.secrets.map((secret) => `- ${secret}`), '']),
     ],
   };
+};
+
+const missingTasksWorkflow = async (files: ProjectFiles, pin: Pin, account: ServiceAccount): Promise<AddedWorkflow | undefined> => {
+  if ((await files.read(TASKS_WORKFLOW_FILE)) !== undefined) return undefined;
+  const workflow = tasksWorkflow(account);
+  return {
+    ...workflow,
+    lines: [`Adds ${workflow.path}, which runs "factory check-tasks" on every pull request, so open tasks fail the factory/tasks status.`, requiredCheckStep(pin.main_branch), ''],
+  };
+};
+
+const missingWorkflows = async (files: ProjectFiles, pin: Pin): Promise<readonly AddedWorkflow[]> => {
+  const account = await githubAccount(files);
+  if (account === undefined) return [];
+  const added = [await missingFactoryWorkflow(files, pin, account), await missingTasksWorkflow(files, pin, account)];
+  return added.flatMap((workflow) => (workflow === undefined ? [] : [workflow]));
 };
 
 export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSION, upgrade }: UpgradeOptions): Promise<UpgradeResult> => {
@@ -99,20 +119,20 @@ export const upgradeProject = async (deps: UpgradeDeps, { engine = ENGINE_VERSIO
   const target = moving ? engine : pin.engine;
   const installed = await staleEngineFiles(deps.files, target);
   const paths = Object.keys(installed);
-  const workflow = await missingWorkflow(deps.files, pin);
-  if (!moving && paths.length === 0 && workflow === undefined) {
+  const workflows = await missingWorkflows(deps.files, pin);
+  if (!moving && paths.length === 0 && workflows.length === 0) {
     return { ok: true, action: 'none', message: `Nothing to upgrade: the project is on engine ${pin.engine} and schema ${migrated.from}, which this engine (${engine}) runs as they are.` };
   }
 
   const workflowOnly = !moving && paths.length === 0;
   const branch = workflowOnly ? WORKFLOW_BRANCH : `factory/upgrade-engine-${engine}`;
   const title = moving ? `chore: upgrade the factory engine to ${engine}` : workflowOnly ? WORKFLOW_TITLE : 'chore: install the factory engine in the project';
-  const workflowLines = workflow?.lines ?? [];
+  const workflowLines = workflows.flatMap((workflow) => workflow.lines);
   const installLine = `Updates ${paths.join(', ')}, which install and run the engine${moving ? '' : ` ${target}`} inside the project.`;
   await deps.publishFiles({
     branch,
     base: pin.main_branch,
-    files: { ...(moving ? { [FACTORY_YAML]: pinned(migrated.text, engine) } : {}), ...installed, ...(workflow === undefined ? {} : { [workflow.path]: workflow.text }) },
+    files: { ...(moving ? { [FACTORY_YAML]: pinned(migrated.text, engine) } : {}), ...installed, ...Object.fromEntries(workflows.map((workflow) => [workflow.path, workflow.text])) },
     executable: paths.filter((path) => path === LAUNCHER_PATH),
     message: title,
   });

@@ -4,7 +4,7 @@ import { TICKET_PROVIDER_NAMES, type AdaptersConfig } from '../config/project-co
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION } from '../version.js';
 import type { FactoryState } from '../record/ticket-record.js';
-import { detectProject, mainBuildWorkflow, type Category, type Detection } from './detect.js';
+import { detectProject, FACTORY_WORKFLOWS, mainBuildWorkflow, type Category, type Detection } from './detect.js';
 import { adaptersFor, buildInstall, type ChosenCheck, type Connection, type InstallAnswers } from './install.js';
 import { matchStatuses } from './match-statuses.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
@@ -95,7 +95,6 @@ export type InitResult =
 
 const TIMEOUTS: Readonly<Record<Category, string>> = { tests: '10m', lint: '5m', types: '5m', format: '2m', security: '10m', build: '10m', e2e: '15m' };
 const CI_TIMEOUT = '15m';
-const FACTORY_WORKFLOW = '.github/workflows/factory.yml';
 
 const ticketProviderOf = (input: InitInput): Connection['ticketProvider'] | readonly string[] => {
   const { team, baseUrl, filter, project, tokenEnv, emailEnv } = input;
@@ -134,7 +133,7 @@ const checksOf = (detection: Detection, verification: readonly Verification[]): 
   });
 
 const ciSystemOf = (detection: Detection, sourceControl: Connection['sourceControl']): InstallAnswers['ci']['system'] => {
-  const builds = detection.ci.jobs.some((job) => job.file !== FACTORY_WORKFLOW);
+  const builds = detection.ci.jobs.some((job) => !FACTORY_WORKFLOWS.includes(job.file));
   return sourceControl.kind === 'github' && !builds ? 'none' : detection.ci.system;
 };
 

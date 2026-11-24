@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { RequiredChecks } from '../src/adapters/source-control.js';
 import type { Access } from '../src/adapters/ticket-provider.js';
 import type { ScriptRun } from '../src/factory/checks.js';
 import { runDoctor } from '../src/setup/doctor.js';
@@ -51,6 +52,16 @@ jobs:
       - run: factory revert --commit \${{ github.event.workflow_run.head_sha }}
 `;
 
+const TASKS_CI = `
+env:
+  JIRA_TOKEN: \${{ secrets.FACTORY_JIRA_TOKEN }}
+  JIRA_EMAIL: \${{ secrets.FACTORY_JIRA_EMAIL }}
+jobs:
+  check-tasks:
+    steps:
+      - run: factory check-tasks --pull-request \${{ github.event.pull_request.number }}
+`;
+
 const PACKAGE = JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .' }, devDependencies: { typescript: '5' } });
 
 const HEALTHY: Readonly<Record<string, string>> = {
@@ -59,14 +70,18 @@ const HEALTHY: Readonly<Record<string, string>> = {
   '.factory/adapters.yaml': ADAPTERS,
   '.github/workflows/ci.yml': CI,
   '.github/workflows/factory.yml': FACTORY_CI,
+  '.github/workflows/factory-tasks.yml': TASKS_CI,
   'package.json': PACKAGE,
   'pnpm-lock.yaml': '',
 };
 
 type Options = Parameters<typeof runDoctor>[1];
 
-const examine = async (files: Readonly<Record<string, string>>, options: Partial<Options> = {}, world: { readonly runs?: Readonly<Record<string, readonly ScriptRun[]>>; readonly access?: Access | Error; readonly reenter?: boolean } = {}) => {
+type World = { readonly runs?: Readonly<Record<string, readonly ScriptRun[]>>; readonly access?: Access | Error; readonly reenter?: boolean; readonly required?: RequiredChecks | Error };
+
+const examine = async (files: Readonly<Record<string, string>>, options: Partial<Options> = {}, world: World = {}) => {
   const reentered: { key: string; status: string }[] = [];
+  const branches: string[] = [];
   const queues = Object.fromEntries(Object.entries(world.runs ?? {}).map(([command, runs]) => [command, [...runs]]));
   const commands: string[] = [];
   const report = await runDoctor(
@@ -86,10 +101,16 @@ const examine = async (files: Readonly<Record<string, string>>, options: Partial
         reentered.push(request);
         return world.reenter ?? false;
       },
+      requiredChecks: async (branch) => {
+        branches.push(branch);
+        const required = world.required ?? ['factory/tasks'];
+        if (required instanceof Error) throw required;
+        return required;
+      },
     },
     { runChecks: false, ...options },
   );
-  return { report, commands, reentered, messages: report.findings.map((finding) => `${finding.kind}: ${finding.message}`) };
+  return { report, commands, reentered, branches, messages: report.findings.map((finding) => `${finding.kind}: ${finding.message}`) };
 };
 
 const without = (files: Readonly<Record<string, string>>, name: string): Readonly<Record<string, string>> => Object.fromEntries(Object.entries(files).filter(([path]) => path !== name));
@@ -127,12 +148,13 @@ describe('factory doctor', () => {
   });
 
   it('says which factory CI steps are missing, counting the watch only when it is on', async () => {
-    const noSteps = without(HEALTHY, '.github/workflows/factory.yml');
+    const noSteps = without(without(HEALTHY, '.github/workflows/factory.yml'), '.github/workflows/factory-tasks.yml');
     const watching = { ...HEALTHY, '.factory/factory.yaml': `${FACTORY}watch: { enabled: true, checks: [./smoke.sh] }\n` };
 
     expect((await examine(noSteps)).messages).toEqual([
       'ci_step: The CI pipeline does not run "factory record-merge". Run "factory migrate" and merge the pull request it opens',
       'ci_step: The CI pipeline does not run "factory revert"',
+      'ci_step: The CI pipeline does not run "factory check-tasks". Run "factory migrate" and merge the pull request it opens',
       'ci_secret: No CI file passes JIRA_TOKEN to the factory steps: the service account is not set up',
       'ci_secret: No CI file passes JIRA_EMAIL to the factory steps: the service account is not set up',
     ]);
@@ -285,10 +307,46 @@ describe('factory doctor', () => {
 
   it('reports a failure that is not an error object too', async () => {
     const report = await runDoctor(
-      { files: createInMemoryProjectFiles(HEALTHY), now: () => '2026-11-21T08:00:00Z', runScript: async () => ({ exitCode: 0, output: '', timedOut: false }), checkAccess: () => Promise.reject('offline'), canReenter: async () => false },
+      { files: createInMemoryProjectFiles(HEALTHY), now: () => '2026-11-21T08:00:00Z', runScript: async () => ({ exitCode: 0, output: '', timedOut: false }), checkAccess: () => Promise.reject('offline'), canReenter: async () => false, requiredChecks: async () => ['factory/tasks'] },
       { runChecks: false, ticket: 'PAY-142' },
     );
 
     expect(report.findings).toEqual([{ kind: 'service_account', message: 'The account could not be checked on PAY-142: offline' }]);
+  });
+
+  it('No CI step runs check-tasks: says so, and points to migrate on GitHub when the tasks workflow is missing', async () => {
+    const noTasks = without(HEALTHY, '.github/workflows/factory-tasks.yml');
+    const elsewhere = { ...HEALTHY, '.github/workflows/factory-tasks.yml': TASKS_CI.replace('factory check-tasks', 'echo') };
+
+    expect((await examine(noTasks)).messages).toEqual(['ci_step: The CI pipeline does not run "factory check-tasks". Run "factory migrate" and merge the pull request it opens']);
+    expect((await examine(elsewhere)).messages).toEqual(['ci_step: The CI pipeline does not run "factory check-tasks"']);
+  });
+
+  it('Check not required: reports that open tasks do not block the merge, naming the main branch', async () => {
+    const trunk = { ...HEALTHY, '.factory/factory.yaml': `${FACTORY}main_branch: trunk\n` };
+
+    const { report, messages, branches } = await examine(trunk, {}, { required: ['build'] });
+
+    expect(report.ok).toBe(false);
+    expect(messages).toEqual(['required_check: factory/tasks is not a required check on trunk, so open tasks do not block the merge']);
+    expect(branches).toEqual(['trunk']);
+  });
+
+  it('Check required by a ruleset: reports nothing, as when a merge check requires every build to pass', async () => {
+    expect((await examine(HEALTHY, { engine: '0.2.0' }, { required: ['build', 'factory/tasks'] })).report).toEqual({ ok: true, findings: [], notes: [] });
+    expect((await examine(HEALTHY, { engine: '0.2.0' }, { required: ['*'] })).report).toEqual({ ok: true, findings: [], notes: [] });
+  });
+
+  it('Settings not readable: notes that the required checks could not be verified, without failing', async () => {
+    const refused = await examine(HEALTHY, { engine: '0.2.0' }, { required: 'unreadable' });
+    const broken = await examine(HEALTHY, { engine: '0.2.0' }, { required: new Error('Set the GH_TOKEN environment variable') });
+
+    expect(refused.report).toEqual({ ok: true, findings: [], notes: ['Could not verify the required checks on main: the token cannot read its branch protection, rulesets or merge checks. Check by hand that factory/tasks is required there'] });
+    expect(broken.report).toEqual({ ok: true, findings: [], notes: ['Could not verify the required checks on main: Set the GH_TOKEN environment variable. Check by hand that factory/tasks is required there'] });
+  });
+
+  it('reads the required checks only when both configuration files are valid', async () => {
+    expect((await examine(without(HEALTHY, '.factory/adapters.yaml'))).branches).toEqual([]);
+    expect((await examine(without(HEALTHY, '.factory/factory.yaml'))).branches).toEqual([]);
   });
 });
