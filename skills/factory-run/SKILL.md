@@ -135,7 +135,7 @@ factory advance <KEY> --diagnosis spec --question "<question>" --recommended "<a
 
 Stop and report the `exit`:
 
-- `pull_request`: give the pull request link, and say who merges it (the pull request's "Merge" section says so)
+- `pull_request`: give the pull request link, and say who merges it (the pull request's "Merge" section says so). If you left tasks unchecked in `tasks.md`, list them, and say that they block the merge: the `factory/tasks` check fails until each one is ticked in a push or accepted as open with `factory accept-tasks <KEY>`
 - `sent_back`: the ticket is back in refinement; list the questions
 - `blocked`: give the link to the failure report
 
