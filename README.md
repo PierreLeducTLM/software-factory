@@ -23,7 +23,7 @@ Claude installs the plugin, asks you three things (your tracker, a ticket to tes
    - Use a dedicated service account, not your own. The factory's CI steps write to tickets as that account.
 2. **Your source control token is available.** The install opens its pull request through the API of GitHub or Bitbucket.
    - GitHub: `export GH_TOKEN=$(gh auth token)`. Claude does this for you when `gh` is logged in.
-   - Bitbucket: `export BITBUCKET_TOKEN=…` and `export BITBUCKET_USERNAME=…`, an app password.
+   - Bitbucket: `export BITBUCKET_TOKEN=…` and `export BITBUCKET_USERNAME=…`, an app password. Or a repository or workspace access token alone: `export BITBUCKET_TOKEN=…`, and the install runs with `--source-access-token`.
 3. **Your tracker has the seven statuses.** Names can differ, and the factory matches them by name and category. It asks only about the ones it cannot match.
 
    | Factory state | Typical name |

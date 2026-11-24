@@ -83,6 +83,7 @@ export type InitInput = {
   readonly sourceControl?: 'github' | 'bitbucket';
   readonly sourceTokenEnv?: string;
   readonly sourceUsernameEnv?: string;
+  readonly sourceAccessToken?: boolean;
   readonly statuses?: Readonly<Partial<Record<FactoryState, string>>>;
   readonly sensitivePaths?: readonly string[];
 };
@@ -109,6 +110,7 @@ const sourceControlOf = (input: InitInput, detection: Detection): Connection['so
   const kind = input.sourceControl ?? detection.remote?.kind;
   if (kind === undefined) return undefined;
   if (kind === 'github') return { kind, tokenEnv: input.sourceTokenEnv ?? 'GH_TOKEN' };
+  if (input.sourceAccessToken === true) return { kind, tokenEnv: input.sourceTokenEnv ?? 'BITBUCKET_TOKEN' };
   return { kind, tokenEnv: input.sourceTokenEnv ?? 'BITBUCKET_TOKEN', usernameEnv: input.sourceUsernameEnv ?? 'BITBUCKET_USERNAME' };
 };
 

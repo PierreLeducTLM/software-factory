@@ -31,7 +31,7 @@ const USAGE = [
   '  factory init --ticket <KEY> --team <key> | --base-url <url> --filter <jql> [options]',
   '  factory init detect [--verify]',
   '  options: --project <name> --token-env <name> --email-env <name> --repository <owner/name> --main-branch <name>',
-  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name>',
+  '           --source-control github|bitbucket --source-token-env <name> --source-username-env <name> --source-access-token',
   '           --statuses "state=Status;state=Status" --sensitive-paths <a,b> --verify',
   '  factory workflow --title <text> [--preview]',
   'Add --json to any command for one line of JSON.',
@@ -106,6 +106,7 @@ const initInput = (flags: Flags): InitInput | string => {
   return {
     ticket: value(flags, '--ticket'),
     verify: flags.switches.includes('--verify'),
+    ...(flags.switches.includes('--source-access-token') ? { sourceAccessToken: true } : {}),
     ...Object.fromEntries(Object.entries(TEXT_FLAGS).flatMap(([flag, key]) => (flag in flags.values ? [[key, value(flags, flag)]] : []))),
     ...(control === undefined ? {} : { sourceControl: control }),
     statuses: chosen,
@@ -145,7 +146,7 @@ const COMMANDS: Readonly<Record<string, Spec & { readonly run: Run }>> = {
   init: {
     valued: [...Object.keys(TEXT_FLAGS), '--source-control', '--statuses', '--sensitive-paths'],
     required: ['--ticket'],
-    switches: ['--verify'],
+    switches: ['--verify', '--source-access-token'],
     run: async (flags, deps) => {
       const input = initInput(flags);
       return typeof input === 'string' ? reply({ ok: false }, [], [input]) : initReply(await initProject(deps, input));
