@@ -121,6 +121,23 @@ p {
   gap: 8px;
 }
 
+.top__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.top__joke {
+  flex: 1 0 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
 .dot {
   flex: none;
   width: 8px;
@@ -641,7 +658,8 @@ p {
   color: #ffffff;
 }
 
-.force-refresh {
+.force-refresh,
+.joke-button {
   min-height: 32px;
   padding: 0 14px;
   font-size: 12px;

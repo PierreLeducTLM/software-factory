@@ -1,6 +1,7 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { HeaderStatus } from '../components/HeaderStatus';
+import { JokeButton } from '../components/JokeButton';
 import { fetchView, reloadView } from '../server/functions';
 import styles from '../styles.css?url';
 
@@ -52,16 +53,18 @@ function RootComponent() {
             </nav>
           </div>
           {view.ok ? (
-            <HeaderStatus
-              loadedAt={view.data.loadedAt}
-              running={view.data.running}
-              needsYou={view.data.needsYou.length}
-              {...(view.data.refreshedAt === undefined ? {} : { refreshedAt: view.data.refreshedAt })}
-              {...(view.data.staleSince === undefined ? {} : { staleSince: view.data.staleSince })}
-              {...(view.data.problem === undefined ? {} : { problem: view.data.problem })}
-              reload={() => reloadView()}
-              refresh={() => router.invalidate()}
-            />
+            <JokeButton>
+              <HeaderStatus
+                loadedAt={view.data.loadedAt}
+                running={view.data.running}
+                needsYou={view.data.needsYou.length}
+                {...(view.data.refreshedAt === undefined ? {} : { refreshedAt: view.data.refreshedAt })}
+                {...(view.data.staleSince === undefined ? {} : { staleSince: view.data.staleSince })}
+                {...(view.data.problem === undefined ? {} : { problem: view.data.problem })}
+                reload={() => reloadView()}
+                refresh={() => router.invalidate()}
+              />
+            </JokeButton>
           ) : null}
         </header>
         <div className="rule" />
