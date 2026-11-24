@@ -1,7 +1,7 @@
-// node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-CfZqd59U.js
+// node_modules/.nitro/vite/services/ssr/assets/_tanstack-start-manifest_v-lTetM9l5.js
 var tsrStartManifest = () => ({ routes: {
 	__root__: {
-		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/eel/view/src/routes/__root.tsx",
+		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/grouper/view/src/routes/__root.tsx",
 		children: [
 			"/",
 			"/health",
@@ -19,17 +19,17 @@ var tsrStartManifest = () => ({ routes: {
 		} }]
 	},
 	"/": {
-		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/eel/view/src/routes/index.tsx",
+		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/grouper/view/src/routes/index.tsx",
 		children: void 0,
 		preloads: ["/assets/routes-BToTM_gR.js"]
 	},
 	"/health": {
-		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/eel/view/src/routes/health.tsx",
+		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/grouper/view/src/routes/health.tsx",
 		children: void 0,
 		preloads: ["/assets/health-DX0bnAoe.js"]
 	},
 	"/needs-you": {
-		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/eel/view/src/routes/needs-you.tsx",
+		filePath: "/Users/pierreleduc/orca/workspaces/software-factory/grouper/view/src/routes/needs-you.tsx",
 		children: void 0,
 		preloads: ["/assets/needs-you-SObCpe4u.js"]
 	}
