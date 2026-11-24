@@ -1,25 +1,10 @@
 import { Link } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { NeedsYouItem } from '../../../src/view/model.js';
 
 type Props = { readonly items: readonly NeedsYouItem[]; readonly onOpen: (key: string, opener: HTMLElement) => void };
 
 const MAX_LINES = 2;
-const PHONE = '(max-width: 719px)';
-
-const subscribeToPhone = (onChange: () => void): (() => void) => {
-  const query = window.matchMedia(PHONE);
-  query.addEventListener('change', onChange);
-  return () => query.removeEventListener('change', onChange);
-};
-
-const usePhone = (): boolean =>
-  useSyncExternalStore(
-    subscribeToPhone,
-    () => window.matchMedia(PHONE).matches,
-    () => false,
-  );
-
 const useWidth = (element: Element | null): number => {
   const [width, setWidth] = useState(0);
   useEffect(() => {
@@ -52,7 +37,6 @@ const fittingCount = (list: HTMLUListElement, shown: number): number | undefined
 };
 
 export function NeedsYouStrip({ items, onOpen }: Props) {
-  const phone = usePhone();
   const [list, setList] = useState<HTMLUListElement | null>(null);
   const width = useWidth(list);
   const [shown, setShown] = useState(items.length);
@@ -67,14 +51,6 @@ export function NeedsYouStrip({ items, onOpen }: Props) {
 
   if (items.length === 0) return null;
   const count = `${items.length} need you`;
-  if (phone)
-    return (
-      <nav className="strip" aria-label="Needs you">
-        <Link to="/needs-you" className="strip__count strip__count--link">
-          {count}
-        </Link>
-      </nav>
-    );
   return (
     <nav className="strip" aria-label="Needs you">
       <ul className="strip__items" ref={setList}>
@@ -94,6 +70,9 @@ export function NeedsYouStrip({ items, onOpen }: Props) {
           </li>
         ) : null}
       </ul>
+      <Link to="/needs-you" className="strip__count strip__count--link strip__phone">
+        {count}
+      </Link>
     </nav>
   );
 }

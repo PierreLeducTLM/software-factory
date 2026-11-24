@@ -1,5 +1,5 @@
 import { __toESM } from "../_runtime.mjs";
-import { CopyCommand, waiting } from "./router-Bi3COU6h.mjs";
+import { CopyCommand, waiting } from "./router-BPYq4IE6.mjs";
 import { require_jsx_runtime, require_react } from "../_libs/@tanstack/react-router+[...].mjs";
 import { useLoaderData } from "../_libs/@tanstack/react-router+[3...].mjs";
 // node_modules/.nitro/vite/services/ssr/assets/needs-you-DokJMIeX.js

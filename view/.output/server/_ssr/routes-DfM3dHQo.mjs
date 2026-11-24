@@ -1,8 +1,8 @@
 import { __toESM } from "../_runtime.mjs";
-import { BoardScreen, fetchDetail, openRun, startRun, useCardAddress } from "./router-Bi3COU6h.mjs";
+import { BoardScreen, fetchDetail, openRun, startRun, useCardAddress } from "./router-BPYq4IE6.mjs";
 import { isRedirect, require_jsx_runtime, require_react, useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { useLoaderData } from "../_libs/@tanstack/react-router+[3...].mjs";
-// node_modules/.nitro/vite/services/ssr/assets/routes-DMrbmSZO.js
+// node_modules/.nitro/vite/services/ssr/assets/routes-DfM3dHQo.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function useServerFn(serverFn) {

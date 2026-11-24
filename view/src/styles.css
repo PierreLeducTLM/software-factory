@@ -390,13 +390,19 @@ p {
   color: var(--ink-2);
 }
 
+.strip {
+  display: flow-root;
+}
+
 .strip__items {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 0;
-  padding: 0;
+  max-height: calc(2 * 32px + 8px + 2 * 4px);
+  margin: -4px;
+  padding: 4px;
+  overflow: hidden;
   list-style: none;
 }
 
@@ -458,6 +464,20 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.strip__phone {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  .strip__items {
+    display: none;
+  }
+
+  .strip__phone {
+    display: inline-flex;
+  }
 }
 
 .detail {

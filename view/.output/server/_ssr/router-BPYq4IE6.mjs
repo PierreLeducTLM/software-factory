@@ -68,7 +68,7 @@ var PERIODS$1 = [
 	90
 ];
 var fetchHealth = createServerFn({ method: "GET" }).validator((days) => PERIODS$1.includes(days) ? days : 7).handler(createSsrRpc("295a6e1eb54f07429317f54f45cb4c252194cfa2417e2f380a0dd37bd5bb6899"));
-// node_modules/.nitro/vite/services/ssr/assets/router-Bi3COU6h.js
+// node_modules/.nitro/vite/services/ssr/assets/router-BPYq4IE6.js
 var __defProp = Object.defineProperty;
 var __exportAll = (all, no_symbols) => {
 	let target = {};
@@ -139,7 +139,7 @@ function HeaderStatus({ reload, refresh, ...freshness }) {
 		})]
 	});
 }
-var styles_default = "/assets/styles-DQ1tvGaK.css";
+var styles_default = "/assets/styles-BFKtHzVM.css";
 var Route$3 = createRootRoute({
 	head: () => ({
 		meta: [
@@ -377,13 +377,6 @@ function Board({ columns, providers, selected, onSelect }) {
 	});
 }
 var MAX_LINES = 2;
-var PHONE = "(max-width: 719px)";
-var subscribeToPhone = (onChange) => {
-	const query = window.matchMedia(PHONE);
-	query.addEventListener("change", onChange);
-	return () => query.removeEventListener("change", onChange);
-};
-var usePhone = () => (0, import_react.useSyncExternalStore)(subscribeToPhone, () => window.matchMedia(PHONE).matches, () => false);
 var useWidth = (element) => {
 	const [width, setWidth] = (0, import_react.useState)(0);
 	(0, import_react.useEffect)(() => {
@@ -420,7 +413,6 @@ var fittingCount = (list, shown) => {
 	return Math.max(Math.min(shown - 1, fitting), 0);
 };
 function NeedsYouStrip({ items, onOpen }) {
-	const phone = usePhone();
 	const [list, setList] = (0, import_react.useState)(null);
 	const width = useWidth(list);
 	const [shown, setShown] = (0, import_react.useState)(items.length);
@@ -436,19 +428,10 @@ function NeedsYouStrip({ items, onOpen }) {
 	});
 	if (items.length === 0) return null;
 	const count = `${items.length} need you`;
-	if (phone) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("nav", {
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("nav", {
 		className: "strip",
 		"aria-label": "Needs you",
-		children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Link, {
-			to: "/needs-you",
-			className: "strip__count strip__count--link",
-			children: count
-		})
-	});
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("nav", {
-		className: "strip",
-		"aria-label": "Needs you",
-		children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ul", {
+		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("ul", {
 			className: "strip__items",
 			ref: setList,
 			children: [
@@ -488,7 +471,11 @@ function NeedsYouStrip({ items, onOpen }) {
 					})
 				}) : null
 			]
-		})
+		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Link, {
+			to: "/needs-you",
+			className: "strip__count strip__count--link strip__phone",
+			children: count
+		})]
 	});
 }
 function OpenInOrca({ runKey, open }) {
@@ -887,7 +874,7 @@ function BoardScreen({ address: routed, columns, needsYou = [], providers = 1, l
 		]
 	});
 }
-var $$splitComponentImporter$2 = () => import("./routes-DMrbmSZO.mjs");
+var $$splitComponentImporter$2 = () => import("./routes-DfM3dHQo.mjs");
 var Route$2 = createFileRoute("/")({
 	validateSearch: cardSearch,
 	component: lazyRouteComponent($$splitComponentImporter$2, "component")
@@ -1086,7 +1073,7 @@ function Health({ health, onPeriod, copy }) {
 		]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./health-Bl6LyGIw.mjs");
+var $$splitComponentImporter$1 = () => import("./health-CKAs5xu0.mjs");
 var DEFAULT_PERIOD = 7;
 var periodOf = (value) => PERIODS.find((days) => days === Number(value)) ?? DEFAULT_PERIOD;
 var Route$1 = createFileRoute("/health")({
