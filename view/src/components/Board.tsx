@@ -3,9 +3,11 @@ import { duration } from '../format';
 
 export type Selected = { readonly column: Column['id']; readonly key: string };
 
-type Props = { readonly columns: readonly Column[]; readonly selected?: Selected; readonly onSelect: (selected: Selected) => void };
+export type OnSelect = (selected: Selected, opener: HTMLElement) => void;
 
-const RISK_LABELS = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' } as const;
+type Props = { readonly columns: readonly Column[]; readonly providers: number; readonly selected?: Selected; readonly onSelect: OnSelect };
+
+const RISK_LABELS = { low: 'Low', medium: 'Medium', high: 'High' } as const;
 const CHIP_NAMES = { pass: 'passed', fail: 'failed', running: 'running', pending: 'not started' } as const;
 const GATES = ['build', 'gate', 'verify', 'review'] as const;
 const FAILED_CATEGORIES: readonly (Card['category'] | undefined)[] = ['blocked', 'run_limit', 'revert'];
@@ -18,17 +20,19 @@ const statusOf = (card: Card, columnId: Column['id']): Chip | 'waiting' => {
   return NOT_STARTED_COLUMNS.includes(columnId) ? 'pending' : 'running';
 };
 
-function CardButton({ card, columnId, selected, onSelect }: { readonly card: Card; readonly columnId: Column['id']; readonly selected: boolean; readonly onSelect: (selected: Selected) => void }) {
+type CardProps = { readonly card: Card; readonly columnId: Column['id']; readonly showProvider: boolean; readonly selected: boolean; readonly onSelect: OnSelect };
+
+function CardButton({ card, columnId, showProvider, selected, onSelect }: CardProps) {
   const meta = [
     card.attempt === undefined ? undefined : `attempt ${card.attempt.number}/${card.attempt.limit}`,
     card.seconds === undefined ? undefined : duration(card.seconds),
   ].filter((part) => part !== undefined);
   return (
-    <button type="button" className={`card${selected ? ' card--selected' : ''}`} aria-pressed={selected} aria-label={`Open ${card.key} ${card.title}`} onClick={() => onSelect({ column: columnId, key: card.key })}>
+    <button type="button" className={`card${selected ? ' card--selected' : ''}`} aria-pressed={selected} aria-label={`Open ${card.key} ${card.title}`} onClick={(event) => onSelect({ column: columnId, key: card.key }, event.currentTarget)}>
       <span className="card__top">
         <span className={`dot dot--${statusOf(card, columnId)}`} aria-hidden="true" />
         <span className="card__key">{card.key}</span>
-        <span className="card__provider">{card.provider}</span>
+        {showProvider ? <span className="card__provider">{card.provider}</span> : null}
       </span>
       <span className="card__title">{card.title}</span>
       <span className="card__who">
@@ -36,15 +40,18 @@ function CardButton({ card, columnId, selected, onSelect }: { readonly card: Car
           {card.claimant ?? 'Unclaimed'}
           {card.run === undefined ? '' : ` · run ${card.run.number} of ${card.run.limit}`}
         </span>
-        {card.risk === undefined ? null : <span className={`risk risk--${card.risk}`}>{RISK_LABELS[card.risk]} (predicted)</span>}
+        {card.risk === undefined ? null : (
+          <span className={`risk risk--${card.risk}`} role="img" aria-label={`${RISK_LABELS[card.risk]} risk (predicted)`}>
+            {RISK_LABELS[card.risk]}
+          </span>
+        )}
       </span>
       {card.rows.map((row) => (
         <span className="attempt" key={row.number} aria-label={`Attempt ${row.number}`}>
-          <span className="attempt__label">A{row.number}</span>
           {GATES.map((gate) => (
-            <span key={gate} className={`chip chip--${row[gate]}`} title={`${gate}: ${CHIP_NAMES[row[gate]]}`}>
-              {gate}
-              <span className="visually-hidden"> {CHIP_NAMES[row[gate]]}</span>
+            <span key={gate} className={`chip chip--${row[gate]}`} title={`${gate} ${CHIP_NAMES[row[gate]]}`}>
+              {gate.charAt(0)}
+              <span className="visually-hidden">{` ${gate} ${CHIP_NAMES[row[gate]]}`}</span>
             </span>
           ))}
         </span>
@@ -59,17 +66,16 @@ function CardButton({ card, columnId, selected, onSelect }: { readonly card: Car
   );
 }
 
-export function Board({ columns, selected, onSelect }: Props) {
+export function Board({ columns, providers, selected, onSelect }: Props) {
   return (
     <section className="board" aria-label="Pipeline">
       {columns.map((column) => (
-        <div className="column" key={column.id}>
+        <div className={column.cards.length === 0 ? 'column column--empty' : 'column'} key={column.id}>
           <h2 className={column.id === 'needs_you' ? 'column__name column__name--warn' : 'column__name'}>
             {column.name} <span className="column__count">{column.cards.length}</span>
           </h2>
-          {column.cards.length === 0 ? <p className="column__empty">Nothing here</p> : null}
           {column.cards.map((card) => (
-            <CardButton key={card.key} card={card} columnId={column.id} selected={column.id === selected?.column && card.key === selected.key} onSelect={onSelect} />
+            <CardButton key={card.key} card={card} columnId={column.id} showProvider={providers > 1} selected={column.id === selected?.column && card.key === selected.key} onSelect={onSelect} />
           ))}
         </div>
       ))}

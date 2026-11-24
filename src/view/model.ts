@@ -90,7 +90,7 @@ const COLUMNS: readonly { readonly id: ColumnId; readonly name: string }[] = [
 const CATEGORY_ORDER: readonly NeedsYouCategory[] = ['revert', 'blocked', 'run_limit', 'interrupted', 'record_edited', 'sent_back', 'open_tasks', 'merge', 'approve', 'not_started'];
 const STEP_COLUMNS: Readonly<Record<string, StationId>> = { revalidate: 'revalidate', build: 'build', quality: 'build', verify: 'review', review: 'review', diagnose: 'build' };
 const VERIFY = 'openspec-verify';
-const SHOWN_ATTEMPTS = 2;
+const SHOWN_ATTEMPTS = 1;
 const MS_PER_HOUR = 3_600_000;
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;

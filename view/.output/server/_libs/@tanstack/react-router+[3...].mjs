@@ -1117,4 +1117,4 @@ function renderScripts(scripts) {
 		key: `tsr-scripts-${asset.tag}-${i}`
 	})) });
 }
-export { HeadContent, Link, Scripts, createFileRoute, createRootRoute, createRouter, lazyRouteComponent, useLoaderData, useNavigate };
+export { HeadContent, Link, Scripts, createFileRoute, createRootRoute, createRouter, lazyRouteComponent, useLoaderData, useNavigate, useSearch };

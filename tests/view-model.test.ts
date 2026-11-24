@@ -159,7 +159,7 @@ describe('pipeline board', () => {
     expect(card).toMatchObject({ claimant: 'maya', onThisMachine: false });
   });
 
-  it('shows the last two attempts with a chip per gate, and how many came before', () => {
+  it('shows only the latest attempt with a chip per gate, and how many came before', () => {
     const firstFailed = withAttempt(step(built(), 'quality', '2026-11-21T08:10:00Z', '2026-11-21T08:12:00Z'), {
       number: 1,
       changed: 'a',
@@ -175,11 +175,8 @@ describe('pipeline board', () => {
 
     const [card] = cardsIn([ticketWith(third)], 'build');
 
-    expect(card?.rows).toEqual([
-      { number: 2, build: 'pass', gate: 'pass', verify: 'pass', review: 'fail' },
-      { number: 3, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' },
-    ]);
-    expect(card?.earlierAttempts).toBe(1);
+    expect(card?.rows).toEqual([{ number: 3, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' }]);
+    expect(card?.earlierAttempts).toBe(2);
     expect(card?.attempt).toEqual({ number: 3, limit: 5 });
   });
 

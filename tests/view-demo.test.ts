@@ -89,10 +89,8 @@ it('shows a run with a failed first attempt and a second one being built', async
   const card = data.columns.find((column) => column.id === 'build')?.cards.find((candidate) => candidate.key === 'PAY-142');
   const detail = await source.detail('PAY-142');
 
-  expect(card?.rows).toEqual([
-    { number: 1, build: 'pass', gate: 'fail', verify: 'pending', review: 'pending' },
-    { number: 2, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' },
-  ]);
+  expect(card?.rows).toEqual([{ number: 2, build: 'running', gate: 'pending', verify: 'pending', review: 'pending' }]);
+  expect(card?.earlierAttempts).toBe(1);
   expect(card?.onThisMachine).toBe(true);
   expect(detail?.sections.map((section) => section.title)).toEqual(['Refinement', 'Run 1 of 3', 'Attempt 1 of 5', 'Attempt 2 of 5']);
 });

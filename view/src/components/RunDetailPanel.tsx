@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Card, RunDetail } from '../../../src/view/model.js';
 import type { OpenResult, StartRequest, StartResult } from '../../../src/view/source.js';
 import { CopyCommand } from './CopyCommand';
@@ -18,9 +19,40 @@ const STATUS_NAMES = { pass: 'passed', fail: 'failed', running: 'in progress', p
 
 const isLink = (text: string): boolean => /^https?:\/\//.test(text);
 
+const useEscape = (onEscape: () => void): void =>
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onEscape();
+    };
+    document.addEventListener('keydown', listener);
+    return () => document.removeEventListener('keydown', listener);
+  }, [onEscape]);
+
+const HEADER = 'header.top';
+
+const useBelowHeader = (drawer: RefObject<HTMLElement | null>): void =>
+  useLayoutEffect(() => {
+    const place = (): void => {
+      const bottom = document.querySelector(HEADER)?.getBoundingClientRect().bottom ?? 0;
+      drawer.current?.style.setProperty('--drawer-top', `${Math.max(Math.round(bottom), 0)}px`);
+    };
+    place();
+    window.addEventListener('scroll', place, { passive: true });
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place);
+      window.removeEventListener('resize', place);
+    };
+  }, [drawer]);
+
 export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca, startInOrca }: Props) {
+  const title = useRef<HTMLHeadingElement>(null);
+  const drawer = useRef<HTMLElement>(null);
+  useBelowHeader(drawer);
+  useEffect(() => title.current?.focus({ preventScroll: true }), []);
+  useEscape(onClose);
   return (
-    <aside className="detail" aria-label="Run detail">
+    <aside className="detail" aria-label="Run detail" ref={drawer}>
       <header className="detail__header">
         <p className="detail__key">
           {card.key} · {card.provider}
@@ -31,7 +63,9 @@ export function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrc
           </svg>
         </button>
       </header>
-      <h2 className="detail__title">{card.title}</h2>
+      <h2 className="detail__title" ref={title} tabIndex={-1}>
+        {card.title}
+      </h2>
       <p className="detail__note">{card.note}</p>
       {card.claimant === undefined ? null : <p className="detail__where">{card.onThisMachine ? 'This run is on your machine, in Orca.' : `This run is in ${card.claimant}'s Orca.`}</p>}
       {card.onThisMachine && openInOrca !== undefined ? <OpenInOrca key={card.key} runKey={card.key} open={openInOrca} /> : null}
