@@ -6,7 +6,7 @@
     {
       "name": "software-factory",
       "source": "./",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "description": "Refine, build and maintain a project's software factory from Claude Code."
     }
   ]

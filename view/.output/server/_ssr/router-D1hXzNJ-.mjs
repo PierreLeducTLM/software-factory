@@ -41,7 +41,7 @@ function CopyCommand({ command, copy = toClipboard }) {
 		})]
 	});
 }
-// node_modules/.nitro/vite/services/ssr/assets/functions-CsH8kHxh.js
+// node_modules/.nitro/vite/services/ssr/assets/functions-CeekdkTQ.js
 var createSsrRpc = (functionId) => {
 	const url = "/_serverFn/" + functionId;
 	const serverFnMeta = { id: functionId };
@@ -58,13 +58,17 @@ var fetchView = createServerFn({ method: "GET" }).handler(createSsrRpc("3d6a23f6
 var reloadView = createServerFn({ method: "POST" }).handler(createSsrRpc("9626c782228982b94e45134c43ed37990be326a9d948c83165234ac1facbb9b8"));
 var fetchDetail = createServerFn({ method: "GET" }).validator((key) => key).handler(createSsrRpc("556e74f1f6692729f191d3f7ae147ed330525a375e523f7fe97b12869b3d33bc"));
 var openRun = createServerFn({ method: "POST" }).validator((key) => key).handler(createSsrRpc("41567f20a59a8cee49cc031e1b121c88afbc89ed746c1cd6470ecb9c537854ed"));
+var startRun = createServerFn({ method: "POST" }).validator((request) => ({
+	key: String(request.key),
+	command: String(request.command)
+})).handler(createSsrRpc("d2af39f86abab94aaeb8033b5f23f8fa0de3c2e25186d97758dad4cbf0fad499"));
 var PERIODS$1 = [
 	7,
 	30,
 	90
 ];
 var fetchHealth = createServerFn({ method: "GET" }).validator((days) => PERIODS$1.includes(days) ? days : 7).handler(createSsrRpc("295a6e1eb54f07429317f54f45cb4c252194cfa2417e2f380a0dd37bd5bb6899"));
-// node_modules/.nitro/vite/services/ssr/assets/router-BaQNQ9dA.js
+// node_modules/.nitro/vite/services/ssr/assets/router-D1hXzNJ-.js
 var __defProp = Object.defineProperty;
 var __exportAll = (all, no_symbols) => {
 	let target = {};
@@ -135,7 +139,7 @@ function HeaderStatus({ reload, refresh, ...freshness }) {
 		})]
 	});
 }
-var styles_default = "/assets/styles-C758B0uX.css";
+var styles_default = "/assets/styles-DbaZTOM_.css";
 var Route$3 = createRootRoute({
 	head: () => ({
 		meta: [
@@ -234,7 +238,7 @@ function RootComponent() {
 		] })]
 	});
 }
-var $$splitComponentImporter$2 = () => import("./routes-CJw4Pf4-.mjs");
+var $$splitComponentImporter$2 = () => import("./routes-CEIn0DEm.mjs");
 var Route$2 = createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter$2, "component") });
 var PERIODS = [
 	7,
@@ -430,7 +434,7 @@ function Health({ health, onPeriod, copy }) {
 		]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./health-D519kNC3.mjs");
+var $$splitComponentImporter$1 = () => import("./health-T9xSuxnr.mjs");
 var DEFAULT_PERIOD = 7;
 var periodOf = (value) => PERIODS.find((days) => days === Number(value)) ?? DEFAULT_PERIOD;
 var Route$1 = createFileRoute("/health")({
@@ -466,4 +470,4 @@ function getRouter() {
 		scrollRestoration: true
 	});
 }
-export { CopyCommand, Health, Route$1, duration, fetchDetail, openRun, router_exports, waiting };
+export { CopyCommand, Health, Route$1, duration, fetchDetail, openRun, router_exports, startRun, waiting };

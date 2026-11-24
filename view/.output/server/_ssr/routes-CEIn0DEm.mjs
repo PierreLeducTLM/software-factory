@@ -1,8 +1,8 @@
 import { __toESM } from "../_runtime.mjs";
-import { CopyCommand, duration, fetchDetail, openRun } from "./router-BaQNQ9dA.mjs";
+import { CopyCommand, duration, fetchDetail, openRun, startRun } from "./router-D1hXzNJ-.mjs";
 import { isRedirect, require_jsx_runtime, require_react, useRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { useLoaderData } from "../_libs/@tanstack/react-router+[3...].mjs";
-// node_modules/.nitro/vite/services/ssr/assets/routes-CJw4Pf4-.js
+// node_modules/.nitro/vite/services/ssr/assets/routes-CEIn0DEm.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function useServerFn(serverFn) {
@@ -182,6 +182,48 @@ function OpenInOrca({ runKey, open }) {
 		]
 	});
 }
+var messageOf = (error) => error instanceof Error ? error.message : String(error);
+function StartInOrca({ runKey, command, start }) {
+	const [state, setState] = (0, import_react.useState)({ kind: "idle" });
+	const press = () => {
+		setState({ kind: "starting" });
+		start({
+			key: runKey,
+			command
+		}).catch((error) => ({
+			ok: false,
+			message: `Orca could not start ${runKey}: ${messageOf(error)}`
+		})).then((result) => setState(result.ok ? {
+			kind: "started",
+			worktree: result.worktree
+		} : {
+			kind: "failed",
+			message: result.message
+		}));
+	};
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "command",
+		children: [
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "button start-in-orca",
+				disabled: state.kind === "starting" || state.kind === "started",
+				onClick: press,
+				children: state.kind === "starting" ? "Starting in Orca…" : "Start in Orca"
+			}),
+			state.kind === "started" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+				className: "start-in-orca__status",
+				role: "status",
+				children: ["Started in Orca: ", state.worktree]
+			}) : null,
+			state.kind === "failed" ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+				className: "start-in-orca__status",
+				role: "status",
+				children: state.message
+			}) : null
+		]
+	});
+}
 var STATUS_NAMES = {
 	pass: "passed",
 	fail: "failed",
@@ -189,7 +231,7 @@ var STATUS_NAMES = {
 	pending: "not started"
 };
 var isLink = (text) => /^https?:\/\//.test(text);
-function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca }) {
+function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca, startInOrca }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("aside", {
 		className: "detail",
 		"aria-label": "Run detail",
@@ -243,6 +285,11 @@ function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca }) {
 				command: card.command,
 				...copy === void 0 ? {} : { copy }
 			}),
+			card.command === void 0 || card.onThisMachine || startInOrca === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(StartInOrca, {
+				runKey: card.key,
+				command: card.command,
+				start: startInOrca
+			}, card.key),
 			card.pullRequest === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("a", {
 				className: "button",
 				href: card.pullRequest,
@@ -307,7 +354,7 @@ function RunDetailPanel({ card, detail, loading, onClose, copy, openInOrca }) {
 		]
 	});
 }
-function BoardScreen({ columns, loadDetail, copy, openInOrca }) {
+function BoardScreen({ columns, loadDetail, copy, openInOrca, startInOrca }) {
 	const [selection, setSelection] = (0, import_react.useState)(void 0);
 	const matches = (candidate) => candidate.key === selection?.key;
 	const card = columns.find((column) => column.id === selection?.column)?.cards.find(matches) ?? columns.flatMap((column) => column.cards).find(matches);
@@ -341,7 +388,8 @@ function BoardScreen({ columns, loadDetail, copy, openInOrca }) {
 			loading: selection.loading,
 			onClose: () => setSelection(void 0),
 			...copy === void 0 ? {} : { copy },
-			...openInOrca === void 0 ? {} : { openInOrca }
+			...openInOrca === void 0 ? {} : { openInOrca },
+			...startInOrca === void 0 ? {} : { startInOrca }
 		})]
 	});
 }
@@ -349,11 +397,13 @@ function BoardRoute() {
 	const view = useLoaderData({ from: "__root__" });
 	const loadDetail = useServerFn(fetchDetail);
 	const open = useServerFn(openRun);
+	const start = useServerFn(startRun);
 	if (!view.ok) return null;
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(BoardScreen, {
 		columns: view.data.columns,
 		loadDetail: async (key) => await loadDetail({ data: key }) ?? void 0,
-		openInOrca: (key) => open({ data: key })
+		openInOrca: (key) => open({ data: key }),
+		startInOrca: (request) => start({ data: request })
 	});
 }
 export { BoardRoute as component };
