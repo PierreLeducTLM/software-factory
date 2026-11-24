@@ -5,6 +5,7 @@ import type { Column } from '../../../src/view/model.js';
 import type { ComponentProps } from 'react';
 import { BoardScreen, useCardAddress } from './BoardScreen';
 import { HeaderStatus } from './HeaderStatus';
+import { JokeButton } from './JokeButton';
 import { getCard, getColumns, getItem, getSampleColumns, renderBoard } from './fixtures';
 
 const noDetail = async () => undefined;
@@ -350,5 +351,104 @@ describe('a fresh load', () => {
 
     await expect.element(screen.getByRole('complementary', { name: 'Run detail' })).toBeVisible();
     await expect.poll(() => window.scrollY).toBe(0);
+  });
+});
+
+function PageWithJokeHeader(props: ComponentProps<typeof BoardScreen>) {
+  return (
+    <>
+      <header className="top">
+        <div>
+          <h1 className="top__title">Software factory</h1>
+          <p className="top__sub">acme/factory · read from Linear · read-only</p>
+          <nav className="tabs" aria-label="Views">
+            <a href="/" className="tab tab--active">
+              Board
+            </a>
+            <a href="/needs-you" className="tab">
+              Needs you · 2
+            </a>
+            <a href="/health" className="tab">
+              Health
+            </a>
+          </nav>
+        </div>
+        <JokeButton>
+          <HeaderStatus loadedAt="2026-11-24T10:00:00Z" refreshedAt="2026-11-24T10:00:00Z" running={1} needsYou={2} reload={async () => undefined} refresh={async () => undefined} />
+        </JokeButton>
+      </header>
+      <div className="rule" />
+      <AddressedBoard {...props} />
+    </>
+  );
+}
+
+describe('the joke button in the header', () => {
+  const FIRST_JOKE = 'Why do programmers prefer dark mode? Because light attracts bugs.';
+  const SECOND_JOKE = "There are 10 kinds of people: those who understand binary and those who don't.";
+  const headerOf = () => document.querySelector('header.top')?.getBoundingClientRect() ?? new DOMRect();
+  const jokeButtonOf = (screen: Awaited<ReturnType<typeof renderBoard>>) => screen.getByRole('button', { name: 'Tell me a joke' });
+  const forceRefreshOf = (screen: Awaited<ReturnType<typeof renderBoard>>) => screen.getByRole('button', { name: 'Force refresh' }).element().getBoundingClientRect();
+  const jokeOf = (screen: Awaited<ReturnType<typeof renderBoard>>) => screen.getByText(/Why do programmers|There are 10 kinds/);
+  const comesAfter = (later: DOMRect, earlier: DOMRect): boolean => Math.round(later.top) >= Math.round(earlier.bottom) || (Math.abs(later.top - earlier.top) < 1 && later.left >= earlier.right);
+
+  it('sits to the right of Force refresh at 1440px, and stays where it is when a joke appears', async () => {
+    await page.viewport(1440, 900);
+    const screen = await renderBoard(<PageWithJokeHeader columns={getSampleColumns()} loadDetail={noDetail} />);
+    const button = jokeButtonOf(screen).element();
+    const before = button.getBoundingClientRect();
+    const forceRefresh = forceRefreshOf(screen);
+
+    expect(before.left).toBeGreaterThanOrEqual(forceRefresh.right);
+    expect(Math.round(before.top + before.height / 2)).toBe(Math.round(forceRefresh.top + forceRefresh.height / 2));
+    expect(Math.round(headerOf().bottom)).toBe(Math.round(before.bottom));
+
+    const spot = { x: before.left + before.width / 2, y: before.top + before.height / 2 };
+    await jokeButtonOf(screen).click();
+    await expect.element(jokeOf(screen)).toHaveTextContent(FIRST_JOKE);
+    const joke = jokeOf(screen).element().getBoundingClientRect();
+    const after = button.getBoundingClientRect();
+
+    expect([after.left, after.top]).toEqual([before.left, before.top]);
+    expect(forceRefreshOf(screen).top).toBe(forceRefresh.top);
+    expect(Math.round(joke.top)).toBeGreaterThanOrEqual(Math.round(after.bottom));
+    expect(Math.round(joke.bottom)).toBeLessThanOrEqual(Math.round(headerOf().bottom));
+    expect(document.elementFromPoint(spot.x, spot.y)).toBe(button);
+
+    await page.elementLocator(document.elementFromPoint(spot.x, spot.y) ?? document.body).click();
+    await expect.element(jokeOf(screen)).toHaveTextContent(SECOND_JOKE);
+  });
+
+  it('stays inside a 390px window after Force refresh, and wraps the joke without a sideways scroll', async () => {
+    await page.viewport(390, 844);
+    const screen = await renderBoard(<PageWithJokeHeader columns={getSampleColumns()} loadDetail={noDetail} />);
+    const button = jokeButtonOf(screen).element().getBoundingClientRect();
+
+    expect([button.left >= 0, button.right <= window.innerWidth]).toEqual([true, true]);
+    expect(comesAfter(button, forceRefreshOf(screen))).toBe(true);
+
+    await jokeButtonOf(screen).click();
+    const joke = jokeOf(screen).element();
+    await expect.element(joke).toHaveTextContent(FIRST_JOKE);
+    const bounds = joke.getBoundingClientRect();
+
+    expect([bounds.left >= 0, bounds.right <= window.innerWidth]).toEqual([true, true]);
+    expect(joke.scrollWidth).toBeLessThanOrEqual(joke.clientWidth);
+    expect(pageScrollsSideways()).toBe(false);
+  });
+
+  it('keeps the drawer below the header when a joke makes the header taller at 1440px', async () => {
+    await page.viewport(1440, 900);
+    const screen = await renderBoard(<PageWithJokeHeader columns={getSampleColumns()} loadDetail={noDetail} />);
+    window.scrollTo(0, 0);
+    await screen.getByRole('button', { name: /Open PAY-147/ }).click();
+    const drawer = screen.getByRole('complementary', { name: 'Run detail' }).element();
+    await expect.element(drawer).toBeVisible();
+    const headerBottom = headerOf().bottom;
+
+    await jokeButtonOf(screen).click();
+    await expect.poll(() => headerOf().bottom).toBeGreaterThan(headerBottom);
+
+    await expect.poll(() => Math.round(drawer.getBoundingClientRect().top)).toBeGreaterThanOrEqual(Math.round(headerOf().bottom));
   });
 });

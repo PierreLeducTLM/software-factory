@@ -68,7 +68,7 @@ var PERIODS$1 = [
 	90
 ];
 var fetchHealth = createServerFn({ method: "GET" }).validator((days) => PERIODS$1.includes(days) ? days : 7).handler(createSsrRpc("295a6e1eb54f07429317f54f45cb4c252194cfa2417e2f380a0dd37bd5bb6899"));
-// node_modules/.nitro/vite/services/ssr/assets/router-BPYq4IE6.js
+// node_modules/.nitro/vite/services/ssr/assets/router-BGdDQfLV.js
 var __defProp = Object.defineProperty;
 var __exportAll = (all, no_symbols) => {
 	let target = {};
@@ -139,7 +139,31 @@ function HeaderStatus({ reload, refresh, ...freshness }) {
 		})]
 	});
 }
-var styles_default = "/assets/styles-BFKtHzVM.css";
+var JOKES = [
+	"Why do programmers prefer dark mode? Because light attracts bugs.",
+	"There are 10 kinds of people: those who understand binary and those who don't.",
+	"A SQL query walks into a bar, goes up to two tables and asks: may I join you?",
+	"Why did the pull request go to therapy? It had too many unresolved conflicts.",
+	"Why did the developer go broke? Because they used up all their cache."
+];
+function JokeButton({ children }) {
+	const [shown, setShown] = (0, import_react.useState)(void 0);
+	const next = () => setShown((current) => current === void 0 ? 0 : (current + 1) % JOKES.length);
+	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+		className: "top__actions",
+		children: [children, /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+			type: "button",
+			className: "button joke-button",
+			onClick: next,
+			children: "Tell me a joke"
+		})]
+	}), shown === void 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+		className: "top__joke",
+		role: "status",
+		children: JOKES[shown]
+	})] });
+}
+var styles_default = "/assets/styles-B2c9rFYS.css";
 var Route$3 = createRootRoute({
 	head: () => ({
 		meta: [
@@ -215,7 +239,7 @@ function RootComponent() {
 							})
 						]
 					})
-				] }), view.ok ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HeaderStatus, {
+				] }), view.ok ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(JokeButton, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HeaderStatus, {
 					loadedAt: view.data.loadedAt,
 					running: view.data.running,
 					needsYou: view.data.needsYou.length,
@@ -224,7 +248,7 @@ function RootComponent() {
 					...view.data.problem === void 0 ? {} : { problem: view.data.problem },
 					reload: () => reloadView(),
 					refresh: () => router.invalidate()
-				}) : null]
+				}) }) : null]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "rule" }),
 			view.ok ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Outlet, {}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
@@ -560,9 +584,13 @@ var useBelowHeader = (drawer) => (0, import_react.useLayoutEffect)(() => {
 		drawer.current?.style.setProperty("--drawer-top", `${Math.max(Math.round(bottom), 0)}px`);
 	};
 	place();
+	const header = document.querySelector(HEADER);
+	const resized = new ResizeObserver(place);
+	if (header !== null) resized.observe(header);
 	window.addEventListener("scroll", place, { passive: true });
 	window.addEventListener("resize", place);
 	return () => {
+		resized.disconnect();
 		window.removeEventListener("scroll", place);
 		window.removeEventListener("resize", place);
 	};
@@ -874,7 +902,7 @@ function BoardScreen({ address: routed, columns, needsYou = [], providers = 1, l
 		]
 	});
 }
-var $$splitComponentImporter$2 = () => import("./routes-DfM3dHQo.mjs");
+var $$splitComponentImporter$2 = () => import("./routes-6n39iCz6.mjs");
 var Route$2 = createFileRoute("/")({
 	validateSearch: cardSearch,
 	component: lazyRouteComponent($$splitComponentImporter$2, "component")
@@ -1073,7 +1101,7 @@ function Health({ health, onPeriod, copy }) {
 		]
 	});
 }
-var $$splitComponentImporter$1 = () => import("./health-CKAs5xu0.mjs");
+var $$splitComponentImporter$1 = () => import("./health-CkkYO4SJ.mjs");
 var DEFAULT_PERIOD = 7;
 var periodOf = (value) => PERIODS.find((days) => days === Number(value)) ?? DEFAULT_PERIOD;
 var Route$1 = createFileRoute("/health")({

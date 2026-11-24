@@ -37,9 +37,13 @@ const useBelowHeader = (drawer: RefObject<HTMLElement | null>): void =>
       drawer.current?.style.setProperty('--drawer-top', `${Math.max(Math.round(bottom), 0)}px`);
     };
     place();
+    const header = document.querySelector(HEADER);
+    const resized = new ResizeObserver(place);
+    if (header !== null) resized.observe(header);
     window.addEventListener('scroll', place, { passive: true });
     window.addEventListener('resize', place);
     return () => {
+      resized.disconnect();
       window.removeEventListener('scroll', place);
       window.removeEventListener('resize', place);
     };
