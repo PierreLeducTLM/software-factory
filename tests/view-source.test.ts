@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createInMemoryTicketProvider } from '../src/adapters/in-memory-ticket-provider.js';
+import type { WorktreeStart } from '../src/adapters/orca-agent-runtime.js';
 import type { Ticket, TicketProvider } from '../src/adapters/ticket-provider.js';
 import { parseFactoryConfig } from '../src/config/project-config.js';
 import { createRecord, recordApproval, recordReadyGate, renderComment, startRun, startStep, type TicketRecord } from '../src/record/ticket-record.js';
@@ -36,8 +37,9 @@ const building = (startedAt: string, machine = 'pierre-mbp'): TicketRecord =>
 
 const withRecord = (record: TicketRecord, overrides: Partial<Ticket>): Ticket => getMockTicket({ status: 'In development', factoryComment: renderComment({ record, summary: 'x' }), ...overrides });
 
-const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string } = {}) => {
+const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string; readonly created?: string } = {}, providerName = 'Jira') => {
   const opened: string[] = [];
+  const started: WorktreeStart[] = [];
   const clock = { now: '2026-11-21T08:10:00Z' };
   const inner = createInMemoryTicketProvider({ tickets: seed, now: () => clock.now });
   const searches = { count: 0 };
@@ -52,7 +54,7 @@ const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string } = {}
     },
   };
   const source = createViewSource({
-    providers: [{ name: 'Jira', provider }],
+    providers: [{ name: providerName, provider }],
     config: getConfig(),
     repository: 'acme/billing-service',
     machine: 'pierre-mbp',
@@ -61,8 +63,13 @@ const getWorld = (seed: readonly Ticket[], orca: { readonly down?: string } = {}
       if (orca.down !== undefined) throw new Error(orca.down);
       opened.push(worktreeId);
     },
+    startWorktree: async (start) => {
+      if (orca.down !== undefined) throw new Error(orca.down);
+      started.push(start);
+      return orca.created ?? start.name;
+    },
   });
-  return { source, inner, clock, searches, failing, opened, gone };
+  return { source, inner, clock, searches, failing, opened, started, gone };
 };
 
 describe('view source', () => {
@@ -248,6 +255,84 @@ describe('view source', () => {
     const { source } = getWorld([withRecord(building('2026-11-21T08:05:00Z'), { key: 'PAY-142' })], { down: 'Orca is not running' });
 
     expect(await source.openInOrca('PAY-142')).toEqual({ ok: false, message: 'Orca could not open the run: Orca is not running' });
+  });
+
+  it('starts a card\'s command in a new Orca worktree named after the key and linked to the Jira ticket', async () => {
+    const { source, started } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' })]);
+
+    expect(await source.startInOrca({ key: 'PAY-151', command: '/factory-run PAY-151' })).toEqual({ ok: true, worktree: 'pay-151' });
+    expect(started).toEqual([{ name: 'pay-151', prompt: '/factory-run PAY-151', ticket: { key: 'PAY-151', tracker: 'jira' } }]);
+  });
+
+  it('links a Linear ticket as a Linear issue and reports the worktree Orca created', async () => {
+    const { source, started } = getWorld([getMockTicket({ key: 'PIE-21', status: 'To refine', labels: ['factory-available'] })], { created: 'pie-21-2' }, 'Linear');
+
+    expect(await source.startInOrca({ key: 'PIE-21', command: '/factory-refine PIE-21' })).toEqual({ ok: true, worktree: 'pie-21-2' });
+    expect(started).toEqual([{ name: 'pie-21', prompt: '/factory-refine PIE-21', ticket: { key: 'PIE-21', tracker: 'linear' } }]);
+  });
+
+  it('starts the clicked ticket, not the next one, from a card that shows /factory-next', async () => {
+    const { source, started } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev', labels: ['factory-auto'] })]);
+
+    expect(await source.startInOrca({ key: 'PAY-151', command: '/factory-next' })).toEqual({ ok: true, worktree: 'pay-151' });
+    expect(started.map(({ prompt }) => prompt)).toEqual(['/factory-run PAY-151']);
+  });
+
+  it('starts an interrupted run claimed on another machine, as a takeover here', async () => {
+    const { source, started } = getWorld([withRecord(building('2026-11-21T07:00:00Z', 'anna-mbp'), { key: 'ENG-95' })]);
+
+    expect(await source.startInOrca({ key: 'ENG-95', command: '/factory-run ENG-95' })).toEqual({ ok: true, worktree: 'eng-95' });
+    expect(started.map(({ prompt }) => prompt)).toEqual(['/factory-run ENG-95']);
+  });
+
+  it('says why Orca could not start the worktree', async () => {
+    const { source } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' })], { down: 'Orca is not running' });
+
+    expect(await source.startInOrca({ key: 'PAY-151', command: '/factory-run PAY-151' })).toEqual({ ok: false, message: 'Orca could not start PAY-151: Orca is not running' });
+  });
+
+  it('starts nothing for a card with no command, a run on this machine, or a ticket it does not hold', async () => {
+    const { source, started } = getWorld([
+      withRecord(building('2026-11-21T08:05:00Z', 'anna-mbp'), { key: 'PAY-142' }),
+      withRecord(building('2026-11-21T07:00:00Z'), { key: 'ENG-95' }),
+      getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' }),
+    ]);
+
+    const noCommand = await source.startInOrca({ key: 'PAY-142', command: '/factory-run PAY-142' });
+    const onThisMachine = await source.startInOrca({ key: 'ENG-95', command: '/factory-run ENG-95' });
+    const unknown = await source.startInOrca({ key: 'PAY-999', command: '/factory-run PAY-999' });
+
+    expect([noCommand, onThisMachine, unknown]).toEqual([
+      { ok: false, message: 'Orca could not start PAY-142: PAY-142 has nothing to start in a new worktree.' },
+      { ok: false, message: 'Orca could not start ENG-95: ENG-95 has nothing to start in a new worktree.' },
+      { ok: false, message: 'Orca could not start PAY-999: PAY-999 has nothing to start in a new worktree.' },
+    ]);
+    expect(started).toEqual([]);
+  });
+
+  it('starts nothing when the card\'s command changed since the panel showed it', async () => {
+    const { source, started } = getWorld([getMockTicket({ key: 'PAY-151', status: 'Ready for Dev' }), getMockTicket({ key: 'PAY-152', status: 'Ready for Dev', labels: ['factory-auto'] })]);
+
+    const refine = await source.startInOrca({ key: 'PAY-151', command: '/factory-refine PAY-151' });
+    const run = await source.startInOrca({ key: 'PAY-152', command: '/factory-run PAY-152' });
+
+    expect([refine, run]).toEqual([
+      { ok: false, message: 'Orca could not start PAY-151: PAY-151 changed since this panel opened. Reopen it to see what to run.' },
+      { ok: false, message: 'Orca could not start PAY-152: PAY-152 changed since this panel opened. Reopen it to see what to run.' },
+    ]);
+    expect(started).toEqual([]);
+  });
+
+  it('starts the command of whichever card the panel showed when the ticket is on two cards', async () => {
+    const record = building('2026-11-21T08:05:00Z', 'anna-mbp');
+    const spent = { ...record, runs: [...record.runs, ...record.runs, ...record.runs] };
+    const { source, started } = getWorld([withRecord(spent, { key: 'PAY-151', status: 'Ready for Dev' })]);
+
+    const ready = await source.startInOrca({ key: 'PAY-151', command: '/factory-run PAY-151' });
+    const overLimit = await source.startInOrca({ key: 'PAY-151', command: '/factory-run PAY-151 --over-limit' });
+
+    expect([ready, overLimit]).toEqual([{ ok: true, worktree: 'pay-151' }, { ok: true, worktree: 'pay-151' }]);
+    expect(started.map(({ prompt }) => prompt)).toEqual(['/factory-run PAY-151', '/factory-run PAY-151 --over-limit']);
   });
 
   it('loads the tickets before giving a detail when nothing was loaded yet', async () => {

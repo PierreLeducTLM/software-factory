@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { basename } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { AgentRuntime, Worktree } from './agent-runtime.js';
@@ -53,6 +54,24 @@ export const createOrcaWorktreeOpener =
   ({ run }: { readonly run: CommandRunner }) =>
   async (worktreeId: string): Promise<void> => {
     await demandOfOrca(run, ['worktree', 'activate', '--worktree', `id:${worktreeId}`]);
+  };
+
+export type TicketTracker = 'linear' | 'jira';
+
+export type WorktreeStart = {
+  readonly name: string;
+  readonly prompt: string;
+  readonly ticket: { readonly key: string; readonly tracker: TicketTracker };
+};
+
+const TICKET_LINKS: Readonly<Record<TicketTracker, string>> = { linear: '--linear-issue', jira: '--reference' };
+
+export const createOrcaWorktreeStarter =
+  ({ run, projectDir }: { readonly run: CommandRunner; readonly projectDir: string }) =>
+  async ({ name, prompt, ticket }: WorktreeStart): Promise<string> => {
+    const link = [TICKET_LINKS[ticket.tracker], ticket.key];
+    const result = await demandOfOrca(run, ['worktree', 'create', '--repo', `path:${projectDir}`, '--name', name, '--no-parent', ...link, '--agent', 'claude', '--prompt', prompt, '--activate']);
+    return basename(WorktreeResultSchema.parse(result).worktree.path);
   };
 
 export const createOrcaAgentRuntime = ({ run }: { readonly run: CommandRunner }): AgentRuntime => {
