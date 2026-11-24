@@ -4,7 +4,7 @@ import { TICKET_PROVIDER_NAMES, type AdaptersConfig } from '../config/project-co
 import type { ScriptRun } from '../factory/checks.js';
 import { ENGINE_VERSION } from '../version.js';
 import type { FactoryState } from '../record/ticket-record.js';
-import { detectProject, FACTORY_WORKFLOWS, mainBuildWorkflow, type Category, type Detection } from './detect.js';
+import { BITBUCKET_PIPELINES_FILE, detectProject, FACTORY_WORKFLOWS, mainBuildWorkflow, type Category, type Detection } from './detect.js';
 import { adaptersFor, buildInstall, type ChosenCheck, type Connection, type InstallAnswers } from './install.js';
 import { matchStatuses } from './match-statuses.js';
 import type { ProjectFiles, PublishedChange } from './project-files.js';
@@ -134,7 +134,9 @@ const checksOf = (detection: Detection, verification: readonly Verification[]): 
 
 const ciSystemOf = (detection: Detection, sourceControl: Connection['sourceControl']): InstallAnswers['ci']['system'] => {
   const builds = detection.ci.jobs.some((job) => !FACTORY_WORKFLOWS.includes(job.file));
-  return sourceControl.kind === 'github' && !builds ? 'none' : detection.ci.system;
+  if (sourceControl.kind === 'github' && !builds) return 'none';
+  const pipelines = detection.ci.jobs.some((job) => job.file === BITBUCKET_PIPELINES_FILE);
+  return sourceControl.kind === 'bitbucket' && pipelines ? 'bitbucket-pipelines' : detection.ci.system;
 };
 
 const summaryOf = (answers: InstallAnswers, advisory: readonly string[]): readonly string[] => {

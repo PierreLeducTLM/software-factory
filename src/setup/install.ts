@@ -1,7 +1,7 @@
 import { stringify } from 'yaml';
 import { z } from 'zod';
 import { parseAdaptersConfig, parseFactoryConfig, type AdaptersConfig } from '../config/project-config.js';
-import { CATEGORIES, type Category } from './detect.js';
+import { BITBUCKET_PIPELINES_FILE, CATEGORIES, type Category } from './detect.js';
 import { engineFiles, LAUNCHER_PATH } from './engine-files.js';
 
 const DURATION = z.string().regex(/^\d+(s|m|h)$/, 'Use a number followed by s, m or h, such as 90s or 6m');
@@ -48,7 +48,6 @@ const FACTORY_YAML = '.factory/factory.yaml';
 const ADAPTERS_YAML = '.factory/adapters.yaml';
 export const WORKFLOW_FILE = '.github/workflows/factory.yml';
 export const TASKS_WORKFLOW_FILE = '.github/workflows/factory-tasks.yml';
-const BITBUCKET_FILE = 'bitbucket-pipelines.yml';
 
 const RUBRICS_README = `# Agent check rubrics
 
@@ -215,12 +214,12 @@ const githubWorkflow = (answers: InstallAnswers): FactoryWorkflow =>
     ...(answers.watch === undefined ? {} : { watchEnvironment: answers.watch.environment }),
   });
 
-const CHECK_TASKS_STEP = `Add this step to ${BITBUCKET_FILE}, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - ${FACTORY} check-tasks --pull-request $BITBUCKET_PR_ID`;
+const CHECK_TASKS_STEP = `Add this step to ${BITBUCKET_PIPELINES_FILE}, under pipelines > pull-requests > '**':\n- step:\n    name: Factory check-tasks\n    script:\n      - ${FACTORY} check-tasks --pull-request $BITBUCKET_PR_ID`;
 
 const NO_CI = 'No CI system was found. Run "factory record-merge" on every merge to the main branch, "factory revert" when the main build fails, and "factory check-tasks --pull-request <number>" on every pull request change, from whatever builds this project.';
 
 const bitbucketSteps = ({ mainBranch, watch }: InstallAnswers): readonly string[] => [
-  `Add this step to ${BITBUCKET_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
+  `Add this step to ${BITBUCKET_PIPELINES_FILE}, under pipelines > branches > ${mainBranch}:\n- step:\n    name: Factory record-merge\n    script:\n      - ${FACTORY} record-merge --commit $BITBUCKET_COMMIT`,
   `Add this after-script to the step that builds ${mainBranch}:\nafter-script:\n  - if [ "$BITBUCKET_EXIT_CODE" != "0" ]; then ${FACTORY} revert --commit $BITBUCKET_COMMIT; fi`,
   ...(watch === undefined ? [] : [`Add this step after the deployment to ${watch.environment}:\n- step:\n    name: Factory watch\n    script:\n      - ${FACTORY} watch --commit $BITBUCKET_COMMIT`]),
   CHECK_TASKS_STEP,

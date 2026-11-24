@@ -372,6 +372,35 @@ describe('the CI of the project while setting up', () => {
     expect(opened[0]?.body).toContain(`- ${manual.at(-1) ?? ''}`);
   });
 
+  it('Bitbucket install with a GitHub workflow beside its pipelines: sets the factory up in Bitbucket Pipelines, and adds no GitHub workflow', async () => {
+    const pipelines = 'pipelines:\n  branches:\n    main:\n      - step:\n          name: Build\n          script:\n            - pnpm test\n';
+    const mirror = 'name: Sync GitHub PR to Bitbucket\non: pull_request\njobs:\n  sync:\n    steps:\n      - run: python sync_pr.py\n';
+    const { deps, published } = getInit({ files: { ...PROJECT, 'bitbucket-pipelines.yml': pipelines, '.github/workflows/sync-to-bitbucket.yml': mirror }, remoteUrl: 'git@bitbucket.org:acme/billing-service.git' });
+
+    const result = await initProject(deps, LINEAR);
+    const manual = result.ok ? result.manual : [];
+
+    expect(Object.keys(published[0]?.files ?? {}).filter((path) => path.startsWith('.github/'))).toEqual([]);
+    expect(manual.filter((step) => step.includes('factory check-tasks --pull-request $BITBUCKET_PR_ID'))).toHaveLength(1);
+  });
+
+  it('GitHub install with Bitbucket pipelines beside its workflows: sets the factory up in GitHub Actions', async () => {
+    const pipelines = 'pipelines:\n  default:\n    - step:\n        name: Build\n        script:\n          - pnpm test\n';
+    const { deps, published } = getInit({ files: { ...WITH_CI, 'bitbucket-pipelines.yml': pipelines } });
+
+    await initProject(deps, LINEAR);
+
+    expect(Object.keys(published[0]?.files ?? {})).toContain('.github/workflows/factory.yml');
+  });
+
+  it('Bitbucket install whose only CI is a GitHub workflow: sets the factory up in GitHub Actions', async () => {
+    const { deps, published } = getInit({ files: WITH_CI, remoteUrl: 'git@bitbucket.org:acme/billing-service.git' });
+
+    await initProject(deps, LINEAR);
+
+    expect(Object.keys(published[0]?.files ?? {})).toContain('.github/workflows/factory.yml');
+  });
+
   it('does not mistake its own tasks workflow for the one that builds main, when it is installed again', async () => {
     const factoryOnly = 'name: Factory\non: push\njobs:\n  record-merge:\n    steps:\n      - run: .factory/bin/factory record-merge --commit ${{ github.sha }}\n';
     const tasksOnly = 'name: Factory tasks\non: pull_request\njobs:\n  check-tasks:\n    steps:\n      - run: .factory/bin/factory check-tasks --pull-request 1\n';

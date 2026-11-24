@@ -122,7 +122,7 @@ export const createFilePublisher =
           if (executable?.includes(path) === true) await chmod(target, 0o755);
         }),
       );
-      await run(['-C', folder, 'add', '--', ...Object.keys(files)]);
+      await run(['-C', folder, 'add', '--force', '--', ...Object.keys(files)]);
       await run(['-C', folder, 'commit', '--quiet', '-m', message]);
       await run(['-C', folder, 'push', '--quiet', '--set-upstream', 'origin', branch]);
     } finally {
