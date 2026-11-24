@@ -43,6 +43,11 @@ const fieldsOf = (issue: Issue, wanted: readonly string[]) =>
     }).filter(([name]) => wanted.includes(name)),
   );
 
+const richTextOf = (fields: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> =>
+  typeof fields['description'] === 'string'
+    ? { ...fields, description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: fields['description'] }] }] } }
+    : fields;
+
 const propertiesOf = (issue: Issue, wanted: readonly string[]) =>
   Object.fromEntries(Object.entries(issue.properties).filter(([name]) => wanted.includes(name)));
 
@@ -87,13 +92,14 @@ export const createFakeJira = ({ baseUrl, tickets, now, pageSize = 100, permissi
     const body: unknown = request.body !== undefined && isJson ? JSON.parse(request.body) : undefined;
     if (!['GET', 'POST', 'PUT'].includes(request.method)) return empty(405);
 
-    if (path === '/rest/api/3/search/jql' && request.method === 'POST') {
+    const searchVersion = /^\/rest\/api\/([23])\/search\/jql$/.exec(path)?.[1];
+    if (searchVersion !== undefined && request.method === 'POST') {
       const { jql, nextPageToken, fields, properties } = body as { jql: string; nextPageToken?: string; fields: string[]; properties: string[] };
       const matching = issues.filter((issue) => matchesJql(issue, jql, now()));
       const start = Number(nextPageToken ?? 0);
       const page = matching.slice(start, start + pageSize);
       return json(200, {
-        issues: page.map((issue) => ({ key: issue.key, fields: fieldsOf(issue, fields), properties: propertiesOf(issue, properties) })),
+        issues: page.map((issue) => ({ key: issue.key, fields: searchVersion === '3' ? richTextOf(fieldsOf(issue, fields)) : fieldsOf(issue, fields), properties: propertiesOf(issue, properties) })),
         ...(start + pageSize < matching.length ? { nextPageToken: String(start + pageSize) } : {}),
       });
     }

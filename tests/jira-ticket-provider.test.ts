@@ -107,6 +107,14 @@ describe('Jira ticket provider', () => {
     expect(jira.requests.length).toBeGreaterThan(0);
   });
 
+  it('finds tickets that have a description, and reads it as plain text', async () => {
+    const { provider } = getSetup([getMockTicket({ spec: '## Why\nRemind patients of late doses.' })]);
+
+    const found = await provider.search({});
+
+    expect(found.map((ticket) => ticket.spec)).toEqual(['## Why\nRemind patients of late doses.']);
+  });
+
   it('follows pages until every matching ticket is returned', async () => {
     const tickets = ['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5'].map((key) => getMockTicket({ key }));
     const { jira, provider } = getSetup(tickets, { pageSize: 2 });
@@ -203,7 +211,7 @@ describe('Jira ticket provider', () => {
 
     await expect(provider.getTicket('PAY-142')).rejects.toThrow('Jira answered 400 to GET');
     await expect(provider.putFactoryComment('PAY-142', 'x')).rejects.toThrow('Jira answered 400 to GET');
-    await expect(provider.search({})).rejects.toThrow('Jira answered 400 to POST /rest/api/3/search/jql');
+    await expect(provider.search({})).rejects.toThrow('Jira answered 400 to POST /rest/api/2/search/jql');
   });
 
   it('reads times that Jira reports in another time zone', async () => {
@@ -259,6 +267,6 @@ describe('Jira ticket provider', () => {
     const throttled: Http = async () => ({ status: 429, headers: {}, body: '' });
     const { provider } = getSetup([getMockTicket()], { wrap: () => throttled });
 
-    await expect(provider.search({})).rejects.toThrow('Jira answered 429 to POST /rest/api/3/search/jql');
+    await expect(provider.search({})).rejects.toThrow('Jira answered 429 to POST /rest/api/2/search/jql');
   });
 });

@@ -112,7 +112,7 @@ export const createJiraTicketProvider = ({ baseUrl, email, token, repository, fi
   };
 
   const searchPages = async (jql: string, nextPageToken?: string): Promise<readonly Issue[]> => {
-    const response = await call('POST', '/rest/api/3/search/jql', {
+    const response = await call('POST', '/rest/api/2/search/jql', {
       jql,
       fields: ISSUE_FIELDS,
       properties: ['factory'],
