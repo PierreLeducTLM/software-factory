@@ -92,49 +92,49 @@ var public_assets_data_default = {
 	"/assets/CopyCommand-DArfV8xF.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"11707-aZo6DKmxDuYMfHalaCSFqtCDnmw\"",
-		"mtime": "2026-11-24T13:02:05.028Z",
+		"mtime": "2026-11-24T13:10:25.331Z",
 		"size": 71431,
 		"path": "../public/assets/CopyCommand-DArfV8xF.js"
 	},
 	"/assets/functions-D5EIAoPg.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"a70c-UwCDAKhSSefKvwGUwbxvcWdlUjo\"",
-		"mtime": "2026-11-24T13:02:05.028Z",
+		"mtime": "2026-11-24T13:10:25.331Z",
 		"size": 42764,
 		"path": "../public/assets/functions-D5EIAoPg.js"
 	},
 	"/assets/health-DX0bnAoe.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"1e1-ZAKZrleHds1KZsAbZY27b85HX30\"",
-		"mtime": "2026-11-24T13:02:05.028Z",
+		"mtime": "2026-11-24T13:10:25.332Z",
 		"size": 481,
 		"path": "../public/assets/health-DX0bnAoe.js"
 	},
 	"/assets/index-DwdfTR57.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"3d7e7-GZM5OSNKl344VQ3vCcgVM9wBtic\"",
-		"mtime": "2026-11-24T13:02:05.028Z",
+		"mtime": "2026-11-24T13:10:25.331Z",
 		"size": 251879,
 		"path": "../public/assets/index-DwdfTR57.js"
 	},
 	"/assets/needs-you-SObCpe4u.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"c14-dOKyKUtTklHl00hVz/pWPzks5Vo\"",
-		"mtime": "2026-11-24T13:02:05.029Z",
+		"mtime": "2026-11-24T13:10:25.332Z",
 		"size": 3092,
 		"path": "../public/assets/needs-you-SObCpe4u.js"
 	},
 	"/assets/routes-BToTM_gR.js": {
 		"type": "text/javascript; charset=utf-8",
 		"etag": "\"2fa-Q+vYJRAX5CPR3F5N7xdBGjoJTc0\"",
-		"mtime": "2026-11-24T13:02:05.029Z",
+		"mtime": "2026-11-24T13:10:25.332Z",
 		"size": 762,
 		"path": "../public/assets/routes-BToTM_gR.js"
 	},
 	"/assets/styles-BFKtHzVM.css": {
 		"type": "text/css; charset=utf-8",
 		"etag": "\"27e1-dJFiIV3c9VP0WjztPOHNDSGiMYY\"",
-		"mtime": "2026-11-24T13:02:05.029Z",
+		"mtime": "2026-11-24T13:10:25.332Z",
 		"size": 10209,
 		"path": "../public/assets/styles-BFKtHzVM.css"
 	}
@@ -258,11 +258,11 @@ var findRouteRules = /* @__PURE__ */ (() => {
 		return r.reverse();
 	};
 })();
-var _lazy_59ac1327b354e25a = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
+var _lazy_78013e468b9bda23 = defineLazyEventHandler(() => import("./_chunks/ssr-renderer.mjs"));
 var findRoute = /* @__PURE__ */ (() => {
 	const data = {
 		route: "/**",
-		handler: _lazy_59ac1327b354e25a
+		handler: _lazy_78013e468b9bda23
 	};
 	return ((_m, p) => {
 		if (p.charCodeAt(p.length - 1) === 47) p = p.slice(0, -1);
